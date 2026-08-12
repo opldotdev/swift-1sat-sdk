@@ -24,17 +24,19 @@ It is the Swift counterpart of [`b-open-io/1sat-sdk`](https://github.com/b-open-
 
 ## Status
 
-Early. The first module is **sweep** — moving coins from a foreign or legacy key into a wallet's
-own address — because that is the first thing a real wallet needs from this layer: taking in money
-held under another scheme. It is generic over source, destination, and UTXO provider.
+Early. The first modules cover **sweep** — moving coins from a foreign or legacy key into a
+wallet's own address — and read-only ordinal and BSV-21 balances for wallet displays. Sweep is
+generic over source, destination, and UTXO provider; the client reads categorised owner outputs
+from the 1Sat indexer.
 
-Next, in the order the wallet app needs them: 1Sat ordinals templates and indexers (real Pass
-data), then ordinals/BSV21 transfers, then OpNS and MNEE.
+Next, in the order the wallet app needs them: 1Sat ordinal templates and transfer actions, then
+BSV-21 transfers, OpNS, and MNEE.
 
 ## Modules
 
 | Module | Responsibility |
 |---|---|
+| `OneSatClient` | Read an address's ordinals and aggregate BSV-21 token balances |
 | `OneSatSweep` | Categorise an address, sweep its fundable BSV, report the rest |
 | `OneSat` | Umbrella, re-exporting the above |
 

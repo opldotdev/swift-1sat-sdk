@@ -10,6 +10,7 @@ import PackageDescription
 /// moving coins from a legacy or foreign key into the wallet's own scheme. The module grows toward
 /// the full `@1sat/actions` surface — ordinals, BSV21, OpNS, MNEE — one boundary at a time.
 let publicModules = [
+    "OneSatClient",
     "OneSatSweep"
 ]
 
@@ -58,12 +59,32 @@ let package = Package(
             ]
         ),
 
+        // Read-only views of the ordinals and BSV-21 balances held by an address. The client uses
+        // the same categorised owner stream as sweep while retaining inscription and token data.
+        .target(
+            name: "OneSatClient",
+            dependencies: [
+                "OneSatSweep",
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+                .product(name: "ToolboxCore", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
+            ]
+        ),
+
         .testTarget(
             name: "OneSatSweepTests",
             dependencies: [
                 "OneSatSweep",
                 .product(name: "BSVKeys", package: "swift-sdk"),
                 .product(name: "BSVTransaction", package: "swift-sdk"),
+                .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
+            ]
+        ),
+        .testTarget(
+            name: "OneSatClientTests",
+            dependencies: [
+                "OneSatClient",
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
             ]
         ),
