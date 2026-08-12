@@ -35,7 +35,7 @@ data), then ordinals/BSV21 transfers, then OpNS and MNEE.
 
 | Module | Responsibility |
 |---|---|
-| `OneSatSweep` | Sweep P2PKH coins from a key to a destination address |
+| `OneSatSweep` | Categorise an address, sweep its fundable BSV, report the rest |
 | `OneSat` | Umbrella, re-exporting the above |
 
 ## Sweep
@@ -50,7 +50,7 @@ Yours Wallet's migration does.
 import OneSatSweep
 
 // 1. Categorise through the 1Sat indexer (the only provider that can tell an ordinal from a coin).
-let plan = try await Sweep.plan(forAddress: legacyAddress, scanner: oneSatScanner)
+let plan = try await Sweep.plan(forAddress: legacyAddress, scanner: OneSatScanner())
 
 // 2. Sweep only the fundable BSV.
 if !plan.fundable.isEmpty {
@@ -72,8 +72,8 @@ if !plan.remaining.isEmpty {
 | **1Sat / GorillaPool** (`api.1sat.app`, junglebus, Banana Blocks) | UTXOs **with** event tags (`bsv21:`, `lock:`, ordinal) | any sweep that could hold assets (`AssetScanner`) |
 
 A sweep that might touch assets **must** read from the 1Sat family — WhatsOnChain cannot tell a
-high-value ordinal from a coin. The wallet's provider setting selects which family answers. The
-`api.1sat.app` scanner adapter is the next module to land.
+high-value ordinal from a coin. The wallet's provider setting selects which family answers. Both adapters are built and
+live-verified: `WhatsOnChainUTXOSource` and `OneSatScanner` (`api.1sat.app`).
 
 ## Building
 
