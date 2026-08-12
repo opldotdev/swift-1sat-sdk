@@ -68,12 +68,12 @@ if !plan.remaining.isEmpty {
 
 | Family | Gives | Use for |
 |---|---|---|
-| **WhatsOnChain** | plain UTXOs, no asset tags | balance, plain-BSV-only sweep () |
-| **1Sat / GorillaPool** (, junglebus, Banana Blocks) | UTXOs **with** event tags (, , ordinal) | any sweep that could hold assets () |
+| **WhatsOnChain** | plain UTXOs, no asset tags | balance, plain-BSV-only sweep (`WhatsOnChainUTXOSource`) |
+| **1Sat / GorillaPool** (`api.1sat.app`, junglebus, Banana Blocks) | UTXOs **with** event tags (`bsv21:`, `lock:`, ordinal) | any sweep that could hold assets (`AssetScanner`) |
 
 A sweep that might touch assets **must** read from the 1Sat family — WhatsOnChain cannot tell a
-k ordinal from a coin. The wallet's provider setting selects which family answers. The
- scanner adapter is the next module to land.
+high-value ordinal from a coin. The wallet's provider setting selects which family answers. The
+`api.1sat.app` scanner adapter is the next module to land.
 
 ## Building
 
