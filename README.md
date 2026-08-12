@@ -40,20 +40,40 @@ data), then ordinals/BSV21 transfers, then OpNS and MNEE.
 
 ## Sweep
 
+A sweep is **partial by nature**. A legacy address rarely holds only plain BSV — it may hold
+ordinals, BSV-21 tokens, and time-locked outputs. Sweeping all of them would burn a collectible as
+a fee or build an invalid transaction. So the safe flow categorises first, sweeps the fundable BSV,
+and **reports what remains** — keeping the source key while any asset is still there, exactly as
+Yours Wallet's migration does.
+
 ```swift
 import OneSatSweep
 
-let result = try await Sweep.build(
-    fromWIF: legacyWIF,
-    toAddress: myWalletAddress,
-    source: WhatsOnChainUTXOSource()   // or any configured provider
-)
-// result.transaction is signed; broadcast it however the wallet is configured.
+// 1. Categorise through the 1Sat indexer (the only provider that can tell an ordinal from a coin).
+let plan = try await Sweep.plan(forAddress: legacyAddress, scanner: oneSatScanner)
+
+// 2. Sweep only the fundable BSV.
+if !plan.fundable.isEmpty {
+    let result = try Sweep.build(fromWIF: legacyWIF, toAddress: myWalletAddress, utxos: plan.fundable)
+    // broadcast result.transaction
+}
+
+// 3. Keep the key while anything remains; re-sweep after the next lock unlocks.
+if !plan.remaining.isEmpty {
+    // preserve legacyWIF; plan.remaining.nextUnlockHeight tells you when to try again
+}
 ```
 
-Sweep is deliberately **not** asset-aware: it moves standard P2PKH outputs. An ordinal or token has
-a non-standard script and is handled by the asset layer, which knows never to spend a collectible
-as a fee. Point sweep at a plain-BSV key, or at the BSV outputs an asset scan already separated.
+### Two provider families
+
+| Family | Gives | Use for |
+|---|---|---|
+| **WhatsOnChain** | plain UTXOs, no asset tags | balance, plain-BSV-only sweep () |
+| **1Sat / GorillaPool** (, junglebus, Banana Blocks) | UTXOs **with** event tags (, , ordinal) | any sweep that could hold assets () |
+
+A sweep that might touch assets **must** read from the 1Sat family — WhatsOnChain cannot tell a
+k ordinal from a coin. The wallet's provider setting selects which family answers. The
+ scanner adapter is the next module to land.
 
 ## Building
 

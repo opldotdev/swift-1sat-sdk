@@ -35,12 +35,33 @@ public enum Sweep {
     ) async throws -> SweepResult {
         let key = try WIF(wif).privateKey
         let sourceAddress = Address(publicKey: key.publicKey, network: .mainnet).description
+        let utxos = try await source.spendableOutputs(forAddress: sourceAddress)
+        return try build(
+            fromWIF: wif, toAddress: destination, utxos: utxos,
+            satoshisPerKilobyte: satoshisPerKilobyte, limits: limits
+        )
+    }
+
+    /// Sweeps an explicit, already-vetted set of outputs.
+    ///
+    /// Use this when the outputs have been categorised — for example the `fundable` set of a
+    /// `SweepPlan`. It spends exactly what it is given, so it never touches an ordinal, a token, or
+    /// a locked output that a caller failed to filter out. The `UTXOSource` overload above is a
+    /// convenience for the plain-BSV case where categorisation is not needed.
+    public static func build(
+        fromWIF wif: String,
+        toAddress destination: String,
+        utxos: [SpendableUTXO],
+        satoshisPerKilobyte: UInt64 = 10,
+        limits: TransactionLimits = defaultLimits
+    ) throws -> SweepResult {
+        let key = try WIF(wif).privateKey
+        let sourceAddress = Address(publicKey: key.publicKey, network: .mainnet).description
         let destinationScript = try Script.payToPublicKeyHash(
             try Address(destination).publicKeyHash,
             maximumByteCount: Int(limits.maximumScriptByteCount)
         )
 
-        let utxos = try await source.spendableOutputs(forAddress: sourceAddress)
         guard !utxos.isEmpty else { throw SweepError.nothingToSweep(address: sourceAddress) }
 
         var total: UInt64 = 0
@@ -95,6 +116,20 @@ public enum Sweep {
         }
 
         return SweepResult(transaction: transaction, swept: total, fee: fee, paid: paid)
+    }
+
+    /// Categorises an address through the 1Sat indexer and returns the plan.
+    ///
+    /// This is the safe entry point for importing a foreign account. It reads the address's
+    /// outputs *with* their asset tags, so the fundable BSV can be swept while ordinals, tokens and
+    /// locks are reported in `remaining` — to be kept, not burned. The caller then runs
+    /// `build(fromWIF:toAddress:utxos:)` on `plan.fundable` and preserves the key while anything
+    /// remains.
+    public static func plan(
+        forAddress address: String,
+        scanner: any AssetScanner
+    ) async throws -> SweepPlan {
+        SweepPlan.from(scan: try await scanner.scan(address: address))
     }
 
     /// Generous bounds for a sweep transaction. A consolidation of many small outputs can have a
