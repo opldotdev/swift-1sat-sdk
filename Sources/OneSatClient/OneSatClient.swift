@@ -23,7 +23,9 @@ public struct OneSatClient: Sendable {
                 txid: output.txid,
                 vout: output.vout,
                 satoshis: output.satoshis,
-                contentType: output.inscriptionContentType
+                contentType: output.inscriptionContentType,
+                origin: output.originEvent,
+                name: output.nameEvent
             )
         }
     }
@@ -64,7 +66,8 @@ public struct OneSatClient: Sendable {
         }
     }
 
-    private let baseURL: URL
+    /// Internal so the collections extension (a second file of this module) reads the same host.
+    let baseURL: URL
     private let http: any HTTPGet
 
     private func outputs(forAddress address: String) async throws -> [IndexedOutput] {
@@ -148,13 +151,25 @@ public struct OrdinalOutput: Equatable, Sendable {
     public let satoshis: UInt64
     /// Explains how a wallet may render the content without fetching it first.
     public let contentType: String?
+    /// The first outpoint of this inscription's chain, which is its identity across transfers.
+    /// The indexer reports it as an `origin:` event; a missing event means this output *is* the
+    /// origin, so the value here is never nil for an inscribed output.
+    public let origin: String
+    /// The inscription's display name, when the indexer surfaced one. Truncated to 64 characters
+    /// by the tag builder upstream; ORDFS metadata carries the untruncated name.
+    public let name: String?
 
     /// Allows callers to preserve an ordinal value across their own read models.
-    public init(txid: String, vout: UInt32, satoshis: UInt64, contentType: String?) {
+    public init(
+        txid: String, vout: UInt32, satoshis: UInt64, contentType: String?,
+        origin: String? = nil, name: String? = nil
+    ) {
         self.txid = txid
         self.vout = vout
         self.satoshis = satoshis
         self.contentType = contentType
+        self.origin = origin ?? Outpoint.join(txid: txid, vout: vout)
+        self.name = name
     }
 }
 
@@ -199,6 +214,24 @@ private struct IndexedOutput: Sendable {
 
     var isLocked: Bool {
         events.contains(where: { $0 == "lock" || $0.hasPrefix("lock:") })
+    }
+
+    /// The `origin:` event value, normalised. A bare `origin` event (no value) marks an output
+    /// that is its own origin, which the `OrdinalOutput` initialiser also uses as the fallback.
+    var originEvent: String? {
+        events.lazy
+            .filter { $0.hasPrefix("origin:") }
+            .map { Outpoint.normalize(String($0.dropFirst("origin:".count))) }
+            .first { !$0.isEmpty }
+    }
+
+    /// The `name:` event value. The upstream tag builder truncates names to 64 characters, so this
+    /// is a display hint, not the canonical name.
+    var nameEvent: String? {
+        events.lazy
+            .filter { $0.hasPrefix("name:") }
+            .map { String($0.dropFirst("name:".count)) }
+            .first { !$0.isEmpty }
     }
 
     var inscriptionContentType: String? {
