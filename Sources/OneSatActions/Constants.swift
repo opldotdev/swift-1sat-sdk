@@ -4,6 +4,8 @@ import BSVWallet
 public enum OneSatConstants {
     /// `FUNDING_BASKET`
     public static let fundingBasket = "default"
+    /// `DEPOSIT_BASKET`
+    public static let depositBasket = "1sat-deposit"
     /// `ORDINALS_BASKET`
     public static let ordinalsBasket = "p 1sat ordinals"
     /// `BSV21_BASKET`

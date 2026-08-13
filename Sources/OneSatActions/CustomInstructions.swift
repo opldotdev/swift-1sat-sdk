@@ -28,7 +28,7 @@ public struct CustomInstructions: Equatable, Sendable {
         self.symbol = symbol
     }
 
-    public func encoded() -> String {
+    public func encoded(includeSelfCounterparty: Bool = false) -> String {
         var pairs: [(String, String)] = [
             (
                 "protocolID",
@@ -38,7 +38,9 @@ public struct CustomInstructions: Equatable, Sendable {
         ]
         switch counterparty {
         case .self:
-            break
+            if includeSelfCounterparty {
+                pairs.append(("counterparty", Self.jsonString("self")))
+            }
         case .anyone:
             pairs.append(("counterparty", Self.jsonString("anyone")))
         case .publicKey(let key):
