@@ -11,7 +11,10 @@ import PackageDescription
 /// the full `@1sat/actions` surface — ordinals, BSV21, OpNS, MNEE — one boundary at a time.
 let publicModules = [
     "OneSatClient",
-    "OneSatSweep"
+    "OneSatSweep",
+    "OneSatTemplates",
+    "OneSatAddresses",
+    "OneSatActions",
 ]
 
 let package = Package(
@@ -59,6 +62,27 @@ let package = Package(
             ]
         ),
 
+        // 1Sat locking scripts: inscription envelope, OrdLock, BSV-21, and CLTV time-lock.
+        // Byte-exact with `@1sat/templates`. Unlock templates live with the action families.
+        .target(
+            name: "OneSatTemplates",
+            dependencies: [
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVCrypto", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+            ]
+        ),
+
+        // P1SAT deposit addresses: protocol [0, "p 1sat"], keyID "1sat <index>".
+        // Matches `@1sat/actions` `deriveDepositAddresses`.
+        .target(
+            name: "OneSatAddresses",
+            dependencies: [
+                .product(name: "BSVKeys", package: "swift-sdk"),
+            ]
+        ),
+
         // Read-only views of the ordinals and BSV-21 balances held by an address. The client uses
         // the same categorised owner stream as sweep while retaining inscription and token data.
         .target(
@@ -68,6 +92,27 @@ let package = Package(
                 .product(name: "BSVKeys", package: "swift-sdk"),
                 .product(name: "BSVScript", package: "swift-sdk"),
                 .product(name: "ToolboxCore", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
+            ]
+        ),
+
+        // Action families from `@1sat/actions`: tracked create/sign, ordinals, inscribe,
+        // BSV-21 transfer, locks, and marketplace. Spend-side unlock templates live here.
+        .target(
+            name: "OneSatActions",
+            dependencies: [
+                "OneSatTemplates",
+                "OneSatAddresses",
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVCrypto", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
             ]
         ),
@@ -82,10 +127,44 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "OneSatTemplatesTests",
+            dependencies: [
+                "OneSatTemplates",
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVCrypto", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+            ]
+        ),
+        .testTarget(
+            name: "OneSatAddressesTests",
+            dependencies: [
+                "OneSatAddresses",
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "ToolboxWallet", package: "swift-wallet-toolbox"),
+            ]
+        ),
+        .testTarget(
             name: "OneSatClientTests",
             dependencies: [
                 "OneSatClient",
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
+            ]
+        ),
+        .testTarget(
+            name: "OneSatActionsTests",
+            dependencies: [
+                "OneSatActions",
+                "OneSatTemplates",
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
             ]
         ),
     ],
