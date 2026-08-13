@@ -13,6 +13,8 @@ public enum Ordinals {
         public let ordinal: WalletOutput
         public let counterparty: PublicKey?
         public let address: String?
+        /// TS `counterparty: 'self'` with `forSelf: false`, keyID = source outpoint.
+        public let toSelf: Bool
         public let map: [(String, String)]
         public let extraTags: [String]
 
@@ -20,12 +22,14 @@ public enum Ordinals {
             ordinal: WalletOutput,
             counterparty: PublicKey? = nil,
             address: String? = nil,
+            toSelf: Bool = false,
             map: [(String, String)] = [],
             extraTags: [String] = []
         ) {
             self.ordinal = ordinal
             self.counterparty = counterparty
             self.address = address
+            self.toSelf = toSelf
             self.map = map
             self.extraTags = extraTags
         }
@@ -196,7 +200,7 @@ public enum Ordinals {
         var signers: [P2PKHSigner] = []
 
         for item in request.transfers {
-            if item.counterparty == nil, item.address == nil {
+            if !item.toSelf, item.counterparty == nil, item.address == nil {
                 throw OneSatActionError.mustProvideCounterpartyOrAddress
             }
             let outpoint = item.ordinal.outpoint.description
@@ -208,7 +212,15 @@ public enum Ordinals {
             }
 
             let recipient: String
-            if let counterparty = item.counterparty {
+            if item.toSelf {
+                recipient = try P1SATKey.address(
+                    identity: ctx.identity,
+                    keyID: outpoint,
+                    counterparty: .self,
+                    forSelf: false,
+                    network: ctx.chain.network
+                ).description
+            } else if let counterparty = item.counterparty {
                 recipient = try Self.recipientAddress(
                     identity: ctx.identity,
                     outpoint: outpoint,
@@ -221,7 +233,8 @@ public enum Ordinals {
                 throw OneSatActionError.mustProvideCounterpartyOrAddress
             }
 
-            var tags = resolveOrdinalTags(outpoint: outpoint, tags: item.ordinal.tags).tags
+            let resolved = resolveOrdinalTags(outpoint: outpoint, tags: item.ordinal.tags)
+            var tags = resolved.tags
             tags.append(contentsOf: item.extraTags)
 
             try inputs.append(
@@ -241,16 +254,38 @@ public enum Ordinals {
             }
 
             let lockingScript = try transferLockingScript(address: recipient, map: item.map)
-            try outputs.append(
-                WalletCreateActionOutput(
-                    lockingScript: lockingScript.bytes,
-                    satoshis: 1,
-                    outputDescription: item.counterparty == nil
-                        ? "Ordinal transfer to external address"
-                        : "Ordinal transfer",
-                    tags: []
+            if item.toSelf {
+                var sourceName: String?
+                if let instructions = item.ordinal.customInstructions,
+                   let parsed = try? CustomInstructions.parse(instructions)
+                {
+                    sourceName = parsed.name
+                }
+                try outputs.append(
+                    WalletCreateActionOutput(
+                        lockingScript: lockingScript.bytes,
+                        satoshis: 1,
+                        outputDescription: "Ordinal transfer",
+                        basket: resolved.basket,
+                        customInstructions: try CustomInstructions(
+                            keyID: outpoint,
+                            name: sourceName
+                        ).encoded(),
+                        tags: tags
+                    )
                 )
-            )
+            } else {
+                try outputs.append(
+                    WalletCreateActionOutput(
+                        lockingScript: lockingScript.bytes,
+                        satoshis: 1,
+                        outputDescription: item.counterparty == nil
+                            ? "Ordinal transfer to external address"
+                            : "Ordinal transfer",
+                        tags: []
+                    )
+                )
+            }
 
             guard let instructions = item.ordinal.customInstructions else {
                 throw OneSatActionError.missingCustomInstructions
