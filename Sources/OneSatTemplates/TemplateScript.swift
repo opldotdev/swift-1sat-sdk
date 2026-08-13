@@ -4,8 +4,8 @@ import BSVScript
 /// Shared construction limits and helpers for 1Sat script templates.
 enum TemplateScript {
     /// Ceiling used when assembling or parsing a template script.
-    /// These templates are small; a 100 KB bound is far above any legitimate output.
-    static let maximumByteCount = 100_000
+    /// Matches 1sat-stack `maxScriptSizePolicy` so a 100_000-byte inscription plus envelope fits.
+    static let maximumByteCount = 1_000_000
 
     static func empty() throws -> Script {
         try Script(bytes: [], maximumByteCount: maximumByteCount)

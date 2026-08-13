@@ -48,6 +48,29 @@ public enum OneSatConstants {
         }
     }
 
+    /// `BAP_BASKET`
+    public static let bapBasket = "bap"
+    /// `BAP_PROTOCOL_ID` name. Security level is `everyApp` (1).
+    public static let bapProtocolName = "sigma"
+    /// `BAP_KEY_ID`. Key IDs are `identity-<N>`.
+    public static let bapKeyID = "identity"
+    /// `BAP_BITCOM_ADDRESS`
+    public static let bapBitcomAddress = "1BAPSuaPnfGnSBM3GLV9yhxUdYe4vGbdMT"
+    /// `AIP_PREFIX`
+    public static let aipPrefix = "15PciHG22SNLQJXMoSUaWVi7WSqc7hCfva"
+    /// AIP algorithm `BITCOIN_ECDSA`
+    public static let aipAlgorithm = "BITCOIN_ECDSA"
+
+    /// `BAP_PROTOCOL_ID` = `[1, "sigma"]`.
+    public static var bapProtocolID: WalletProtocolID {
+        get throws {
+            try WalletProtocolID(
+                securityLevel: .everyApp,
+                name: bapProtocolName
+            )
+        }
+    }
+
     /// `buildInputAssetLabel` from `packages/types/src/constants.ts`.
     public static func inputAssetLabel(basket: String, id: String) -> String {
         let suffix: String

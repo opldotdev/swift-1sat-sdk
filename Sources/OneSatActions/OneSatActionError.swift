@@ -27,6 +27,7 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case listingTransactionNotFound
     case listingOutputNotFound
     case notAnOrdLockListing
+    case listingNotFoundInOverlay
     case malformedPurchaseTransaction
     case missingSourceTxid
     case inputNotInTransaction(outpoint: String)
@@ -90,6 +91,8 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "listing-output-not-found"
         case .notAnOrdLockListing:
             return "not-an-ordlock-listing"
+        case .listingNotFoundInOverlay:
+            return "listing-not-found-in-overlay"
         case .malformedPurchaseTransaction:
             return "Malformed transaction: requires at least 2 outputs"
         case .missingSourceTxid:

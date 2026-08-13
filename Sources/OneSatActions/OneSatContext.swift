@@ -23,6 +23,8 @@ public enum OneSatChain: String, Equatable, Sendable {
 public protocol Bsv21ActionServices: Sendable {
     func tokenDetails(tokenId: String) async throws -> Bsv21TokenDetails
     func validateUnspentOutputs(tokenId: String, outpoints: [String]) async throws -> Set<String>
+    /// GET /{tokenId}/outputs/{outpoint}. Throws when the overlay does not know the outpoint (404).
+    func validateOutput(tokenId: String, outpoint: String) async throws
     func submitTransfer(tx: [UInt8], tokenId: String) async throws
 }
 

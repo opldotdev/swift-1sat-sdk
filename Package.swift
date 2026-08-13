@@ -39,7 +39,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "f52e30d7e206e98f397fdf28314b656dd45f507a"
+            revision: "440b48129dc479fd82fb20004acf03b1481b278e"
         ),
     ],
     targets: [
@@ -103,6 +103,7 @@ let package = Package(
             dependencies: [
                 "OneSatTemplates",
                 "OneSatAddresses",
+                .product(name: "BSVCompat", package: "swift-sdk"),
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
@@ -157,6 +158,7 @@ let package = Package(
             dependencies: [
                 "OneSatActions",
                 "OneSatTemplates",
+                .product(name: "BSVCompat", package: "swift-sdk"),
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
                 .product(name: "BSVScript", package: "swift-sdk"),

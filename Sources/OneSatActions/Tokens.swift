@@ -8,6 +8,9 @@ import ToolboxActions
 
 /// BSV-21 transfer from `packages/actions/src/tokens/index.ts` `sendBsv21`.
 public enum Tokens {
+    /// `tokens/index.ts:876` `unlockingScriptLength` for token purchase. Not the ordinal 1368.
+    public static let purchaseUnlockingScriptLength: UInt32 = 1_402
+
     public struct Recipient: Sendable {
         public let amount: UInt64
         public let destination: Destination
@@ -25,6 +28,28 @@ public enum Tokens {
         public init(tokenId: String, recipients: [Recipient]) {
             self.tokenId = tokenId
             self.recipients = recipients
+        }
+    }
+
+    public struct PurchaseRequest: Sendable {
+        public let tokenId: String
+        public let outpoint: Outpoint
+        public let amount: UInt64
+        public let marketplaceAddress: String?
+        public let marketplaceRate: Double?
+
+        public init(
+            tokenId: String,
+            outpoint: Outpoint,
+            amount: UInt64,
+            marketplaceAddress: String? = nil,
+            marketplaceRate: Double? = nil
+        ) {
+            self.tokenId = tokenId
+            self.outpoint = outpoint
+            self.amount = amount
+            self.marketplaceAddress = marketplaceAddress
+            self.marketplaceRate = marketplaceRate
         }
     }
 
@@ -280,6 +305,149 @@ public enum Tokens {
                 options: TrackedAction.Options(randomizeOutputs: false)
             ) { transaction in
                 try Ordinals.signP2PKHInputs(ctx.identity, transaction, prepared.signers)
+            }
+            if let tx = result.tx {
+                try? await bsv21.submitTransfer(tx: tx, tokenId: request.tokenId)
+            }
+            return result
+        } catch let error as OneSatActionError {
+            return ActionResult.failure(error)
+        } catch {
+            return ActionResult.failure(error.localizedDescription)
+        }
+    }
+
+    public static func purchase(
+        _ ctx: OneSatContext,
+        _ request: PurchaseRequest
+    ) async -> ActionResult {
+        do {
+            guard let bsv21 = ctx.bsv21, let listings = ctx.listings else {
+                return ActionResult.failure(.servicesRequiredForPurchase)
+            }
+            do {
+                try await bsv21.validateOutput(
+                    tokenId: request.tokenId,
+                    outpoint: request.outpoint.ordinalDescription
+                )
+            } catch {
+                return ActionResult.failure(.listingNotFoundInOverlay)
+            }
+            let details = try await bsv21.tokenDetails(tokenId: request.tokenId)
+            let beef = try await listings.beef(forTxid: request.outpoint.transactionID.displayHex)
+            let parsed = try BEEF(bytes: beef, limits: WalletBEEFLimits.standard)
+            let limits = WalletBEEFLimits.standard.transactionLimits
+            guard let listingTx = parsed.transactions.compactMap(\.transaction).first(where: {
+                (try? $0.transactionID(limits: limits).displayHex)
+                    == request.outpoint.transactionID.displayHex
+            }) else {
+                return ActionResult.failure(.listingTransactionNotFound)
+            }
+            let vout = Int(request.outpoint.outputIndex)
+            guard listingTx.outputs.indices.contains(vout) else {
+                return ActionResult.failure(.listingOutputNotFound)
+            }
+            let listingOutput = listingTx.outputs[vout]
+            guard let decoded = OrdLock.decode(
+                listingOutput.lockingScript,
+                network: ctx.chain.network
+            ) else {
+                return ActionResult.failure(.notAnOrdLockListing)
+            }
+
+            let keyID = "\(request.tokenId)-\(request.outpoint.description)"
+            let buyer = try P1SATKey.address(
+                identity: ctx.identity,
+                keyID: keyID,
+                counterparty: .self,
+                forSelf: true,
+                network: ctx.chain.network
+            )
+            var tags = [
+                "bsv21:\(request.tokenId)",
+                "amt:\(request.amount)",
+                "dec:\(details.decimals)",
+            ]
+            if let symbol = details.symbol { tags.append("sym:\(symbol)") }
+            if let icon = details.icon { tags.append("icon:\(icon)") }
+            var outputs: [WalletCreateActionOutput] = [
+                try WalletCreateActionOutput(
+                    lockingScript: try transferScript(
+                        tokenId: request.tokenId,
+                        amount: request.amount,
+                        recipient: ActionScript.payToPublicKeyHash(buyer)
+                    ).bytes,
+                    satoshis: 1,
+                    outputDescription: "Purchased tokens",
+                    basket: OneSatConstants.bsv21Basket,
+                    customInstructions: try CustomInstructions(
+                        protocolID: try OneSatConstants.p1satProtocolID,
+                        keyID: keyID,
+                        symbol: details.symbol
+                    ).encoded(),
+                    tags: tags
+                ),
+            ]
+
+            let payout = try Ordinals.payoutOutput(decoded.payout)
+            try outputs.append(
+                WalletCreateActionOutput(
+                    lockingScript: payout.script.bytes,
+                    satoshis: payout.satoshis,
+                    outputDescription: "Payment to seller",
+                    tags: []
+                )
+            )
+
+            if let marketplaceAddress = request.marketplaceAddress,
+               let marketplaceRate = request.marketplaceRate,
+               marketplaceRate > 0 {
+                let marketFee = UInt64((Double(payout.satoshis) * marketplaceRate).rounded(.up))
+                if marketFee > 0 {
+                    try outputs.append(
+                        WalletCreateActionOutput(
+                            lockingScript: try ActionScript.payToPublicKeyHash(marketplaceAddress)
+                                .bytes,
+                            satoshis: marketFee,
+                            outputDescription: "Marketplace fee",
+                            tags: []
+                        )
+                    )
+                }
+            }
+
+            if details.isActive {
+                try outputs.append(
+                    WalletCreateActionOutput(
+                        lockingScript: try ActionScript.payToPublicKeyHash(details.feeAddress).bytes,
+                        satoshis: details.feePerOutput,
+                        outputDescription: "Overlay processing fee",
+                        tags: []
+                    )
+                )
+            }
+
+            let result = try await TrackedAction.execute(
+                ctx,
+                description: "Purchase \(request.amount) tokens for \(payout.satoshis) sats",
+                inputBEEF: parsed,
+                inputs: [
+                    try WalletCreateActionInput(
+                        outpoint: request.outpoint,
+                        inputDescription: "Listed token",
+                        unlockingScriptLength: purchaseUnlockingScriptLength
+                    ),
+                ],
+                outputs: outputs,
+                labels: [OneSatConstants.tokenLabel(request.tokenId)],
+                options: TrackedAction.Options(randomizeOutputs: false)
+            ) { transaction in
+                let index = try Ordinals.inputIndex(request.outpoint, in: transaction)
+                return [
+                    UInt32(index): try UnlockScripts.ordLockPurchase(
+                        transaction: transaction, inputIndex: index
+                    ),
+                ]
             }
             if let tx = result.tx {
                 try? await bsv21.submitTransfer(tx: tx, tokenId: request.tokenId)
