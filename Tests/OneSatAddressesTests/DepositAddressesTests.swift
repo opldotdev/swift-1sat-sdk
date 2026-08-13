@@ -45,4 +45,23 @@ final class DepositAddressesTests: XCTestCase {
         XCTAssertEqual(DepositAddresses.invoiceNumber(index: 0), "0-p 1sat-1sat 0")
         XCTAssertEqual(DepositAddresses.invoiceNumber(prefix: "mcp", index: 4), "0-p 1sat-mcp 4")
     }
+
+    /// The owner and the toolbox copy must emit the same bytes for the same identity.
+    ///
+    /// `RemoteWallet.receiveAddress` is `OneSatDeposit` (fixed prefix `"1sat"`). This suite
+    /// compiles against the toolbox revision `Package.swift` pins, so a byte change in either
+    /// copy fails here.
+    func test_ownerAndToolboxCopyProduceTheSameAddresses() throws {
+        let identity = try identity()
+        let wallet = try RemoteWallet.restore(fromPhrase: phrase)
+        let owner = try (0...4).map {
+            try DepositAddresses.address(identity: identity, index: $0).description
+        }
+        let copy = try (0...4).map { try wallet.receiveAddress(index: $0) }
+
+        XCTAssertEqual(owner, copy)
+        XCTAssertEqual(owner[0], "18Dg5KjZsS4fTPZYTvNP9z76WySuB8XSLc")
+        XCTAssertEqual(owner[1], "1JKT82gZGUCMo9PU7Hjrqa9rKBtcj9khPz")
+        XCTAssertEqual(owner[2], "1BdMVZzcu9G67hrfQFMnae6EFkrzJCDC9y")
+    }
 }

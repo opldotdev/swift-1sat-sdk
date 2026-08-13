@@ -1,9 +1,15 @@
 import BSVKeys
 
-/// Deposit addresses for a 1Sat identity, matching `@1sat/actions` `deriveDepositAddresses`.
+/// Deposit addresses for a 1Sat identity. This type is the Swift protocol owner.
 ///
-/// Protocol `[0, "p 1sat"]`, key identifier `"<prefix> <index>"`. The default prefix is `"1sat"`
-/// so every wallet that binds the same identity key derives the same default addresses.
+/// It matches `@1sat/actions` `deriveDepositAddresses`: protocol `[0, "p 1sat"]`, key identifier
+/// `"<prefix> <index>"`. The default prefix is `"1sat"` so every wallet that binds the same
+/// identity key derives the same default addresses.
+///
+/// `ToolboxBRC29.OneSatDeposit` is a byte-identical copy of the default-prefix case. The toolbox
+/// cannot import this module: `swift-1sat-sdk` depends on `swift-wallet-toolbox`, so the reverse
+/// edge would cycle. Change this type first; the copy and `RemoteWallet.receiveAddress` must stay
+/// equal, and `DepositAddressesTests` fails if they drift.
 public enum DepositAddresses {
     public static let defaultPrefix = "1sat"
 

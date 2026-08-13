@@ -1,8 +1,10 @@
 import Foundation
 import BSVKeys
 import BSVScript
+import BSVTransaction
 import BSVWallet
 import OneSatTemplates
+import ToolboxActions
 
 /// BSV-21 transfer from `packages/actions/src/tokens/index.ts` `sendBsv21`.
 public enum Tokens {
@@ -263,9 +265,15 @@ public enum Tokens {
                 network: ctx.chain.network,
                 changeKeyID: changeKeyID
             )
+            let inputBEEF = try await resolveInputBEEF(
+                listed: listed,
+                selected: selected.selected,
+                listings: ctx.listings
+            )
             let result = try await TrackedAction.execute(
                 ctx,
                 description: prepared.description,
+                inputBEEF: inputBEEF,
                 inputs: prepared.inputs,
                 outputs: prepared.outputs,
                 labels: prepared.labels,
@@ -282,5 +290,35 @@ public enum Tokens {
         } catch {
             return ActionResult.failure(error.localizedDescription)
         }
+    }
+
+    /// `tokens/index.ts` `sendBsv21`: prefer `listOutputs` BEEF, else `getBeefForTxid`.
+    public static func resolveInputBEEF(
+        listed: WalletListOutputsResult,
+        selected: [SelectedInput],
+        listings: (any ListingBeefSource)?
+    ) async throws -> BEEF {
+        if let beef = listed.beef {
+            return beef
+        }
+        guard let listings else { throw OneSatActionError.noBeefAvailable }
+        var txids: [String] = []
+        for item in selected {
+            let txid = item.output.outpoint.transactionID.displayHex
+            if !txids.contains(txid) { txids.append(txid) }
+        }
+        guard let first = txids.first else { throw OneSatActionError.noBeefAvailable }
+        var merged = try BEEF(
+            bytes: try await listings.beef(forTxid: first),
+            limits: WalletBEEFLimits.standard
+        )
+        for txid in txids.dropFirst() {
+            let next = try BEEF(
+                bytes: try await listings.beef(forTxid: txid),
+                limits: WalletBEEFLimits.standard
+            )
+            merged = try merged.merging(next, limits: WalletBEEFLimits.standard)
+        }
+        return merged
     }
 }

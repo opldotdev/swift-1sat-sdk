@@ -262,6 +262,50 @@ final class FamilyBuilderTests: XCTestCase {
         )
     }
 
+    func test_tokenSendUsesListOutputsBEEF() async throws {
+        let source = Transaction(
+            version: 1,
+            inputs: [],
+            outputs: [
+                TransactionOutput(
+                    satoshis: 1,
+                    lockingScript: try Script(bytes: [0x51], maximumByteCount: 10_000)
+                ),
+            ],
+            lockTime: 0
+        )
+        let beef = try BEEF(
+            merklePaths: [],
+            transactions: [.raw(source)],
+            limits: WalletBEEFLimits.standard
+        )
+        let listed = try WalletListOutputsResult(
+            totalOutputs: 1,
+            beef: beef,
+            outputs: [
+                try WalletOutput(
+                    satoshis: 1,
+                    spendable: true,
+                    customInstructions: try CustomInstructions(keyID: "tok-0").encoded(),
+                    tags: ["bsv21:\(ActionVectors.tokenID)", "amt:80"],
+                    outpoint: try Outpoint(ActionVectors.outpoint)
+                ),
+            ]
+        )
+        let selected = [
+            Tokens.SelectedInput(output: listed.outputs[0], amount: 80),
+        ]
+        let resolved = try await Tokens.resolveInputBEEF(
+            listed: listed,
+            selected: selected,
+            listings: nil
+        )
+        XCTAssertEqual(
+            try resolved.serialized(limits: WalletBEEFLimits.standard),
+            try beef.serialized(limits: WalletBEEFLimits.standard)
+        )
+    }
+
     func test_tokenSendRefusesInputsWithoutCustomInstructions() throws {
         let identity = try ActionVectors.identity()
         let first = try WalletOutput(
