@@ -19,7 +19,7 @@ public struct OneSatClient: Sendable {
     /// Every ordinal is returned separately because its outpoint is its wallet identity.
     public func ordinals(forAddress address: String) async throws -> [OrdinalOutput] {
         try await outputs(forAddress: address).compactMap { output in
-            guard output.isInscribed, output.tokenID == nil, !output.isLocked else { return nil }
+            guard output.isInscribed, !output.isToken, !output.isLocked else { return nil }
             return OrdinalOutput(
                 txid: output.txid,
                 vout: output.vout,
@@ -37,12 +37,22 @@ public struct OneSatClient: Sendable {
 
         for output in outputs {
             guard let tokenID = output.tokenID else { continue }
-            guard let tokenAmount = output.tokenAmount else {
+            let tokenAmount: UInt64
+            if let parsed = output.tokenAmount {
+                tokenAmount = parsed
+            } else if output.hasBsv21Event {
                 throw OneSatClientError.unreadableResponse
+            } else {
+                tokenAmount = 0
             }
 
             if balances[tokenID] == nil {
-                balances[tokenID] = TokenAccumulator(amount: 0, symbol: nil)
+                balances[tokenID] = TokenAccumulator(
+                    amount: 0,
+                    symbol: nil,
+                    decimals: output.tokenDecimals,
+                    kind: output.tokenKind
+                )
                 tokenOrder.append(tokenID)
             }
             guard var balance = balances[tokenID] else {
@@ -61,7 +71,13 @@ public struct OneSatClient: Sendable {
             guard let balance = balances[tokenID] else {
                 throw OneSatClientError.unreadableResponse
             }
-            return TokenBalance(tokenID: tokenID, amount: balance.amount, symbol: balance.symbol)
+            return TokenBalance(
+                tokenID: tokenID,
+                amount: balance.amount,
+                symbol: balance.symbol,
+                decimals: balance.decimals,
+                kind: balance.kind
+            )
         }
     }
 
@@ -79,7 +95,7 @@ public struct OneSatClient: Sendable {
         }
         components.queryItems = [
             URLQueryItem(name: "limit", value: String(Self.outputLimit)),
-            URLQueryItem(name: "tags", value: "insc,bsv21"),
+            URLQueryItem(name: "tags", value: "insc,bsv20,bsv21"),
         ]
         guard let url = components.url else { throw OneSatClientError.unreadableResponse }
 
@@ -147,6 +163,12 @@ public struct OrdinalOutput: Equatable, Sendable {
     }
 }
 
+/// Distinguishes tick-based BSV-20 from id-based BSV-21 in a token balance.
+public enum TokenKind: String, Equatable, Sendable {
+    case bsv20
+    case bsv21
+}
+
 /// Represents the aggregate a wallet displays instead of individual fungible token outputs.
 public struct TokenBalance: Equatable, Sendable {
     public let tokenID: String
@@ -154,12 +176,23 @@ public struct TokenBalance: Equatable, Sendable {
     public let amount: UInt64
     /// Gives the ticker only when the owner stream itself reported one.
     public let symbol: String?
+    /// Display decimals from the indexer, or 0 when the stream omitted them.
+    public let decimals: Int
+    public let kind: TokenKind
 
     /// Allows callers to preserve a balance value across their own read models.
-    public init(tokenID: String, amount: UInt64, symbol: String?) {
+    public init(
+        tokenID: String,
+        amount: UInt64,
+        symbol: String?,
+        decimals: Int = 0,
+        kind: TokenKind = .bsv21
+    ) {
         self.tokenID = tokenID
         self.amount = amount
         self.symbol = symbol
+        self.decimals = decimals
+        self.kind = kind
     }
 }
 
@@ -176,10 +209,37 @@ private struct IndexedOutput: Sendable {
     let events: [String]
     let data: [String: JSONValue]
 
+    var hasBsv21Event: Bool {
+        events.contains(where: { $0.hasPrefix("bsv21:") })
+    }
+
+    var isTokenInscription: Bool {
+        inscriptionContentType == "application/bsv-20"
+            || events.contains("type:application/bsv-20")
+    }
+
+    var isToken: Bool {
+        hasBsv21Event || data["bsv21"] != nil || data["bsv20"] != nil || isTokenInscription
+    }
+
+    var tokenKind: TokenKind {
+        if hasBsv21Event || data["bsv21"] != nil { return .bsv21 }
+        if nonempty(inscriptionJSON?["id"]?.stringValue) != nil { return .bsv21 }
+        return .bsv20
+    }
+
     var tokenID: String? {
-        events.first(where: { $0.hasPrefix("bsv21:") }).map {
+        if let id = events.first(where: { $0.hasPrefix("bsv21:") }).map({
             String($0.dropFirst("bsv21:".count))
-        }.flatMap { $0.isEmpty ? nil : $0 }
+        }).flatMap({ $0.isEmpty ? nil : $0 }) {
+            return id
+        }
+        if let id = nonempty(data["bsv21"]?["id"]?.stringValue) { return id }
+        if let tick = nonempty(data["bsv20"]?["tick"]?.stringValue) { return tick }
+        if let id = nonempty(inscriptionJSON?["id"]?.stringValue) { return id }
+        if let tick = nonempty(inscriptionJSON?["tick"]?.stringValue) { return tick }
+        if isToken { return "\(txid)_\(vout)" }
+        return nil
     }
 
     var isInscribed: Bool {
@@ -194,12 +254,40 @@ private struct IndexedOutput: Sendable {
         nonempty(data["insc"]?["file"]?["type"]?.stringValue)
     }
 
+    var inscriptionJSON: JSONValue? {
+        data["insc"]?["json"]
+    }
+
     var tokenAmount: UInt64? {
-        data["bsv21"]?["amt"]?.stringValue.flatMap(UInt64.init)
+        integerAmount(data["bsv21"]?["amt"])
+            ?? integerAmount(data["bsv20"]?["amt"])
+            ?? integerAmount(inscriptionJSON?["amt"])
     }
 
     var tokenSymbol: String? {
         nonempty(data["bsv21"]?["sym"]?.stringValue)
+            ?? nonempty(data["bsv20"]?["tick"]?.stringValue)
+            ?? nonempty(data["bsv20"]?["sym"]?.stringValue)
+            ?? nonempty(inscriptionJSON?["sym"]?.stringValue)
+            ?? nonempty(inscriptionJSON?["tick"]?.stringValue)
+    }
+
+    var tokenDecimals: Int {
+        integer(data["bsv21"]?["dec"])
+            ?? integer(data["bsv20"]?["dec"])
+            ?? integer(inscriptionJSON?["dec"])
+            ?? 0
+    }
+
+    private func integerAmount(_ value: JSONValue?) -> UInt64? {
+        if let text = value?.stringValue { return UInt64(text) }
+        if let number = value?.intValue { return UInt64(exactly: number) }
+        return nil
+    }
+
+    private func integer(_ value: JSONValue?) -> Int? {
+        if let text = value?.stringValue { return Int(text) }
+        return value?.intValue
     }
 
     private func nonempty(_ value: String?) -> String? {
@@ -211,4 +299,6 @@ private struct IndexedOutput: Sendable {
 private struct TokenAccumulator {
     var amount: UInt64
     var symbol: String?
+    var decimals: Int
+    var kind: TokenKind
 }

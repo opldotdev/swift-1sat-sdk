@@ -52,6 +52,10 @@ final class OneSatClientTests: XCTestCase {
         data: {"outpoint":"\(String(repeating: "d", count: 64)).3","score":3,"satoshis":1,"events":["1sat","insc","type:application","type:application/bsv-20","bsv21:\(tokenID)"],"data":{"insc":{"file":{"hash":"AA==","size":1,"type":"application/bsv-20"}},"bsv21":{"id":"\(tokenID)","op":"transfer","amt":"2"}}}
         id: 3
 
+        event: txo
+        data: {"outpoint":"\(String(repeating: "e", count: 64)).4","score":4,"satoshis":1,"events":["1sat","insc","type:application","type:application/bsv-20"],"data":{"insc":{"file":{"hash":"AA==","size":1,"type":"application/bsv-20"},"json":{"p":"bsv-20","op":"transfer","tick":"SHUA","amt":"1000"}},"bsv20":{"tick":"SHUA","op":"transfer","amt":"1000"}}}
+        id: 4
+
         event: done
         data: {}
 
@@ -83,7 +87,10 @@ final class OneSatClientTests: XCTestCase {
 
         XCTAssertEqual(
             balances,
-            [TokenBalance(tokenID: tokenID, amount: 42, symbol: "GOLD")]
+            [
+                TokenBalance(tokenID: tokenID, amount: 42, symbol: "GOLD", kind: .bsv21),
+                TokenBalance(tokenID: "SHUA", amount: 1000, symbol: "SHUA", kind: .bsv20),
+            ]
         )
     }
 
@@ -99,7 +106,7 @@ final class OneSatClientTests: XCTestCase {
         let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
         XCTAssertEqual(items, [
             URLQueryItem(name: "limit", value: "10000"),
-            URLQueryItem(name: "tags", value: "insc,bsv21"),
+            URLQueryItem(name: "tags", value: "insc,bsv20,bsv21"),
         ])
     }
 
