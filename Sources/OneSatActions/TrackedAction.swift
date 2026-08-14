@@ -14,15 +14,27 @@ public enum TrackedAction {
         public var bypassP1Sat: Bool
         public var randomizeOutputs: Bool
         public var acceptDelayedBroadcast: Bool
+        public var noSend: Bool
+        public var noSendChange: [String]
+        public var knownTxids: [String]
+        public var sendWith: [String]
 
         public init(
             bypassP1Sat: Bool = false,
             randomizeOutputs: Bool = true,
-            acceptDelayedBroadcast: Bool = false
+            acceptDelayedBroadcast: Bool = false,
+            noSend: Bool = false,
+            noSendChange: [String] = [],
+            knownTxids: [String] = [],
+            sendWith: [String] = []
         ) {
             self.bypassP1Sat = bypassP1Sat
             self.randomizeOutputs = randomizeOutputs
             self.acceptDelayedBroadcast = acceptDelayedBroadcast
+            self.noSend = noSend
+            self.noSendChange = noSendChange
+            self.knownTxids = knownTxids
+            self.sendWith = sendWith
         }
     }
 
@@ -95,6 +107,13 @@ public enum TrackedAction {
             options: WalletCreateActionOptions(
                 signAndProcess: false,
                 acceptDelayedBroadcast: options.acceptDelayedBroadcast,
+                trustSelf: nil,
+                knownTransactionIDs: try options.knownTxids.map { try TransactionID(displayHex: $0) },
+                noSend: options.noSend ? true : nil,
+                noSendChange: options.noSendChange.isEmpty
+                    ? nil
+                    : try options.noSendChange.map { try Outpoint($0) },
+                sendWith: try options.sendWith.map { try TransactionID(displayHex: $0) },
                 randomizeOutputs: options.randomizeOutputs
             )
         )
@@ -160,14 +179,25 @@ public enum TrackedAction {
             )
 
             let signed = try SignedAction(funded: funded, transaction: transaction)
-            let processed = try await ctx.storage.processAction(ctx.auth, try signed.processRequest())
+            let processed = try await ctx.storage.processAction(
+                ctx.auth,
+                try signed.processRequest(sendWith: options.sendWith)
+            )
             if let failed = processed.sendWithResults.first(where: { $0.status != .unproven }) {
                 return ActionResult.failure("broadcast-\(failed.status.rawValue)", actionId: actionID)
+            }
+            let changeOutpoints: [String]?
+            if options.noSend {
+                let txid = signed.transactionID.displayHex
+                changeOutpoints = funded.outputs.filter(\.isChange).map { "\(txid).\($0.vout)" }
+            } else {
+                changeOutpoints = nil
             }
             return ActionResult(
                 txid: signed.transactionID.displayHex,
                 tx: try signed.atomicBEEF(),
-                actionId: actionID
+                actionId: actionID,
+                noSendChange: changeOutpoints
             )
         } catch {
             let reference = funded.reference

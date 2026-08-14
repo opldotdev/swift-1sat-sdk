@@ -14,6 +14,8 @@ public enum OneSatConstants {
     public static let lockBasket = "p 1sat lock"
     /// `OPNS_BASKET`
     public static let opnsBasket = "p 1sat opns"
+    /// `SIGMA_BASKET`
+    public static let sigmaBasket = "p 1sat sigma"
     /// `P1SAT_LABEL`
     public static let p1satLabel = "p 1sat action"
     /// `P1SAT_BASKET_PREFIX`

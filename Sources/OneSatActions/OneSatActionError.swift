@@ -32,6 +32,13 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case missingSourceTxid
     case inputNotInTransaction(outpoint: String)
     case mneeClientRequired
+    case quantityMustBePositive
+    case anchorNoTxid
+    case exactlyOneOfContentOrRef
+    case contentTypeRequiredWithContent
+    case invalidRef(ref: String)
+    case invalidCollectionIdFormat(id: String)
+    case noBapIdentity
 
     /// Exact `error` strings from `@1sat/actions`.
     public var wireMessage: String {
@@ -102,6 +109,20 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "input-not-in-transaction-\(outpoint)"
         case .mneeClientRequired:
             return "MNEE client not available — services required"
+        case .quantityMustBePositive:
+            return "quantity-must-be-positive"
+        case .anchorNoTxid:
+            return "anchor-no-txid"
+        case .exactlyOneOfContentOrRef:
+            return "exactly-one-of-base64Content-or-ref-required"
+        case .contentTypeRequiredWithContent:
+            return "contentType-required-with-base64Content"
+        case .invalidRef(let ref):
+            return "invalid-ref: \(ref)"
+        case .invalidCollectionIdFormat(let id):
+            return "Invalid collectionId format: \(id)"
+        case .noBapIdentity:
+            return "No BAP identity published — cannot resolve current signing key. Publish an identity before signing."
         }
     }
 }
@@ -111,12 +132,20 @@ public struct ActionResult: Equatable, Sendable {
     public let tx: [UInt8]?
     public let actionId: String?
     public let error: String?
+    public let noSendChange: [String]?
 
-    public init(txid: String? = nil, tx: [UInt8]? = nil, actionId: String? = nil, error: String? = nil) {
+    public init(
+        txid: String? = nil,
+        tx: [UInt8]? = nil,
+        actionId: String? = nil,
+        error: String? = nil,
+        noSendChange: [String]? = nil
+    ) {
         self.txid = txid
         self.tx = tx
         self.actionId = actionId
         self.error = error
+        self.noSendChange = noSendChange
     }
 
     public static func failure(_ error: OneSatActionError, actionId: String? = nil) -> ActionResult {
