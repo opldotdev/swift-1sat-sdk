@@ -81,6 +81,24 @@ public struct OneSatClient: Sendable {
         }
     }
 
+    /// One BSV-21 output at a time so a sweep can rebuild each token UTXO.
+    public func tokenOutputs(forAddress address: String) async throws -> [TokenOutput] {
+        try await outputs(forAddress: address).compactMap { output in
+            guard output.tokenKind == .bsv21,
+                  let tokenID = output.tokenID,
+                  let amount = output.tokenAmount
+            else { return nil }
+            return TokenOutput(
+                txid: output.txid,
+                vout: output.vout,
+                tokenID: tokenID,
+                amount: amount,
+                symbol: output.tokenSymbol,
+                decimals: output.tokenDecimals
+            )
+        }
+    }
+
     private let baseURL: URL
     private let http: any HTTPGet
 
@@ -167,6 +185,32 @@ public struct OrdinalOutput: Equatable, Sendable {
 public enum TokenKind: String, Equatable, Sendable {
     case bsv20
     case bsv21
+}
+
+/// One BSV-21 UTXO, used when a sweep must move each output.
+public struct TokenOutput: Equatable, Sendable {
+    public let txid: String
+    public let vout: UInt32
+    public let tokenID: String
+    public let amount: UInt64
+    public let symbol: String?
+    public let decimals: Int
+
+    public init(
+        txid: String,
+        vout: UInt32,
+        tokenID: String,
+        amount: UInt64,
+        symbol: String?,
+        decimals: Int
+    ) {
+        self.txid = txid
+        self.vout = vout
+        self.tokenID = tokenID
+        self.amount = amount
+        self.symbol = symbol
+        self.decimals = decimals
+    }
 }
 
 /// Represents the aggregate a wallet displays instead of individual fungible token outputs.
