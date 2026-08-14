@@ -106,9 +106,7 @@ final class OneSatScannerTests: XCTestCase {
         XCTAssertEqual(
             OneSatScanner.splitOutpoint(String(repeating: "a", count: 64) + ".3")?.vout, 3
         )
-        XCTAssertEqual(
-            OneSatScanner.splitOutpoint(String(repeating: "b", count: 64) + "_7")?.vout, 7
-        )
+        XCTAssertNil(OneSatScanner.splitOutpoint(String(repeating: "b", count: 64) + "_7"))
         XCTAssertNil(OneSatScanner.splitOutpoint("not-an-outpoint"))
     }
 

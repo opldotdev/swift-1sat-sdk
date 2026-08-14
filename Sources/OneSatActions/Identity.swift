@@ -76,37 +76,6 @@ public enum Identity {
         return try computeBapId(identity: ctx.identity)
     }
 
-    /// Port of `resolveCurrentKeyId` (`aip.ts:37-67`). Throws the TS message when no ID output exists.
-    public static func resolveCurrentSigningKeyID(_ ctx: OneSatContext) async throws -> String {
-        let listed = try await ctx.storage.listOutputs(
-            ctx.auth,
-            try WalletListOutputsRequest(
-                basket: OneSatConstants.bapBasket,
-                tags: ["type:id"],
-                includeCustomInstructions: true,
-                includeTags: true,
-                pagination: WalletPagination(limit: 100)
-            )
-        )
-        var maxSeq = -1
-        var keyID: String?
-        for output in listed.outputs {
-            guard let seqTag = output.tags?.first(where: { $0.hasPrefix("seq:") }) else { continue }
-            let seqText = String(seqTag.dropFirst("seq:".count))
-            guard let seq = Int(seqText) else { continue }
-            guard seq > maxSeq, let instructions = output.customInstructions else { continue }
-            maxSeq = seq
-            let parsed = try JSONSerialization.jsonObject(with: Data(instructions.utf8))
-            if let object = parsed as? [String: Any], let resolved = object["keyID"] as? String {
-                keyID = resolved
-            } else {
-                keyID = nil
-            }
-        }
-        guard let keyID else { throw Failure.noSigningKey }
-        return keyID
-    }
-
     /// Port of `updateProfile` (`identity/index.ts:450-586`). `profileJSON` must be a JSON object;
     /// its UTF-8 bytes are pushed verbatim.
     public static func updateProfile(_ ctx: OneSatContext, profileJSON: String) async -> PublishResult {
@@ -168,7 +137,12 @@ public enum Identity {
                     )
                 )
             } else {
-                let keyID = try await resolveCurrentSigningKeyID(ctx)
+                let keyID: String
+                do {
+                    keyID = try await Sigma.resolveCurrentKeyId(ctx)
+                } catch let error as OneSatActionError {
+                    return PublishResult(error: error.wireMessage)
+                }
                 let signedAlias = try AIPSign.apply(
                     to: aliasScript,
                     signingKey: try derivedKey(ctx.identity, keyID: keyID)
@@ -382,8 +356,6 @@ public enum Identity {
         case noLockingScript = "malformed-alias: winner has no locking script"
         case noBitcom = "malformed-alias: no bitcom structure found"
         case noBap = "malformed-alias: no BAP protocol found in bitcom"
-        case noSigningKey =
-            "No BAP identity published — cannot resolve current signing key. Publish an identity before signing."
         case profileNotObject = "profile-must-be-json-object"
 
         var errorDescription: String? { rawValue }

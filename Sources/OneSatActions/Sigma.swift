@@ -1,3 +1,4 @@
+import Foundation
 import BSVCompat
 import BSVCore
 import BSVCrypto
@@ -24,13 +25,10 @@ public enum Sigma {
         for output in listed.outputs {
             guard let seqTag = output.tags?.first(where: { $0.hasPrefix("seq:") }) else { continue }
             guard let seq = Int(seqTag.dropFirst(4)) else { continue }
-            guard let text = output.customInstructions,
-                  let parsed = try? CustomInstructions.parse(text)
-            else { continue }
-            if seq > maxSeq {
-                maxSeq = seq
-                keyID = parsed.keyID
-            }
+            guard seq > maxSeq, let instructions = output.customInstructions else { continue }
+            maxSeq = seq
+            let parsed = try JSONSerialization.jsonObject(with: Data(instructions.utf8))
+            keyID = (parsed as? [String: Any])?["keyID"] as? String
         }
         guard let keyID else { throw OneSatActionError.noBapIdentity }
         return keyID

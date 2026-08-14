@@ -1,4 +1,5 @@
 import Foundation
+import OneSatSweep
 import ToolboxCore
 import ToolboxServices
 
@@ -108,7 +109,7 @@ public struct OneSatClient: Sendable {
 
             guard let json = try? JSONDecoder().decode(JSONValue.self, from: Data(data.utf8)),
                   let outpoint = json["outpoint"]?.stringValue,
-                  let (txid, vout) = splitOutpoint(outpoint),
+                  let (txid, vout) = OneSatScanner.splitOutpoint(outpoint),
                   let satoshisValue = json["satoshis"]?.intValue,
                   let satoshis = UInt64(exactly: satoshisValue) else {
                 throw OneSatClientError.unreadableResponse
@@ -126,18 +127,6 @@ public struct OneSatClient: Sendable {
             )
         }
         return outputs
-    }
-
-    /// Validates the indexer's two supported outpoint separators before exposing an asset id.
-    private static func splitOutpoint(_ outpoint: String) -> (txid: String, vout: UInt32)? {
-        for separator: Character in [".", "_"] {
-            guard let index = outpoint.lastIndex(of: separator) else { continue }
-            let txid = String(outpoint[..<index])
-            guard let vout = UInt32(outpoint[outpoint.index(after: index)...]),
-                  txid.count == 64 else { continue }
-            return (txid, vout)
-        }
-        return nil
     }
 }
 

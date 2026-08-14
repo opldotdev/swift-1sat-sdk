@@ -155,16 +155,17 @@ final class IdentityUpdateProfileTests: XCTestCase {
         XCTAssertNil(result.txid)
 
         do {
-            _ = try await Identity.resolveCurrentSigningKeyID(
+            _ = try await Sigma.resolveCurrentKeyId(
                 try context(
                     identity: identity,
                     transport: ScriptedTransport(idOutputs: [], aliasOutputs: [])
                 )
             )
-            XCTFail("expected resolveCurrentSigningKeyID to throw")
-        } catch {
+            XCTFail("expected resolveCurrentKeyId to throw")
+        } catch let error as OneSatActionError {
+            XCTAssertEqual(error, .noBapIdentity)
             XCTAssertEqual(
-                error.localizedDescription,
+                error.wireMessage,
                 "No BAP identity published — cannot resolve current signing key. Publish an identity before signing."
             )
         }
