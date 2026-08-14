@@ -80,6 +80,45 @@ final class OneSatClientTests: XCTestCase {
         )
     }
 
+    func test_tokenOutputsKeepsEachUTXOAndItsProtocol() async throws {
+        let client = OneSatClient(http: StubHTTP(status: 200, body: Array(sse.utf8)))
+
+        let outputs = try await client.tokenOutputs(forAddress: address)
+
+        XCTAssertEqual(
+            outputs,
+            [
+                TokenOutput(
+                    txid: String(repeating: "c", count: 64),
+                    vout: 2,
+                    tokenID: tokenID,
+                    amount: 40,
+                    symbol: "GOLD",
+                    decimals: 0,
+                    kind: .bsv21
+                ),
+                TokenOutput(
+                    txid: String(repeating: "d", count: 64),
+                    vout: 3,
+                    tokenID: tokenID,
+                    amount: 2,
+                    symbol: nil,
+                    decimals: 0,
+                    kind: .bsv21
+                ),
+                TokenOutput(
+                    txid: String(repeating: "e", count: 64),
+                    vout: 4,
+                    tokenID: "SHUA",
+                    amount: 1000,
+                    symbol: "SHUA",
+                    decimals: 0,
+                    kind: .bsv20
+                ),
+            ]
+        )
+    }
+
     func test_tokenBalancesGroupsOutputsAndSumsProtocolAmounts() async throws {
         let client = OneSatClient(http: StubHTTP(status: 200, body: Array(sse.utf8)))
 

@@ -76,6 +76,15 @@ public enum Tokens {
         try BSV21.transfer(tokenID: tokenId, amount: String(amount)).lock(lockingScript: recipient)
     }
 
+    /// `BSV20.transfer(tick, amount).lock(recipientScript)`.
+    public static func transferBsv20Script(
+        tick: String,
+        amount: UInt64,
+        recipient: Script
+    ) throws -> Script {
+        try BSV20.transfer(tick: tick, amount: String(amount)).lock(lockingScript: recipient)
+    }
+
     public static func selectInputs(
         outputs: [WalletOutput],
         tokenId: String,

@@ -81,10 +81,10 @@ public struct OneSatClient: Sendable {
         }
     }
 
-    /// One BSV-21 output at a time so a sweep can rebuild each token UTXO.
+    /// One token UTXO at a time so a sweep can rebuild a transfer.
     public func tokenOutputs(forAddress address: String) async throws -> [TokenOutput] {
         try await outputs(forAddress: address).compactMap { output in
-            guard output.tokenKind == .bsv21,
+            guard output.isToken,
                   let tokenID = output.tokenID,
                   let amount = output.tokenAmount
             else { return nil }
@@ -94,7 +94,8 @@ public struct OneSatClient: Sendable {
                 tokenID: tokenID,
                 amount: amount,
                 symbol: output.tokenSymbol,
-                decimals: output.tokenDecimals
+                decimals: output.tokenDecimals,
+                kind: output.tokenKind
             )
         }
     }
@@ -187,7 +188,7 @@ public enum TokenKind: String, Equatable, Sendable {
     case bsv21
 }
 
-/// One BSV-21 UTXO, used when a sweep must move each output.
+/// One token UTXO, used when a sweep must rebuild a transfer.
 public struct TokenOutput: Equatable, Sendable {
     public let txid: String
     public let vout: UInt32
@@ -195,6 +196,7 @@ public struct TokenOutput: Equatable, Sendable {
     public let amount: UInt64
     public let symbol: String?
     public let decimals: Int
+    public let kind: TokenKind
 
     public init(
         txid: String,
@@ -202,7 +204,8 @@ public struct TokenOutput: Equatable, Sendable {
         tokenID: String,
         amount: UInt64,
         symbol: String?,
-        decimals: Int
+        decimals: Int,
+        kind: TokenKind
     ) {
         self.txid = txid
         self.vout = vout
@@ -210,6 +213,7 @@ public struct TokenOutput: Equatable, Sendable {
         self.amount = amount
         self.symbol = symbol
         self.decimals = decimals
+        self.kind = kind
     }
 }
 

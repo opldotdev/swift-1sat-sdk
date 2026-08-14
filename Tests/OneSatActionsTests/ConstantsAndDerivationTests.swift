@@ -29,6 +29,10 @@ final class ConstantsAndDerivationTests: XCTestCase {
         XCTAssertEqual(protocolID.name, "p 1sat")
     }
 
+    func test_bsv20BasketFollowsTheP1SATPrefix() {
+        XCTAssertEqual(OneSatConstants.bsv20Basket, "p 1sat bsv20")
+    }
+
     func test_invoiceNumbersMatchBRC43() {
         XCTAssertEqual(P1SATKey.invoiceNumber(keyID: "lock"), "0-p 1sat-lock")
         XCTAssertEqual(

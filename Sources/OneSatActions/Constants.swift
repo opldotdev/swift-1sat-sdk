@@ -10,6 +10,8 @@ public enum OneSatConstants {
     public static let ordinalsBasket = "p 1sat ordinals"
     /// `BSV21_BASKET`
     public static let bsv21Basket = "p 1sat bsv21"
+    /// Tick-based BSV-20 after a token-transfer sweep. `@1sat/actions` has no BSV-20 basket.
+    public static let bsv20Basket = "p 1sat bsv20"
     /// `LOCK_BASKET`
     public static let lockBasket = "p 1sat lock"
     /// `OPNS_BASKET`
