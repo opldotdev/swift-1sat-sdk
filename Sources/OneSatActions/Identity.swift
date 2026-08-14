@@ -1,3 +1,4 @@
+import Foundation
 import BSVCore
 import BSVCrypto
 import BSVKeys
@@ -6,7 +7,7 @@ import BSVTransaction
 import BSVWallet
 import OneSatTemplates
 
-/// BAP `publishIdentity` and `getProfile` from `@1sat/actions` `identity/index.ts`.
+/// BAP `publishIdentity`, `updateProfile`, and `getProfile` from `@1sat/actions` `identity/index.ts`.
 public enum Identity {
     public struct PublishResult: Sendable {
         public let txid: String?
@@ -75,6 +76,152 @@ public enum Identity {
         return try computeBapId(identity: ctx.identity)
     }
 
+    /// Port of `resolveCurrentKeyId` (`aip.ts:37-67`). Throws the TS message when no ID output exists.
+    public static func resolveCurrentSigningKeyID(_ ctx: OneSatContext) async throws -> String {
+        let listed = try await ctx.storage.listOutputs(
+            ctx.auth,
+            try WalletListOutputsRequest(
+                basket: OneSatConstants.bapBasket,
+                tags: ["type:id"],
+                includeCustomInstructions: true,
+                includeTags: true,
+                pagination: WalletPagination(limit: 100)
+            )
+        )
+        var maxSeq = -1
+        var keyID: String?
+        for output in listed.outputs {
+            guard let seqTag = output.tags?.first(where: { $0.hasPrefix("seq:") }) else { continue }
+            let seqText = String(seqTag.dropFirst("seq:".count))
+            guard let seq = Int(seqText) else { continue }
+            guard seq > maxSeq, let instructions = output.customInstructions else { continue }
+            maxSeq = seq
+            let parsed = try JSONSerialization.jsonObject(with: Data(instructions.utf8))
+            if let object = parsed as? [String: Any], let resolved = object["keyID"] as? String {
+                keyID = resolved
+            } else {
+                keyID = nil
+            }
+        }
+        guard let keyID else { throw Failure.noSigningKey }
+        return keyID
+    }
+
+    /// Port of `updateProfile` (`identity/index.ts:450-586`). `profileJSON` must be a JSON object;
+    /// its UTF-8 bytes are pushed verbatim.
+    public static func updateProfile(_ ctx: OneSatContext, profileJSON: String) async -> PublishResult {
+        do {
+            guard isJSONObject(profileJSON) else {
+                return PublishResult(error: Failure.profileNotObject.rawValue)
+            }
+
+            let publishedAtTag = "publishedAt:\(Int64(Date().timeIntervalSince1970 * 1000))"
+            let existingId = try await resolveBapId(ctx)
+            let bapId = try existingId ?? computeBapId(identity: ctx.identity)
+
+            let existingAliases = try await ctx.storage.listOutputs(
+                ctx.auth,
+                try WalletListOutputsRequest(
+                    basket: OneSatConstants.bapBasket,
+                    tags: ["type:alias"],
+                    pagination: WalletPagination(limit: 100)
+                )
+            )
+
+            let aliasScript = try pushReturnScript([
+                Array(OneSatConstants.bapBitcomAddress.utf8),
+                Array("ALIAS".utf8),
+                Array(bapId.utf8),
+                Array(profileJSON.utf8),
+            ])
+
+            var outputs: [WalletCreateActionOutput] = []
+            if existingId == nil {
+                let id = try buildIdOutput(
+                    identity: ctx.identity,
+                    bapId: bapId,
+                    seq: 1,
+                    signerKeyID: signingKeyID(0),
+                    declareKeyID: signingKeyID(1)
+                )
+                outputs.append(
+                    try WalletCreateActionOutput(
+                        lockingScript: id.lockingScript,
+                        satoshis: 0,
+                        outputDescription: "BAP ID",
+                        basket: OneSatConstants.bapBasket,
+                        customInstructions: id.customInstructions,
+                        tags: id.tags
+                    )
+                )
+                let signedAlias = try AIPSign.apply(
+                    to: aliasScript,
+                    signingKey: try derivedKey(ctx.identity, keyID: signingKeyID(1))
+                )
+                outputs.append(
+                    try WalletCreateActionOutput(
+                        lockingScript: signedAlias.bytes,
+                        satoshis: 0,
+                        outputDescription: "BAP ALIAS",
+                        basket: OneSatConstants.bapBasket,
+                        tags: ["type:alias", "bapId:\(bapId)", publishedAtTag]
+                    )
+                )
+            } else {
+                let keyID = try await resolveCurrentSigningKeyID(ctx)
+                let signedAlias = try AIPSign.apply(
+                    to: aliasScript,
+                    signingKey: try derivedKey(ctx.identity, keyID: keyID)
+                )
+                outputs.append(
+                    try WalletCreateActionOutput(
+                        lockingScript: signedAlias.bytes,
+                        satoshis: 0,
+                        outputDescription: "BAP ALIAS",
+                        basket: OneSatConstants.bapBasket,
+                        tags: ["type:alias", "bapId:\(bapId)", publishedAtTag]
+                    )
+                )
+            }
+
+            let result = try await TrackedAction.execute(
+                ctx,
+                description: existingId == nil
+                    ? "BAP identity creation with profile"
+                    : "BAP alias update",
+                outputs: outputs,
+                options: TrackedAction.Options(
+                    randomizeOutputs: false,
+                    acceptDelayedBroadcast: false
+                )
+            )
+            if let error = result.error {
+                return PublishResult(bapId: bapId, error: error)
+            }
+            guard let txid = result.txid else {
+                return PublishResult(bapId: bapId, error: Failure.noTxid.rawValue)
+            }
+
+            for old in existingAliases.outputs {
+                do {
+                    _ = try await ctx.storage.relinquishOutput(
+                        ctx.auth,
+                        try WalletRelinquishOutputRequest(
+                            basket: OneSatConstants.bapBasket,
+                            output: old.outpoint
+                        )
+                    )
+                } catch {
+                    continue
+                }
+            }
+
+            return PublishResult(txid: txid, tx: result.tx, bapId: bapId)
+        } catch {
+            return PublishResult(error: error.localizedDescription)
+        }
+    }
+
     public static func publish(_ ctx: OneSatContext) async -> PublishResult {
         do {
             let existing = try await ctx.storage.listOutputs(
@@ -90,39 +237,20 @@ public enum Identity {
             }
 
             let bapId = try computeBapId(identity: ctx.identity)
-            let rootKey = try derivedKey(ctx.identity, index: 0)
-            let declareAddress = try derivedAddress(ctx.identity, index: 1).description
-            var script = try Script(bytes: [], maximumByteCount: ActionScript.maximumByteCount)
-            try script.append(.zero, maximumScriptByteCount: ActionScript.maximumByteCount)
-            try script.append(.return, maximumScriptByteCount: ActionScript.maximumByteCount)
-            try script.appendPushData(
-                Array(OneSatConstants.bapBitcomAddress.utf8),
-                maximumScriptByteCount: ActionScript.maximumByteCount
+            let id = try buildIdOutput(
+                identity: ctx.identity,
+                bapId: bapId,
+                seq: 1,
+                signerKeyID: signingKeyID(0),
+                declareKeyID: signingKeyID(1)
             )
-            try script.appendPushData(
-                Array("ID".utf8),
-                maximumScriptByteCount: ActionScript.maximumByteCount
-            )
-            try script.appendPushData(
-                Array(bapId.utf8),
-                maximumScriptByteCount: ActionScript.maximumByteCount
-            )
-            try script.appendPushData(
-                Array(declareAddress.utf8),
-                maximumScriptByteCount: ActionScript.maximumByteCount
-            )
-            let signed = try AIPSign.apply(to: script, signingKey: rootKey)
-            let instructions = try CustomInstructions(
-                protocolID: try OneSatConstants.bapProtocolID,
-                keyID: signingKeyID(1)
-            ).encoded()
             let output = try WalletCreateActionOutput(
-                lockingScript: signed.bytes,
+                lockingScript: id.lockingScript,
                 satoshis: 0,
                 outputDescription: "BAP ID",
                 basket: OneSatConstants.bapBasket,
-                customInstructions: instructions,
-                tags: ["type:id", "bapId:\(bapId)", "seq:1"]
+                customInstructions: id.customInstructions,
+                tags: id.tags
             )
             let result = try await TrackedAction.execute(
                 ctx,
@@ -247,29 +375,95 @@ public enum Identity {
         }
     }
 
-    private enum Failure: String {
+    private enum Failure: String, LocalizedError {
         case identityExists = "identity-exists: already published"
         case noTxid = "no-txid-returned"
         case noProfile = "no-profile: no alias output in wallet"
         case noLockingScript = "malformed-alias: winner has no locking script"
         case noBitcom = "malformed-alias: no bitcom structure found"
         case noBap = "malformed-alias: no BAP protocol found in bitcom"
+        case noSigningKey =
+            "No BAP identity published — cannot resolve current signing key. Publish an identity before signing."
+        case profileNotObject = "profile-must-be-json-object"
+
+        var errorDescription: String? { rawValue }
     }
 
-    private static func derivedKey(_ identity: PrivateKey, index: Int) throws -> PrivateKey {
+    private struct IdOutput {
+        let lockingScript: [UInt8]
+        let tags: [String]
+        let customInstructions: String
+    }
+
+    /// Same ID-output bytes `publish` used to build inline. One builder, two callers.
+    private static func buildIdOutput(
+        identity: PrivateKey,
+        bapId: String,
+        seq: Int,
+        signerKeyID: String,
+        declareKeyID: String
+    ) throws -> IdOutput {
+        let declareAddress = try derivedAddress(identity, keyID: declareKeyID).description
+        let script = try pushReturnScript([
+            Array(OneSatConstants.bapBitcomAddress.utf8),
+            Array("ID".utf8),
+            Array(bapId.utf8),
+            Array(declareAddress.utf8),
+        ])
+        let signed = try AIPSign.apply(
+            to: script,
+            signingKey: try derivedKey(identity, keyID: signerKeyID)
+        )
+        let instructions = try CustomInstructions(
+            protocolID: try OneSatConstants.bapProtocolID,
+            keyID: declareKeyID
+        ).encoded()
+        return IdOutput(
+            lockingScript: signed.bytes,
+            tags: ["type:id", "bapId:\(bapId)", "seq:\(seq)"],
+            customInstructions: instructions
+        )
+    }
+
+    private static func pushReturnScript(_ chunks: [[UInt8]]) throws -> Script {
+        var script = try Script(bytes: [], maximumByteCount: ActionScript.maximumByteCount)
+        try script.append(.zero, maximumScriptByteCount: ActionScript.maximumByteCount)
+        try script.append(.return, maximumScriptByteCount: ActionScript.maximumByteCount)
+        for chunk in chunks {
+            try script.appendPushData(chunk, maximumScriptByteCount: ActionScript.maximumByteCount)
+        }
+        return script
+    }
+
+    private static func isJSONObject(_ raw: String) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) else {
+            return false
+        }
+        return object is [String: Any]
+    }
+
+    private static func derivedKey(_ identity: PrivateKey, keyID: String) throws -> PrivateKey {
         try WalletKeyDeriver(rootKey: identity).derivePrivateKey(
             protocolID: try OneSatConstants.bapProtocolID,
-            keyID: try WalletKeyID(signingKeyID(index)),
+            keyID: try WalletKeyID(keyID),
             counterparty: .self
         )
     }
 
-    private static func derivedAddress(_ identity: PrivateKey, index: Int) throws -> Address {
+    private static func derivedKey(_ identity: PrivateKey, index: Int) throws -> PrivateKey {
+        try derivedKey(identity, keyID: signingKeyID(index))
+    }
+
+    private static func derivedAddress(_ identity: PrivateKey, keyID: String) throws -> Address {
         Address(
-            publicKey: try derivedKey(identity, index: index).publicKey,
+            publicKey: try derivedKey(identity, keyID: keyID).publicKey,
             network: .mainnet,
             compressed: true
         )
+    }
+
+    private static func derivedAddress(_ identity: PrivateKey, index: Int) throws -> Address {
+        try derivedAddress(identity, keyID: signingKeyID(index))
     }
 
     private static func parseCandidate(_ output: WalletOutput) -> AliasCandidate {
