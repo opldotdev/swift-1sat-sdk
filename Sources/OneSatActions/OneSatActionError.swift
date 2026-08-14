@@ -31,6 +31,7 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case malformedPurchaseTransaction
     case missingSourceTxid
     case inputNotInTransaction(outpoint: String)
+    case mneeClientRequired
 
     /// Exact `error` strings from `@1sat/actions`.
     public var wireMessage: String {
@@ -99,6 +100,8 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "sourceTXID is required"
         case .inputNotInTransaction(let outpoint):
             return "input-not-in-transaction-\(outpoint)"
+        case .mneeClientRequired:
+            return "MNEE client not available — services required"
         }
     }
 }
