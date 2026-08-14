@@ -2,7 +2,7 @@ import BSVKeys
 import BSVScript
 
 enum ActionScript {
-    static let maximumByteCount = 100_000
+    static let maximumByteCount = 1_100_000
 
     static func payToPublicKeyHash(_ address: Address) throws -> Script {
         try Script.payToPublicKeyHash(address, maximumByteCount: maximumByteCount)

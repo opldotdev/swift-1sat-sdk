@@ -5,7 +5,7 @@ import BSVScript
 ///
 /// Field order is the script. Callers pass pairs in the same order `Object.entries` would.
 public enum MapSuffix {
-    private static let maximumByteCount = 100_000
+    private static let maximumByteCount = 1_100_000
 
     public static func set(_ fields: [(String, String)]) throws -> Script {
         var script = try Script(bytes: [], maximumByteCount: maximumByteCount)

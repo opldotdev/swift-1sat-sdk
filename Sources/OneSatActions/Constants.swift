@@ -26,8 +26,10 @@ public enum OneSatConstants {
     public static let p1satTokenLabelPrefix = "p 1sat bsv21 "
     /// `MAP_PREFIX`
     public static let mapPrefix = "1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5"
-    /// `MAX_INSCRIPTION_BYTES`
-    public static let maxInscriptionBytes = 100_000
+    /// Upper bound on inscription *content*. The envelope, MAP, and SIGMA
+    /// suffix sit on top of this. Storage script limit is 1 MiB, so this
+    /// leaves room for that wrapper.
+    public static let maxInscriptionBytes = 900_000
     /// `P1SAT_PROTOCOL` security level. The name is `p1satProtocolName`.
     public static let p1satProtocolSecurityLevel: UInt8 = 0
     /// `P1SAT_PROTOCOL` name.

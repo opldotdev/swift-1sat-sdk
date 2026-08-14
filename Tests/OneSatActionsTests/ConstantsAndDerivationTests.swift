@@ -13,7 +13,7 @@ final class ConstantsAndDerivationTests: XCTestCase {
         XCTAssertEqual(OneSatConstants.p1satProtocolName, "p 1sat")
         XCTAssertEqual(OneSatConstants.p1satProtocolSecurityLevel, 0)
         XCTAssertEqual(OneSatConstants.lockKeyID, "lock")
-        XCTAssertEqual(OneSatConstants.maxInscriptionBytes, 100_000)
+        XCTAssertEqual(OneSatConstants.maxInscriptionBytes, 900_000)
         XCTAssertEqual(OneSatConstants.mapPrefix, "1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5")
         XCTAssertEqual(
             OneSatConstants.inputAssetLabel(basket: "p 1sat ordinals", id: "ab_0"),

@@ -5,7 +5,7 @@ import BSVScript
 enum TemplateScript {
     /// Ceiling used when assembling or parsing a template script.
     /// Matches 1sat-stack `maxScriptSizePolicy` so a 100_000-byte inscription plus envelope fits.
-    static let maximumByteCount = 1_000_000
+    static let maximumByteCount = 1_100_000
 
     static func empty() throws -> Script {
         try Script(bytes: [], maximumByteCount: maximumByteCount)
