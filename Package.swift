@@ -6,9 +6,9 @@ import PackageDescription
 /// BRC-100 wallet. This is the Swift counterpart of `b-open-io/1sat-sdk` and the `@1sat/*` packages,
 /// the third layer above `swift-sdk` (primitives) and `swift-wallet-toolbox` (the generic wallet).
 ///
-/// It starts with sweep, because sweep is the first thing a real wallet needs from this layer:
-/// moving coins from a legacy or foreign key into the wallet's own scheme. The module grows toward
-/// the full `@1sat/actions` surface — ordinals, BSV21, OpNS, MNEE — one boundary at a time.
+/// Sweep still moves coins from a legacy or foreign key into the wallet's own scheme — the first
+/// thing a real wallet needs from this layer. The tree already ships the `@1sat/actions` surface
+/// — ordinals, BSV21, OpNS, MNEE — alongside templates, addresses, and clients.
 let publicModules = [
     "OneSatClient",
     "OneSatSweep",
@@ -62,8 +62,9 @@ let package = Package(
             ]
         ),
 
-        // 1Sat locking scripts: inscription envelope, OrdLock, BSV-21, and CLTV time-lock.
-        // Byte-exact with `@1sat/templates`. Unlock templates live with the action families.
+        // 1Sat locking scripts: inscription envelope, OrdLock, BSV-20, BSV-21, Cosign, BAP,
+        // BitCom, and CLTV time-lock. Byte-exact with `@1sat/templates`. Unlock templates live
+        // with the action families.
         .target(
             name: "OneSatTemplates",
             dependencies: [
