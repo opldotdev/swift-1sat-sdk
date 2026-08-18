@@ -24,20 +24,24 @@ It is the Swift counterpart of [`b-open-io/1sat-sdk`](https://github.com/b-open-
 
 ## Status
 
-Early. The first modules cover **sweep** — moving coins from a foreign or legacy key into a
-wallet's own address — and read-only ordinal and BSV-21 balances for wallet displays. Sweep is
-generic over source, destination, and UTXO provider; the client reads categorised owner outputs
-from the 1Sat indexer.
+The tree now has more than sweep and read-only balances. **Sweep** still moves coins from a
+foreign or legacy key into a wallet's own address — generic over source, destination, and UTXO
+provider; the client still reads categorised owner outputs from the 1Sat indexer. Alongside that:
+P1SAT deposit addresses, 1Sat locking templates, MNEE and OpNS clients, and the `@1sat/actions`
+families (ordinals, inscriptions, token transfers, locks, collections, identity, OpNS, MNEE,
+and asset sweep onto P1SAT outputs).
 
-Next, in the order the wallet app needs them: 1Sat ordinal templates and transfer actions, then
-BSV-21 transfers, OpNS, and MNEE.
+Sweep stays **partial by design**. Further `@1sat` surface lands as the wallet needs it.
 
 ## Modules
 
 | Module | Responsibility |
 |---|---|
-| `OneSatClient` | Read an address's ordinals and aggregate BSV-21 token balances |
+| `OneSatClient` | Read-only ordinals and BSV-21 balances; MNEE and OpNS clients; 1sat-stack services |
 | `OneSatSweep` | Categorise an address, sweep its fundable BSV, report the rest |
+| `OneSatTemplates` | Locking scripts: inscription, OrdLock, BSV-20/21, Cosign, TimeLock, BAP, BitCom |
+| `OneSatAddresses` | P1SAT deposit addresses (`[0, "p 1sat"]`, keyID `"1sat <index>"`) |
+| `OneSatActions` | Action families from `@1sat/actions`, including spend-side unlock templates |
 | `OneSat` | Umbrella, re-exporting the above |
 
 ## Sweep
