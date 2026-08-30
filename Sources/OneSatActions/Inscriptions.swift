@@ -1,4 +1,5 @@
 import Foundation
+import BSVCore
 import BSVKeys
 import BSVScript
 import BSVTransaction
@@ -60,11 +61,11 @@ public enum Inscriptions {
         map: [(String, String)] = []
     ) throws -> Script {
         let suffix = try MapSuffix.appending(map, to: recipient)
-        return try Inscription.create(
+        return try Inscription.compose(
             content: content,
             contentType: contentType,
             scriptSuffix: suffix
-        ).lock()
+        )
     }
 
     public static func prepare(
@@ -73,6 +74,12 @@ public enum Inscriptions {
         network: BitcoinNetwork = .mainnet,
         keyID: String? = nil
     ) throws -> PreparedInscription {
+        if request.contentType.isEmpty || request.contentType.utf8.count > 255 {
+            throw OneSatActionError.inscriptionContentTypeInvalid
+        }
+        if request.content.isEmpty {
+            throw OneSatActionError.inscriptionContentEmpty
+        }
         if request.content.count > OneSatConstants.maxInscriptionBytes {
             throw OneSatActionError.inscriptionTooLarge(bytes: request.content.count)
         }
@@ -90,17 +97,31 @@ public enum Inscriptions {
             recipient: resolved.lockingScript,
             map: request.map
         )
-        var tags = ["type:\(request.contentType)", "origin"]
-        if let name = request.map.first(where: { $0.0 == "name" })?.1 {
-            tags.append("name:\(name)")
+        let typeBase = request.contentType.split(separator: ";", maxSplits: 1)
+            .first.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            ?? request.contentType
+        let hash = try Inscription.create(
+            content: request.content,
+            contentType: request.contentType
+        ).contentHash
+        var tags = ["type:\(typeBase)", "origin", "sha256:\(Hex.encode(hash.bytes))"]
+        if let app = request.map.first(where: { $0.0 == "app" })?.1, !app.isEmpty {
+            tags.append("app:\(app)")
         }
-        let instructions: CustomInstructions?
+        let instructions: String?
         if let resolvedInstructions = resolved.customInstructions {
             let name = request.map.first(where: { $0.0 == "name" })?.1
-            instructions = try CustomInstructions(
+            let counterparty: String?
+            switch resolvedInstructions.counterparty {
+            case .self: counterparty = nil
+            case .anyone: counterparty = "anyone"
+            case .publicKey(let key): counterparty = Hex.encode(key.compressedBytes)
+            }
+            instructions = OrdinalRemittance.buildCustomInstructions(
                 protocolID: resolvedInstructions.protocolID,
                 keyID: resolvedInstructions.keyID,
-                counterparty: resolvedInstructions.counterparty,
+                counterparty: counterparty,
+                tags: tags,
                 name: name.map { String($0.prefix(64)) }
             )
         } else {
@@ -109,7 +130,7 @@ public enum Inscriptions {
         return PreparedInscription(
             lockingScript: lockingScript,
             tags: tags,
-            customInstructions: instructions?.encoded(),
+            customInstructions: instructions,
             keyID: resolved.customInstructions?.keyID
         )
     }
@@ -192,12 +213,28 @@ public enum Inscriptions {
         )
         guard let anchorTxid = anchor.txid else { throw OneSatActionError.anchorNoTxid }
 
-        let sigmaScript = try await Sigma.apply(
+        let sealed = try await Sigma.applyWithCreator(
             ctx,
             to: prepared.lockingScript,
             inputTxid: anchorTxid,
             inputVout: 0
         )
+        let tags = prepared.tags.filter { !$0.hasPrefix("creator:") }
+            + ["creator:\(sealed.creator)"]
+        let customInstructions: String?
+        if let keyID = prepared.keyID {
+            let sourceName = prepared.customInstructions.flatMap {
+                (try? CustomInstructions.parse($0))?.name
+            }
+            customInstructions = OrdinalRemittance.buildCustomInstructions(
+                protocolID: try OneSatConstants.p1satProtocolID,
+                keyID: keyID,
+                tags: tags,
+                name: sourceName
+            )
+        } else {
+            customInstructions = prepared.customInstructions
+        }
 
         let inputBEEF: BEEF?
         if let tx = anchor.tx {
@@ -219,12 +256,12 @@ public enum Inscriptions {
             ],
             outputs: [
                 try WalletCreateActionOutput(
-                    lockingScript: sigmaScript.bytes,
+                    lockingScript: sealed.script.bytes,
                     satoshis: 1,
                     outputDescription: "Inscription",
                     basket: OneSatConstants.ordinalsBasket,
-                    customInstructions: prepared.customInstructions,
-                    tags: prepared.tags
+                    customInstructions: customInstructions,
+                    tags: tags
                 ),
             ],
             options: TrackedAction.Options(

@@ -71,6 +71,20 @@ public struct Inscription: Equatable, Sendable {
         )
     }
 
+    /// Envelope first, then `scriptSuffix` (P2PKH ± MAP). Write-side twin of `decode`.
+    /// Port of `@1sat/templates` `buildInscriptionScript`.
+    public static func compose(
+        content: [UInt8],
+        contentType: String,
+        scriptSuffix: Script
+    ) throws -> Script {
+        try create(
+            content: content,
+            contentType: contentType,
+            scriptSuffix: scriptSuffix
+        ).lock()
+    }
+
     /// `[prefix] OP_0 OP_IF "ord" OP_1 <type> [OP_3 <parent>] OP_0 <content> OP_ENDIF [suffix]`
     public func lock() throws -> Script {
         var script = try scriptPrefix ?? TemplateScript.empty()

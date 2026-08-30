@@ -15,14 +15,14 @@ import XCTest
 
 final class SyncAddressesTests: XCTestCase {
     private let pinnedInstructions =
-        "{\"protocolID\":[0,\"p 1sat\"],\"keyID\":\"1sat 0\",\"counterparty\":\"self\"}"
+        "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"1sat 0\",\"counterparty\":\"self\"}"
 
     func test_customInstructionsEmitsSelfWhenAsked() throws {
         let encoded = try CustomInstructions(keyID: "1sat 0")
             .encoded(includeSelfCounterparty: true)
         XCTAssertEqual(encoded, pinnedInstructions)
         let defaultEncoded = try CustomInstructions(keyID: "1sat 0").encoded()
-        XCTAssertEqual(defaultEncoded, "{\"protocolID\":[0,\"p 1sat\"],\"keyID\":\"1sat 0\"}")
+        XCTAssertEqual(defaultEncoded, "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"1sat 0\"}")
     }
 
     func test_depositBasketName() {

@@ -30,12 +30,13 @@ public enum SweepDeposit {
             return Result(swept: 0)
         }
 
-        let inputs: [(outpoint: Outpoint, keyID: String)] = listed.outputs.compactMap { output in
-            guard let text = output.customInstructions,
-                  let parsed = try? CustomInstructions.parse(text)
-            else { return nil }
-            return (output.outpoint, parsed.keyID)
-        }
+        let inputs: [(outpoint: Outpoint, protocolID: WalletProtocolID, keyID: String)] =
+            listed.outputs.compactMap { output in
+                guard let text = output.customInstructions,
+                      let parsed = try? CustomInstructions.parse(text)
+                else { return nil }
+                return (output.outpoint, parsed.protocolID, parsed.keyID)
+            }
         if inputs.isEmpty {
             return Result(swept: 0)
         }
@@ -64,7 +65,7 @@ public enum SweepDeposit {
                     identity: ctx.identity,
                     transaction: transaction,
                     inputIndex: index,
-                    protocolID: try OneSatConstants.p1satProtocolID,
+                    protocolID: input.protocolID,
                     keyID: input.keyID,
                     counterparty: .self
                 )

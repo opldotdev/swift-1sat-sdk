@@ -2,9 +2,10 @@ import BSVKeys
 
 /// Deposit addresses for a 1Sat identity. This type is the Swift protocol owner.
 ///
-/// It matches `@1sat/actions` `deriveDepositAddresses`: protocol `[0, "p 1sat"]`, key identifier
+/// It matches `@1sat/actions` `deriveDepositAddresses`: protocol `[0, "onesat"]`, key identifier
 /// `"<prefix> <index>"`. The default prefix is `"1sat"` so every wallet that binds the same
-/// identity key derives the same default addresses.
+/// identity key derives the same default addresses. `"1sat"` is 4 characters; BRC-100 protocol
+/// names must be at least 5, so the protocol string is `"onesat"`.
 ///
 /// `ToolboxBRC29.OneSatDeposit` is a byte-identical copy of the default-prefix case. The toolbox
 /// cannot import this module: `swift-1sat-sdk` depends on `swift-wallet-toolbox`, so the reverse
@@ -13,9 +14,9 @@ import BSVKeys
 public enum DepositAddresses {
     public static let defaultPrefix = "1sat"
 
-    /// BRC-43 invoice number for a deposit index: `0-p 1sat-<prefix> <index>`.
+    /// BRC-43 invoice number for a deposit index: `0-onesat-<prefix> <index>`.
     public static func invoiceNumber(prefix: String = defaultPrefix, index: Int) -> String {
-        "0-p 1sat-\(prefix) \(index)"
+        "0-onesat-\(prefix) \(index)"
     }
 
     public static func key(

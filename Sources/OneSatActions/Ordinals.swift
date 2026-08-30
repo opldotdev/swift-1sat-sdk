@@ -1,3 +1,4 @@
+import BSVCore
 import BSVKeys
 import BSVScript
 import BSVTransaction
@@ -13,10 +14,16 @@ public enum Ordinals {
         public let ordinal: WalletOutput
         public let counterparty: PublicKey?
         public let address: String?
-        /// TS `counterparty: 'self'` with `forSelf: false`, keyID = source outpoint.
+        /// TS `counterparty: 'self'` with `forSelf: true`, keyID = source outpoint.
         public let toSelf: Bool
         public let map: [(String, String)]
         public let extraTags: [String]
+        /// Optional new inscription payload. Same coin, same origin, new content.
+        public let inscription: InscriptionPayload?
+        /// Sign a new inscription envelope with the current BAP identity.
+        public let signWithBAP: Bool
+        /// Internal family override used by OpNS; normal ordinals always use `1sat`.
+        public let basket: String?
 
         public init(
             ordinal: WalletOutput,
@@ -24,7 +31,10 @@ public enum Ordinals {
             address: String? = nil,
             toSelf: Bool = false,
             map: [(String, String)] = [],
-            extraTags: [String] = []
+            extraTags: [String] = [],
+            inscription: InscriptionPayload? = nil,
+            signWithBAP: Bool = false,
+            basket: String? = nil
         ) {
             self.ordinal = ordinal
             self.counterparty = counterparty
@@ -32,6 +42,19 @@ public enum Ordinals {
             self.toSelf = toSelf
             self.map = map
             self.extraTags = extraTags
+            self.inscription = inscription
+            self.signWithBAP = signWithBAP
+            self.basket = basket
+        }
+    }
+
+    public struct InscriptionPayload: Sendable {
+        public let content: [UInt8]
+        public let contentType: String
+
+        public init(content: [UInt8], contentType: String) {
+            self.content = content
+            self.contentType = contentType
         }
     }
 
@@ -188,6 +211,44 @@ public enum Ordinals {
         return (next, basket)
     }
 
+    /// `ordinalSeedTags` from `packages/actions/src/utils/ordinalSeedTags.ts`.
+    public static func seedTags(source: WalletOutput) -> [String] {
+        var out: [String] = []
+        for tag in source.tags ?? [] {
+            if tag == "origin" {
+                let promoted = "origin:\(Bsv21Remittance.formatOrdinalOutpoint(source.outpoint.description))"
+                if !out.contains(promoted) { out.append(promoted) }
+                continue
+            }
+            if tag.hasPrefix("origin:") {
+                let normalized = "origin:\(Bsv21Remittance.formatOrdinalOutpoint(String(tag.dropFirst(7))))"
+                if !out.contains(normalized) { out.append(normalized) }
+                continue
+            }
+            if tag.hasPrefix("content:") {
+                let normalized = "content:\(Bsv21Remittance.formatOrdinalOutpoint(String(tag.dropFirst(8))))"
+                if !out.contains(normalized) { out.append(normalized) }
+                continue
+            }
+            if tag.hasPrefix("collection:") {
+                let normalized = "collection:\(Bsv21Remittance.formatOrdinalOutpoint(String(tag.dropFirst(11))))"
+                if !out.contains(normalized) { out.append(normalized) }
+                continue
+            }
+            if tag.hasPrefix("type:") || tag.hasPrefix("app:") || tag.hasPrefix("creator:") {
+                if !out.contains(tag) { out.append(tag) }
+            }
+        }
+        let types = out.filter { $0.hasPrefix("type:") }
+        if types.count > 1 {
+            let full = types.filter { $0.contains("/") }
+            if !full.isEmpty {
+                return out.filter { !$0.hasPrefix("type:") || full.contains($0) }
+            }
+        }
+        return out
+    }
+
     public static func buildTransfer(
         _ ctx: OneSatContext,
         _ request: TransferRequest
@@ -203,6 +264,9 @@ public enum Ordinals {
             if !item.toSelf, item.counterparty == nil, item.address == nil {
                 throw OneSatActionError.mustProvideCounterpartyOrAddress
             }
+            if item.signWithBAP, item.inscription == nil {
+                throw OneSatActionError.signWithBapRequiresInscription
+            }
             let outpoint = item.ordinal.outpoint.description
             if let sourceType = item.ordinal.tags?.first(where: { $0.hasPrefix("type:") })?
                 .dropFirst(5),
@@ -217,7 +281,7 @@ public enum Ordinals {
                     identity: ctx.identity,
                     keyID: outpoint,
                     counterparty: .self,
-                    forSelf: false,
+                    forSelf: true,
                     network: ctx.chain.network
                 ).description
             } else if let counterparty = item.counterparty {
@@ -233,9 +297,27 @@ public enum Ordinals {
                 throw OneSatActionError.mustProvideCounterpartyOrAddress
             }
 
-            let resolved = resolveOrdinalTags(outpoint: outpoint, tags: item.ordinal.tags)
-            var tags = resolved.tags
+            var inscriptionContent: [UInt8]?
+            var inscriptionType: String?
+            if let payload = item.inscription {
+                if payload.contentType.isEmpty || payload.contentType.utf8.count > 255 {
+                    throw OneSatActionError.inscriptionContentTypeInvalid
+                }
+                if payload.content.isEmpty {
+                    throw OneSatActionError.inscriptionContentEmpty
+                }
+                if payload.content.count > OneSatConstants.maxInscriptionBytes {
+                    throw OneSatActionError.inscriptionTooLarge(bytes: payload.content.count)
+                }
+                inscriptionContent = payload.content
+                inscriptionType = payload.contentType
+            }
+
+            // BRC-147 identity is the first envelope. Reinscription changes the
+            // current bytes but preserves the source origin and type tags.
+            var tags = seedTags(source: item.ordinal)
             tags.append(contentsOf: item.extraTags)
+            let basket = item.basket ?? OneSatConstants.ordinalsBasket
 
             try inputs.append(
                 WalletCreateActionInput(
@@ -253,7 +335,21 @@ public enum Ordinals {
                 )
             }
 
-            let lockingScript = try transferLockingScript(address: recipient, map: item.map)
+            let recipientScript = try ActionScript.payToPublicKeyHash(recipient)
+            var lockingScript: Script
+            if let inscriptionContent, let inscriptionType {
+                lockingScript = try Inscriptions.lockingScript(
+                    content: inscriptionContent,
+                    contentType: inscriptionType,
+                    recipient: recipientScript,
+                    map: item.map
+                )
+            } else {
+                lockingScript = try transferLockingScript(address: recipient, map: item.map)
+            }
+            if item.signWithBAP {
+                lockingScript = try Sigma.appendPlaceholder(to: lockingScript, vin: inputs.count - 1)
+            }
             if item.toSelf {
                 var sourceName: String?
                 if let instructions = item.ordinal.customInstructions,
@@ -265,12 +361,14 @@ public enum Ordinals {
                     WalletCreateActionOutput(
                         lockingScript: lockingScript.bytes,
                         satoshis: 1,
-                        outputDescription: "Ordinal transfer",
-                        basket: resolved.basket,
-                        customInstructions: try CustomInstructions(
+                        outputDescription: "Ordinal self-transfer",
+                        basket: basket,
+                        customInstructions: OrdinalRemittance.buildCustomInstructions(
+                            protocolID: try OneSatConstants.p1satProtocolID,
                             keyID: outpoint,
+                            tags: tags,
                             name: sourceName
-                        ).encoded(),
+                        ),
                         tags: tags
                     )
                 )
@@ -319,12 +417,48 @@ public enum Ordinals {
     ) async -> ActionResult {
         do {
             let prepared = try buildTransfer(ctx, request)
+            var outputs = prepared.outputs
+            for (index, item) in request.transfers.enumerated() where item.signWithBAP {
+                let placeholder = try Script(
+                    bytes: outputs[index].lockingScript,
+                    maximumByteCount: ActionScript.maximumByteCount
+                )
+                let sealed = try await Sigma.sealPlaceholder(
+                    ctx,
+                    in: placeholder,
+                    inputTxid: item.ordinal.outpoint.transactionID.displayHex,
+                    inputVout: item.ordinal.outpoint.outputIndex,
+                    refVin: index
+                )
+                let tags = outputs[index].tags.filter { !$0.hasPrefix("creator:") }
+                    + ["creator:\(sealed.creator)"]
+                var sourceName: String?
+                if let instructions = outputs[index].customInstructions {
+                    sourceName = (try? CustomInstructions.parse(instructions))?.name
+                }
+                let customInstructions = item.toSelf
+                    ? OrdinalRemittance.buildCustomInstructions(
+                        protocolID: try OneSatConstants.p1satProtocolID,
+                        keyID: item.ordinal.outpoint.description,
+                        tags: tags,
+                        name: sourceName
+                    )
+                    : outputs[index].customInstructions
+                outputs[index] = try WalletCreateActionOutput(
+                    lockingScript: sealed.script.bytes,
+                    satoshis: outputs[index].satoshis,
+                    outputDescription: outputs[index].outputDescription,
+                    basket: outputs[index].basket,
+                    customInstructions: customInstructions,
+                    tags: tags
+                )
+            }
             return try await TrackedAction.execute(
                 ctx,
                 description: prepared.description,
                 inputBEEF: try TrackedAction.parseInputBEEF(request.inputBEEF),
                 inputs: prepared.inputs,
-                outputs: prepared.outputs,
+                outputs: outputs,
                 labels: prepared.labels,
                 options: TrackedAction.Options(randomizeOutputs: false)
             ) { transaction in
@@ -355,9 +489,9 @@ public enum Ordinals {
             payAddress: request.payAddress,
             price: request.price
         )
-        var resolved = resolveOrdinalTags(outpoint: outpoint, tags: request.ordinal.tags)
-        resolved.tags.append("ordlock")
-        resolved.tags.append("price:\(request.price)")
+        var tags = seedTags(source: request.ordinal)
+        tags.append("ordlock")
+        tags.append("price:\(request.price)")
 
         var sourceName: String?
         if let instructions = request.ordinal.customInstructions,
@@ -390,13 +524,14 @@ public enum Ordinals {
                     lockingScript: lockingScript.bytes,
                     satoshis: 1,
                     outputDescription: "List ordinal for \(request.price) sats",
-                    basket: resolved.basket,
-                    customInstructions: try CustomInstructions(
+                    basket: OneSatConstants.ordinalsBasket,
+                    customInstructions: OrdinalRemittance.buildCustomInstructions(
                         protocolID: try OneSatConstants.p1satProtocolID,
                         keyID: outpoint,
+                        tags: tags,
                         name: sourceName
-                    ).encoded(),
-                    tags: resolved.tags
+                    ),
+                    tags: tags
                 ),
             ],
             labels: labels,
@@ -450,7 +585,13 @@ public enum Ordinals {
             outpoint: newKeyID,
             network: ctx.chain.network
         )
-        let resolved = resolveOrdinalTags(outpoint: outpoint, tags: request.listing.tags)
+        let tags = seedTags(source: request.listing)
+        var sourceName: String?
+        if let instructions = request.listing.customInstructions,
+           let source = try? CustomInstructions.parse(instructions)
+        {
+            sourceName = source.name
+        }
         let inputID = OneSatConstants.assetID(in: request.listing.tags)
         let labels = inputID.map {
             [OneSatConstants.inputAssetLabel(basket: OneSatConstants.ordinalsBasket, id: $0)]
@@ -470,12 +611,14 @@ public enum Ordinals {
                     lockingScript: try ActionScript.payToPublicKeyHash(cancel).bytes,
                     satoshis: 1,
                     outputDescription: "Cancelled listing",
-                    basket: resolved.basket,
-                    customInstructions: try CustomInstructions(
+                    basket: OneSatConstants.ordinalsBasket,
+                    customInstructions: OrdinalRemittance.buildCustomInstructions(
                         protocolID: try OneSatConstants.p1satProtocolID,
-                        keyID: newKeyID
-                    ).encoded(),
-                    tags: resolved.tags
+                        keyID: newKeyID,
+                        tags: tags,
+                        name: sourceName
+                    ),
+                    tags: tags
                 ),
             ],
             labels: labels,
@@ -552,11 +695,12 @@ public enum Ordinals {
                 satoshis: 1,
                 outputDescription: "Purchased ordinal",
                 basket: resolved.basket,
-                customInstructions: try CustomInstructions(
+                customInstructions: OrdinalRemittance.buildCustomInstructions(
                     protocolID: try OneSatConstants.p1satProtocolID,
                     keyID: outpointText,
+                    tags: resolved.tags,
                     name: name
-                ).encoded(),
+                ),
                 tags: resolved.tags
             ),
         ]

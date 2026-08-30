@@ -91,15 +91,16 @@ public enum Tokens {
         amount: UInt64,
         validOutpoints: Set<String>?
     ) throws -> (selected: [SelectedInput], totalIn: UInt64) {
+        let wanted = Bsv21Remittance.normalizeTokenId(tokenId)
         var selected: [SelectedInput] = []
         var totalIn: UInt64 = 0
         for output in outputs {
             if totalIn >= amount { break }
-            guard let idTag = output.tags?.first(where: { $0.hasPrefix("bsv21:") }),
-                  idTag.dropFirst(6) == tokenId
+            let fields = Bsv21Remittance.fields(from: output)
+            guard let id = fields.tokenId,
+                  Bsv21Remittance.normalizeTokenId(id) == wanted
             else { continue }
-            guard let amtTag = output.tags?.first(where: { $0.hasPrefix("amt:") }),
-                  let utxoAmount = UInt64(amtTag.dropFirst(4))
+            guard let amtText = fields.amt, let utxoAmount = UInt64(amtText), utxoAmount > 0
             else { continue }
             if let validOutpoints, !validOutpoints.contains(output.outpoint.description) {
                 continue
@@ -130,12 +131,26 @@ public enum Tokens {
         let totalAmount = resolvedAmounts.reduce(0, +)
         guard totalIn >= totalAmount else { throw OneSatActionError.insufficientTokens }
 
+        let fromTip = selected.first.map { Bsv21Remittance.fields(from: $0.output) }
+        let tokenTags = Bsv21Remittance.filterTags(tokenId: tokenId)
+        let protocolID = try OneSatConstants.p1satProtocolID
+        func tokenFields(amount: UInt64) -> Bsv21Remittance.Fields {
+            Bsv21Remittance.Fields(
+                id: tokenId,
+                amt: String(amount),
+                op: "transfer",
+                symbol: details.symbol ?? fromTip?.symbol,
+                decimals: String(details.decimals),
+                icon: details.icon ?? fromTip?.icon
+            )
+        }
+
         var outputs: [WalletCreateActionOutput] = []
         for (recipient, amount) in zip(recipients, resolvedAmounts) {
             let destination = try ResolveDestination.resolve(
                 identity: identity,
                 destination: recipient.destination,
-                protocolID: try OneSatConstants.p1satProtocolID,
+                protocolID: protocolID,
                 keyIDPrefix: tokenId,
                 network: network
             )
@@ -144,13 +159,35 @@ public enum Tokens {
                 amount: amount,
                 recipient: destination.lockingScript
             )
-            try outputs.append(
-                WalletCreateActionOutput(
-                    lockingScript: script.bytes,
-                    satoshis: 1,
-                    outputDescription: "Send \(amount) tokens"
+            let isSelf = recipient.destination.counterparty == .self
+                || destination.customInstructions?.counterparty == .self
+            if isSelf {
+                try outputs.append(
+                    WalletCreateActionOutput(
+                        lockingScript: script.bytes,
+                        satoshis: 1,
+                        outputDescription: "Send \(amount) tokens",
+                        basket: OneSatConstants.bsv21Basket,
+                        customInstructions: destination.customInstructions.map { instructions in
+                            Bsv21Remittance.buildCustomInstructions(
+                                token: tokenFields(amount: amount),
+                                protocolID: protocolID,
+                                keyID: instructions.keyID,
+                                counterparty: "self"
+                            )
+                        },
+                        tags: tokenTags
+                    )
                 )
-            )
+            } else {
+                try outputs.append(
+                    WalletCreateActionOutput(
+                        lockingScript: script.bytes,
+                        satoshis: 1,
+                        outputDescription: "Send \(amount) tokens"
+                    )
+                )
+            }
         }
 
         let change = totalIn - totalAmount
@@ -169,25 +206,19 @@ public enum Tokens {
                 amount: change,
                 recipient: ActionScript.payToPublicKeyHash(changeAddress)
             )
-            var tags = [
-                "bsv21:\(tokenId)",
-                "amt:\(change)",
-                "dec:\(details.decimals)",
-            ]
-            if let symbol = details.symbol { tags.append("sym:\(symbol)") }
-            if let icon = details.icon { tags.append("icon:\(icon)") }
             try outputs.append(
                 WalletCreateActionOutput(
                     lockingScript: changeScript.bytes,
                     satoshis: 1,
                     outputDescription: "Token change",
                     basket: OneSatConstants.bsv21Basket,
-                    customInstructions: try CustomInstructions(
-                        protocolID: try OneSatConstants.p1satProtocolID,
+                    customInstructions: Bsv21Remittance.buildCustomInstructions(
+                        token: tokenFields(amount: change),
+                        protocolID: protocolID,
                         keyID: changeKeyID,
-                        symbol: details.symbol
-                    ).encoded(),
-                    tags: tags
+                        counterparty: "self"
+                    ),
+                    tags: tokenTags
                 )
             )
         }
@@ -372,13 +403,7 @@ public enum Tokens {
                 forSelf: true,
                 network: ctx.chain.network
             )
-            var tags = [
-                "bsv21:\(request.tokenId)",
-                "amt:\(request.amount)",
-                "dec:\(details.decimals)",
-            ]
-            if let symbol = details.symbol { tags.append("sym:\(symbol)") }
-            if let icon = details.icon { tags.append("icon:\(icon)") }
+            let protocolID = try OneSatConstants.p1satProtocolID
             var outputs: [WalletCreateActionOutput] = [
                 try WalletCreateActionOutput(
                     lockingScript: try transferScript(
@@ -389,12 +414,20 @@ public enum Tokens {
                     satoshis: 1,
                     outputDescription: "Purchased tokens",
                     basket: OneSatConstants.bsv21Basket,
-                    customInstructions: try CustomInstructions(
-                        protocolID: try OneSatConstants.p1satProtocolID,
+                    customInstructions: Bsv21Remittance.buildCustomInstructions(
+                        token: Bsv21Remittance.Fields(
+                            id: request.tokenId,
+                            amt: String(request.amount),
+                            op: "transfer",
+                            symbol: details.symbol,
+                            decimals: String(details.decimals),
+                            icon: details.icon
+                        ),
+                        protocolID: protocolID,
                         keyID: keyID,
-                        symbol: details.symbol
-                    ).encoded(),
-                    tags: tags
+                        counterparty: "self"
+                    ),
+                    tags: Bsv21Remittance.filterTags(tokenId: request.tokenId)
                 ),
             ]
 
