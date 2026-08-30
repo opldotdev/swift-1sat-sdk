@@ -73,6 +73,129 @@ final class FamilyBuilderTests: XCTestCase {
         XCTAssertEqual(prepared.signers[0].keyID, ActionVectors.outpoint)
     }
 
+    func test_reinscribeUsesTheSameEnvelopeAsInscribe() throws {
+        let identity = try ActionVectors.identity()
+        let ctx = try dummyContext(identity: identity)
+        let content = Array("Hello, BSV!".utf8)
+        let ordinal = try walletOutput(
+            tags: ["type:image/png", "origin:\(ActionVectors.outpoint)", "id:deadbeef_0"],
+            instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
+        )
+        let prepared = try Ordinals.buildTransfer(
+            ctx,
+            Ordinals.TransferRequest(
+                transfers: [
+                    Ordinals.TransferItem(
+                        ordinal: ordinal,
+                        address: ActionVectors.templateAddress,
+                        map: [("name", "hello")],
+                        inscription: Ordinals.InscriptionPayload(
+                            content: content,
+                            contentType: "text/plain"
+                        )
+                    ),
+                ]
+            )
+        )
+        XCTAssertEqual(
+            Hex.encode(prepared.outputs[0].lockingScript),
+            ActionVectors.inscribeP2PKHMapSuffix
+        )
+        XCTAssertEqual(prepared.outputs[0].tags, [])
+    }
+
+    func test_reinscribeSelfKeepsOriginalIdentityTags() throws {
+        let identity = try ActionVectors.identity()
+        let ctx = try dummyContext(identity: identity)
+        let ordinal = try walletOutput(
+            tags: ["type:image/png", "origin:\(ActionVectors.outpoint)", "id:deadbeef_0"],
+            instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
+        )
+        let prepared = try Ordinals.buildTransfer(
+            ctx,
+            Ordinals.TransferRequest(
+                transfers: [
+                    Ordinals.TransferItem(
+                        ordinal: ordinal,
+                        toSelf: true,
+                        inscription: Ordinals.InscriptionPayload(
+                            content: Array("next".utf8),
+                            contentType: "text/plain"
+                        )
+                    ),
+                ]
+            )
+        )
+        XCTAssertEqual(prepared.outputs[0].basket, OneSatConstants.ordinalsBasket)
+        XCTAssertTrue(prepared.outputs[0].tags.contains("type:image/png"))
+        XCTAssertFalse(prepared.outputs[0].tags.contains("type:text/plain"))
+        XCTAssertTrue(prepared.outputs[0].tags.contains {
+            $0.hasPrefix("origin:")
+        })
+        XCTAssertFalse(prepared.outputs[0].tags.contains { $0.hasPrefix("sha256:") })
+        let ci = try XCTUnwrap(prepared.outputs[0].customInstructions)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(ci.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(
+            object["origin"] as? String,
+            Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint)
+        )
+    }
+
+    func test_reinscribeRejectsEmptyContent() throws {
+        let identity = try ActionVectors.identity()
+        let ctx = try dummyContext(identity: identity)
+        let ordinal = try walletOutput(
+            tags: ["type:image/png", "id:deadbeef_0"],
+            instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
+        )
+        XCTAssertThrowsError(
+            try Ordinals.buildTransfer(
+                ctx,
+                Ordinals.TransferRequest(
+                    transfers: [
+                        Ordinals.TransferItem(
+                            ordinal: ordinal,
+                            address: ActionVectors.payAddress,
+                            inscription: Ordinals.InscriptionPayload(
+                                content: [],
+                                contentType: "text/plain"
+                            )
+                        ),
+                    ]
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? OneSatActionError, .inscriptionContentEmpty)
+        }
+    }
+
+    func test_sigmaTransferRequiresInscription() throws {
+        let identity = try ActionVectors.identity()
+        let ctx = try dummyContext(identity: identity)
+        let ordinal = try walletOutput(
+            tags: ["type:image/png", "id:deadbeef_0"],
+            instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
+        )
+        XCTAssertThrowsError(
+            try Ordinals.buildTransfer(
+                ctx,
+                Ordinals.TransferRequest(
+                    transfers: [
+                        Ordinals.TransferItem(
+                            ordinal: ordinal,
+                            toSelf: true,
+                            signWithBAP: true
+                        ),
+                    ]
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? OneSatActionError, .signWithBapRequiresInscription)
+        }
+    }
+
     func test_inscribePrepareCapsSizeAndSetsBasketTags() throws {
         let identity = try ActionVectors.identity()
         XCTAssertThrowsError(
@@ -93,7 +216,14 @@ final class FamilyBuilderTests: XCTestCase {
                 destination: .address(ActionVectors.templateAddress)
             )
         )
-        XCTAssertEqual(prepared.tags, ["type:text/plain", "origin", "name:hello"])
+        XCTAssertEqual(
+            prepared.tags,
+            [
+                "type:text/plain",
+                "origin",
+                "sha256:b194e2edd2e49265f4615e5d95480bad2ad3ca474222c19c87cbdcf98f384762",
+            ]
+        )
         XCTAssertNil(prepared.customInstructions)
         XCTAssertEqual(prepared.lockingScript.hex, ActionVectors.inscribeP2PKHMapSuffix)
     }
@@ -196,19 +326,44 @@ final class FamilyBuilderTests: XCTestCase {
         XCTAssertEqual(prepared.change, 20)
         XCTAssertEqual(prepared.outputs.count, 3)
         XCTAssertEqual(prepared.outputs[1].basket, OneSatConstants.bsv21Basket)
-        XCTAssertTrue(prepared.outputs[1].tags.contains("amt:20"))
+        XCTAssertEqual(prepared.outputs[1].tags, ["bsv21:\(ActionVectors.tokenID)"])
+        XCTAssertFalse(prepared.outputs[1].tags.contains { $0.hasPrefix("amt:") })
+        let changeCI = Bsv21Remittance.parseCustomInstructions(prepared.outputs[1].customInstructions)
+        XCTAssertEqual(changeCI.fields?.amt, "20")
+        XCTAssertEqual(changeCI.fields?.id, ActionVectors.tokenID)
+        XCTAssertEqual(changeCI.fields?.symbol, "GOLD")
         XCTAssertEqual(prepared.outputs[2].satoshis, 2_000)
         XCTAssertTrue(prepared.labels.contains(OneSatConstants.tokenLabel(ActionVectors.tokenID)))
         XCTAssertEqual(prepared.description, "Send GOLD to 1 recipient")
     }
 
-    func test_trackedActionInjectsIdTagsAndDispatchLabel() throws {
+    func test_tokenSelectionPrefersCIAmountOverTags() throws {
+        let ci = Bsv21Remittance.buildCustomInstructions(
+            token: Bsv21Remittance.Fields(id: ActionVectors.tokenID, amt: "80"),
+            protocolID: try OneSatConstants.p1satProtocolID,
+            keyID: "tok-0"
+        )
+        let output = try walletOutput(
+            tags: ["bsv21:\(ActionVectors.tokenID)", "amt:1"],
+            instructions: ci
+        )
+        let selected = try Tokens.selectInputs(
+            outputs: [output],
+            tokenId: ActionVectors.tokenID,
+            amount: 80,
+            validOutpoints: nil
+        )
+        XCTAssertEqual(selected.totalIn, 80)
+        XCTAssertEqual(selected.selected[0].amount, 80)
+    }
+
+    func test_trackedActionReplacesIdTagsWithoutImplicitDispatchLabel() throws {
         let output = try WalletCreateActionOutput(
             lockingScript: [0x51],
             satoshis: 1,
             outputDescription: "Inscription",
             basket: OneSatConstants.ordinalsBasket,
-            tags: ["type:text/plain"]
+            tags: ["type:text/plain", "id:stale_9"]
         )
         let tracked = try TrackedAction.applyTracking(
             outputs: [output],
@@ -217,7 +372,7 @@ final class FamilyBuilderTests: XCTestCase {
             bypassP1Sat: false
         )
         XCTAssertEqual(tracked.outputs[0].tags, ["type:text/plain", "id:aabbccdd_0"])
-        XCTAssertEqual(tracked.labels, [OneSatConstants.p1satLabel])
+        XCTAssertEqual(tracked.labels, [])
     }
 
     func test_trackedActionRequestCarriesInputBEEF() throws {

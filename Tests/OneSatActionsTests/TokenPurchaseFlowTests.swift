@@ -192,11 +192,18 @@ final class TokenPurchaseFlowTests: XCTestCase {
 
         let tags = try XCTUnwrap(envelope.outputs[0]["tags"] as? [String])
         XCTAssertTrue(tags.contains("bsv21:\(ActionVectors.tokenID)"))
-        XCTAssertTrue(tags.contains("amt:500"))
-        XCTAssertTrue(tags.contains("dec:2"))
-        XCTAssertTrue(tags.contains("sym:GOLD"))
-        XCTAssertTrue(tags.contains("icon:icon_1"))
+        XCTAssertFalse(tags.contains { $0.hasPrefix("amt:") })
+        XCTAssertFalse(tags.contains { $0.hasPrefix("sym:") })
+        XCTAssertFalse(tags.contains { $0.hasPrefix("dec:") })
+        XCTAssertFalse(tags.contains { $0.hasPrefix("icon:") })
         XCTAssertEqual(tags.filter { $0.hasPrefix("id:") }.count, 1)
+        let ci = Bsv21Remittance.parseCustomInstructions(
+            envelope.outputs[0]["customInstructions"] as? String
+        )
+        XCTAssertEqual(ci.fields?.amt, "500")
+        XCTAssertEqual(ci.fields?.symbol, "GOLD")
+        XCTAssertEqual(ci.fields?.decimals, "2")
+        XCTAssertEqual(ci.fields?.icon, "icon_1")
 
         XCTAssertEqual((envelope.outputs[1]["satoshis"] as? NSNumber)?.uint64Value, envelope.payout.satoshis)
         XCTAssertEqual(envelope.outputs[1]["lockingScript"] as? String, envelope.payout.script.hex)
@@ -411,11 +418,19 @@ final class TokenPurchaseFlowTests: XCTestCase {
             amount: 500,
             recipient: ActionScript.payToPublicKeyHash(buyer)
         )
-        let expectedInstructions = try CustomInstructions(
+        let expectedInstructions = Bsv21Remittance.buildCustomInstructions(
+            token: Bsv21Remittance.Fields(
+                id: ActionVectors.tokenID,
+                amt: "500",
+                op: "transfer",
+                symbol: details.symbol,
+                decimals: String(details.decimals),
+                icon: details.icon
+            ),
             protocolID: try OneSatConstants.p1satProtocolID,
             keyID: keyID,
-            symbol: details.symbol
-        ).encoded()
+            counterparty: "self"
+        )
         let decoded = try XCTUnwrap(OrdLock.decode(fixture.listingScript))
         let payout = try Ordinals.payoutOutput(decoded.payout)
         return CapturedEnvelope(

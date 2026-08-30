@@ -46,7 +46,10 @@ public enum TrackedAction {
         return Hex.encode(bytes)
     }
 
-    /// Injects `id:<actionId>_<index>` on basketed outputs and the `p 1sat action` label.
+    /// Injects `id:<actionId>_<index>` on basketed outputs.
+    ///
+    /// The released local pipeline does not add a permission-module dispatch label;
+    /// that routing label is opt-in in the TypeScript implementation.
     public static func applyTracking(
         outputs: [WalletCreateActionOutput],
         labels: [String],
@@ -64,14 +67,11 @@ public enum TrackedAction {
                 outputDescription: output.outputDescription,
                 basket: output.basket,
                 customInstructions: output.customInstructions,
-                tags: output.tags + ["id:\(actionID)_\(index)"]
+                tags: output.tags.filter { !$0.hasPrefix("id:") }
+                    + ["id:\(actionID)_\(index)"]
             )
         }
-        var nextLabels = labels
-        if !nextLabels.contains(OneSatConstants.p1satLabel) {
-            nextLabels.append(OneSatConstants.p1satLabel)
-        }
-        return (tracked, nextLabels)
+        return (tracked, labels)
     }
 
     /// Parses caller BEEF bytes. Empty or absent is no graph.

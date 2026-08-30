@@ -5,6 +5,8 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case missingPayAddress
     case invalidPrice
     case inscriptionTooLarge(bytes: Int)
+    case inscriptionContentTypeInvalid
+    case inscriptionContentEmpty
     case noRecipients
     case amountMustBePositive
     case recipientMissingDestination
@@ -39,6 +41,10 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case invalidRef(ref: String)
     case invalidCollectionIdFormat(id: String)
     case noBapIdentity
+    case signWithBapRequiresInscription
+    case sigmaPlaceholderMissing
+    case moveBasketMissingBEEF(basket: String)
+    case moveBasketBasketsRequired
 
     /// Exact `error` strings from `@1sat/actions`.
     public var wireMessage: String {
@@ -55,6 +61,10 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "invalid-price"
         case .inscriptionTooLarge(let bytes):
             return "Inscription data too large: \(bytes) bytes (max \(OneSatConstants.maxInscriptionBytes))"
+        case .inscriptionContentTypeInvalid:
+            return "inscription-content-type-invalid"
+        case .inscriptionContentEmpty:
+            return "inscription-content-empty"
         case .noRecipients:
             return "no-recipients"
         case .amountMustBePositive:
@@ -123,6 +133,14 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "Invalid collectionId format: \(id)"
         case .noBapIdentity:
             return "No BAP identity published — cannot resolve current signing key. Publish an identity before signing."
+        case .signWithBapRequiresInscription:
+            return "sign-with-bap-requires-inscription"
+        case .sigmaPlaceholderMissing:
+            return "sigma seal: no zeroed placeholder tape on the script"
+        case .moveBasketMissingBEEF(let basket):
+            return "moveBasket: listOutputs returned no BEEF for basket \(basket)"
+        case .moveBasketBasketsRequired:
+            return "moveBasket: from and to baskets required"
         }
     }
 }

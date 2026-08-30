@@ -263,21 +263,26 @@ public enum AssetSweep {
                 amount: total,
                 recipient: recipient
             )
-            var tags = ["bsv21:\(tokenID)", "amt:\(total)", "dec:\(decimals)"]
-            if let symbol { tags.append("sym:\(symbol)") }
-
+            let protocolID = try OneSatConstants.p1satProtocolID
             let outputs = [
                 try WalletCreateActionOutput(
                     lockingScript: tokenScript.bytes,
                     satoshis: 1,
                     outputDescription: "Sweep \(total) tokens",
                     basket: OneSatConstants.bsv21Basket,
-                    customInstructions: try CustomInstructions(
-                        protocolID: try OneSatConstants.p1satProtocolID,
+                    customInstructions: Bsv21Remittance.buildCustomInstructions(
+                        token: Bsv21Remittance.Fields(
+                            id: tokenID,
+                            amt: String(total),
+                            op: "transfer",
+                            symbol: symbol,
+                            decimals: String(decimals)
+                        ),
+                        protocolID: protocolID,
                         keyID: keyID,
-                        name: symbol
-                    ).encoded(),
-                    tags: tags
+                        counterparty: "self"
+                    ),
+                    tags: Bsv21Remittance.filterTags(tokenId: tokenID)
                 ),
                 try WalletCreateActionOutput(
                     lockingScript: try ActionScript.payToPublicKeyHash(feeAddress).bytes,

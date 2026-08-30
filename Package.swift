@@ -39,7 +39,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "440b48129dc479fd82fb20004acf03b1481b278e"
+            revision: "9e0a722622f51585448abd98a005856b17904e9e"
         ),
     ],
     targets: [
@@ -74,7 +74,7 @@ let package = Package(
             ]
         ),
 
-        // P1SAT deposit addresses: protocol [0, "p 1sat"], keyID "1sat <index>".
+        // P1SAT deposit addresses: protocol [0, "onesat"], keyID "1sat <index>".
         // Matches `@1sat/actions` `deriveDepositAddresses`.
         .target(
             name: "OneSatAddresses",

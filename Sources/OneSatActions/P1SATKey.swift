@@ -3,8 +3,9 @@ import BSVWallet
 
 /// P1SAT BRC-42/43 derivation.
 ///
-/// Invoice `0-p 1sat-<keyID>` is `WalletKeyDeriver.invoice` for `P1SAT_PROTOCOL`.
+/// Invoice `0-onesat-<keyID>` is `WalletKeyDeriver.invoice` for `ONESAT_PROTOCOL`.
 /// The deposit module uses the same invoice shape with `keyID = "<prefix> <index>"`.
+/// Spends of older outputs use the protocolID recorded in customInstructions.
 public enum P1SATKey {
     public static func invoiceNumber(keyID: String) -> String {
         "\(OneSatConstants.p1satProtocolSecurityLevel)-\(OneSatConstants.p1satProtocolName)-\(keyID)"

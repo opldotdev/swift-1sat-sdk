@@ -78,7 +78,7 @@ final class CollectionMintTests: XCTestCase {
         for anchor in anchors {
             XCTAssertEqual(anchor.outputs.count, 1)
             XCTAssertEqual(anchor.outputs[0].satoshis, 2)
-            XCTAssertEqual(anchor.outputs[0].basket, "p 1sat sigma")
+            XCTAssertEqual(anchor.outputs[0].basket, "sigma")
             XCTAssertFalse(anchor.outputs[0].tags.contains { $0.hasPrefix("id:") })
             XCTAssertFalse(anchor.labels.contains(OneSatConstants.p1satLabel))
             XCTAssertEqual(anchor.options["noSend"] as? Bool, true)
@@ -111,7 +111,7 @@ final class CollectionMintTests: XCTestCase {
             XCTAssertEqual(known, [anchorTxid])
             XCTAssertEqual(sendWith, [anchorTxid])
             XCTAssertEqual(publish.outputs[0].satoshis, 1)
-            XCTAssertEqual(publish.outputs[0].basket, "p 1sat ordinals")
+            XCTAssertEqual(publish.outputs[0].basket, "1sat")
             XCTAssertTrue(publish.outputs[0].tags.contains("origin"))
             if index == 0 {
                 XCTAssertTrue(publish.outputs[0].tags.contains("subType:collection"))

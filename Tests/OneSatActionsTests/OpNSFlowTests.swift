@@ -17,8 +17,8 @@ final class OpNSFlowTests: XCTestCase {
     private static let identityPubKeyHex =
         "02bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a5"
 
-    /// `P1SATKey.address(identity:, keyID: ActionVectors.outpoint, counterparty: .self, forSelf: false)`.
-    private static let selfAddress = "1FRgL8WGTQ7rd81M5Cj4t6d6HJPverhUVP"
+    /// Released `[0, "onesat"]` derivation with counterparty self and `forSelf: true`.
+    private static let selfAddress = "1F5UNyuueGgsrGjevcLuicSwtQv8oXxMeS"
 
     func test_toSelfBuilderBasketsOpNSAndWritesIdKey() throws {
         let identity = try ActionVectors.identity()
@@ -27,7 +27,7 @@ final class OpNSFlowTests: XCTestCase {
             identity: identity,
             keyID: ActionVectors.outpoint,
             counterparty: .self,
-            forSelf: false
+            forSelf: true
         )
         XCTAssertEqual(selfAddr.description, Self.selfAddress)
 
@@ -49,7 +49,8 @@ final class OpNSFlowTests: XCTestCase {
                         ordinal: ordinal,
                         toSelf: true,
                         map: [("opns.idKey", Self.identityPubKeyHex)],
-                        extraTags: ["opns:published"]
+                        extraTags: ["opns:published"],
+                        basket: OneSatConstants.opnsBasket
                     ),
                 ]
             )
@@ -61,8 +62,7 @@ final class OpNSFlowTests: XCTestCase {
             prepared.outputs[0].tags,
             [
                 "type:application/op-ns",
-                "origin:\(ActionVectors.outpoint)",
-                "name:alice",
+                "origin:\(Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint))",
                 "opns:published",
             ]
         )
@@ -76,7 +76,7 @@ final class OpNSFlowTests: XCTestCase {
             to: ActionScript.payToPublicKeyHash(selfAddr)
         )
         XCTAssertEqual(prepared.outputs[0].lockingScript, expected.bytes)
-        XCTAssertEqual(prepared.outputs[0].outputDescription, "Ordinal transfer")
+        XCTAssertEqual(prepared.outputs[0].outputDescription, "Ordinal self-transfer")
         XCTAssertEqual(prepared.inputs.count, 1)
         XCTAssertEqual(
             prepared.labels,
@@ -90,7 +90,7 @@ final class OpNSFlowTests: XCTestCase {
             identity: identity,
             keyID: ActionVectors.outpoint,
             counterparty: .self,
-            forSelf: false
+            forSelf: true
         )
         let ctx = try dummyContext(identity: identity)
         let ordinal = try walletOutput(
@@ -110,7 +110,8 @@ final class OpNSFlowTests: XCTestCase {
                         ordinal: ordinal,
                         toSelf: true,
                         map: [("opns.idKey", "")],
-                        extraTags: []
+                        extraTags: [],
+                        basket: OneSatConstants.opnsBasket
                     ),
                 ]
             )
@@ -120,8 +121,7 @@ final class OpNSFlowTests: XCTestCase {
             prepared.outputs[0].tags,
             [
                 "type:application/op-ns",
-                "origin:\(ActionVectors.outpoint)",
-                "name:alice",
+                "origin:\(Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint))",
             ]
         )
         XCTAssertFalse(prepared.outputs[0].tags.contains("opns:published"))
@@ -214,7 +214,7 @@ final class OpNSFlowTests: XCTestCase {
         let params = try XCTUnwrap(envelope["params"] as? [Any])
         XCTAssertGreaterThanOrEqual(params.count, 2)
         let args = try XCTUnwrap(params[1] as? [String: Any])
-        XCTAssertEqual(args["basket"] as? String, "p 1sat opns")
+        XCTAssertEqual(args["basket"] as? String, "opns")
         XCTAssertEqual(args["include"] as? String, "entire transactions")
         XCTAssertEqual(args["includeCustomInstructions"] as? Bool, true)
         XCTAssertEqual(args["includeTags"] as? Bool, true)
@@ -266,25 +266,24 @@ final class OpNSFlowTests: XCTestCase {
         XCTAssertEqual(outputs.count, 1)
         XCTAssertEqual((outputs[0]["satoshis"] as? NSNumber)?.uint64Value, 1)
         XCTAssertEqual(outputs[0]["basket"] as? String, OneSatConstants.opnsBasket)
-        XCTAssertEqual(outputs[0]["outputDescription"] as? String, "Ordinal transfer")
+        XCTAssertEqual(outputs[0]["outputDescription"] as? String, "Ordinal self-transfer")
         let tags = try XCTUnwrap(outputs[0]["tags"] as? [String])
-        XCTAssertEqual(tags.prefix(4), [
+        XCTAssertEqual(tags.prefix(3), [
             "type:application/op-ns",
-            "origin:\(ActionVectors.outpoint)",
-            "name:alice",
+            "origin:\(Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint))",
             "opns:published",
         ])
         let idTag = try XCTUnwrap(tags.last)
         XCTAssertTrue(idTag.hasPrefix("id:"))
         XCTAssertTrue(idTag.hasSuffix("_0"))
         let labels = try XCTUnwrap(args["labels"] as? [String])
-        XCTAssertTrue(labels.contains(OneSatConstants.p1satLabel))
+        XCTAssertFalse(labels.contains(OneSatConstants.p1satLabel))
 
         let selfAddr = try P1SATKey.address(
             identity: identity,
             keyID: ActionVectors.outpoint,
             counterparty: .self,
-            forSelf: false
+            forSelf: true
         )
         let expected = try MapSuffix.appending(
             [("opns.idKey", Self.identityPubKeyHex)],

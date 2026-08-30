@@ -6,36 +6,44 @@ public enum OneSatConstants {
     public static let fundingBasket = "default"
     /// `DEPOSIT_BASKET`
     public static let depositBasket = "1sat-deposit"
-    /// `ORDINALS_BASKET`
-    public static let ordinalsBasket = "p 1sat ordinals"
+    /// `ONESAT_BASKET` / `ORDINALS_BASKET`. Collectable inventory (BRC-147).
+    public static let onesatBasket = "1sat"
+    /// `ORDINALS_BASKET` — alias of `onesatBasket`.
+    public static let ordinalsBasket = onesatBasket
     /// `BSV21_BASKET`
-    public static let bsv21Basket = "p 1sat bsv21"
+    public static let bsv21Basket = "bsv21"
     /// Tick-based BSV-20 after a token-transfer sweep. `@1sat/actions` has no BSV-20 basket.
-    public static let bsv20Basket = "p 1sat bsv20"
+    public static let bsv20Basket = "bsv20"
     /// `LOCK_BASKET`
-    public static let lockBasket = "p 1sat lock"
+    public static let lockBasket = "lock"
     /// `OPNS_BASKET`
-    public static let opnsBasket = "p 1sat opns"
+    public static let opnsBasket = "opns"
     /// `SIGMA_BASKET`
-    public static let sigmaBasket = "p 1sat sigma"
-    /// `P1SAT_LABEL`
+    public static let sigmaBasket = "sigma"
+    /// `HOSTING_BASKET`
+    public static let hostingBasket = "hosting"
+    /// `BSOCIAL_BASKET`
+    public static let bsocialBasket = "bsocial"
+    /// `P1SAT_LABEL` = `p 1sat action`
     public static let p1satLabel = "p 1sat action"
-    /// `P1SAT_BASKET_PREFIX`
+    /// `P1SAT_BASKET_PREFIX` — leftover P-basket spelling, migration source only.
     public static let p1satBasketPrefix = "p 1sat "
-    /// `P1SAT_INPUT_LABEL_PREFIX`
-    public static let p1satInputLabelPrefix = "p 1sat input "
-    /// `P1SAT_TOKEN_LABEL_PREFIX`
-    public static let p1satTokenLabelPrefix = "p 1sat bsv21 "
+    /// `BSV21_TOKEN_LABEL_PREFIX`
+    public static let p1satTokenLabelPrefix = "p bsv21 token "
     /// `MAP_PREFIX`
     public static let mapPrefix = "1PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5"
     /// Upper bound on inscription *content*. The envelope, MAP, and SIGMA
     /// suffix sit on top of this. Storage script limit is 1 MiB, so this
     /// leaves room for that wrapper.
     public static let maxInscriptionBytes = 900_000
-    /// `P1SAT_PROTOCOL` security level. The name is `p1satProtocolName`.
+    /// `ONESAT_PROTOCOL` / `P1SAT_PROTOCOL` security level.
     public static let p1satProtocolSecurityLevel: UInt8 = 0
-    /// `P1SAT_PROTOCOL` name.
-    public static let p1satProtocolName = "p 1sat"
+    /// Preferred default protocol name (`ONESAT_PROTOCOL`). BRC-100 names must
+    /// be at least 5 characters, so this is `"onesat"` not `"1sat"`.
+    public static let p1satProtocolName = "onesat"
+    /// Legacy protocol name recorded on outputs filed before the onesat rename.
+    /// Spends must honor customInstructions that still say this.
+    public static let legacyP1SatProtocolName = "p 1sat"
     /// `locks/index.ts` `LOCK_KEY_ID`.
     public static let lockKeyID = "lock"
     /// P2PKH unlocking length used by ordinals transfer, list, cancel, and BSV-21 send.
@@ -44,6 +52,18 @@ public enum OneSatConstants {
     public static let timeLockUnlockingScriptLength: UInt32 = 1_205
     /// `purchaseOrdinal` `unlockingScriptLength`.
     public static let purchaseUnlockingScriptLength: UInt32 = 1_368
+
+    /// `LEGACY_P1SAT_BASKET_MIGRATIONS` plus Swift's own `p 1sat bsv20` filing.
+    public static let legacyP1SatBasketMigrations: [(from: String, to: String)] = [
+        ("p 1sat ordinals", onesatBasket),
+        ("p 1sat bsv21", bsv21Basket),
+        ("p 1sat opns", opnsBasket),
+        ("p 1sat hosting", hostingBasket),
+        ("p 1sat lock", lockBasket),
+        ("p 1sat sigma", sigmaBasket),
+        ("p 1sat bsocial", bsocialBasket),
+        ("p 1sat bsv20", bsv20Basket),
+    ]
 
     public static var p1satProtocolID: WalletProtocolID {
         get throws {
@@ -77,15 +97,22 @@ public enum OneSatConstants {
         }
     }
 
-    /// `buildInputAssetLabel` from `packages/types/src/constants.ts`.
-    public static func inputAssetLabel(basket: String, id: String) -> String {
-        let suffix: String
-        if basket.hasPrefix(p1satBasketPrefix) {
-            suffix = String(basket.dropFirst(p1satBasketPrefix.count))
-        } else {
-            suffix = basket
+    /// Permission scheme id for a preferred storage basket, if any.
+    /// `schemeForBasket` from `packages/types/src/constants.ts`.
+    public static func permissionScheme(forBasket basket: String) -> String? {
+        switch basket {
+        case onesatBasket, opnsBasket, bsv21Basket, lockBasket:
+            return basket
+        default:
+            return nil
         }
-        return "\(p1satInputLabelPrefix)\(suffix) \(id)"
+    }
+
+    /// `buildInputAssetLabel` from `packages/types/src/constants.ts`.
+    /// Held-row form: `p <scheme> input id <key>`.
+    public static func inputAssetLabel(basket: String, id: String) -> String {
+        let scheme = permissionScheme(forBasket: basket) ?? basket
+        return "p \(scheme) input id \(id)"
     }
 
     /// `buildTokenLabel` from `packages/types/src/constants.ts`.

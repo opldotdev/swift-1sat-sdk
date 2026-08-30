@@ -1,5 +1,5 @@
-import BSVCore
 import BSVScript
+import OneSatTemplates
 
 /// MAP SET suffix from `@1sat/templates` `bitcom/map.ts` + `utils/buildMapSuffix.ts`.
 ///
@@ -8,18 +8,7 @@ public enum MapSuffix {
     private static let maximumByteCount = 1_100_000
 
     public static func set(_ fields: [(String, String)]) throws -> Script {
-        var script = try Script(bytes: [], maximumByteCount: maximumByteCount)
-        try script.append(.return, maximumScriptByteCount: maximumByteCount)
-        try script.appendPushData(
-            Array(OneSatConstants.mapPrefix.utf8),
-            maximumScriptByteCount: maximumByteCount
-        )
-        try script.appendPushData(Array("SET".utf8), maximumScriptByteCount: maximumByteCount)
-        for (key, value) in fields {
-            try script.appendPushData(Array(clean(key).utf8), maximumScriptByteCount: maximumByteCount)
-            try script.appendPushData(Array(clean(value).utf8), maximumScriptByteCount: maximumByteCount)
-        }
-        return script
+        try MAPTemplate.set(fields)
     }
 
     /// `appendMapSuffix` from `packages/actions/src/utils/buildMapSuffix.ts`.
@@ -31,8 +20,4 @@ public enum MapSuffix {
         )
     }
 
-    private static func clean(_ value: String) -> String {
-        value.replacingOccurrences(of: "\0", with: " ")
-            .replacingOccurrences(of: "\\u0000", with: " ")
-    }
 }

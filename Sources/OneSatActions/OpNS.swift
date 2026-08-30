@@ -73,7 +73,8 @@ public enum OpNS {
                             ordinal: request.ordinal,
                             toSelf: true,
                             map: [("opns.idKey", identityHex)],
-                            extraTags: ["opns:published"]
+                            extraTags: ["opns:published"],
+                            basket: OneSatConstants.opnsBasket
                         ),
                     ],
                     inputBEEF: inputBEEF
@@ -107,7 +108,8 @@ public enum OpNS {
                             ordinal: request.ordinal,
                             toSelf: true,
                             map: [("opns.idKey", "")],
-                            extraTags: []
+                            extraTags: [],
+                            basket: OneSatConstants.opnsBasket
                         ),
                     ],
                     inputBEEF: inputBEEF

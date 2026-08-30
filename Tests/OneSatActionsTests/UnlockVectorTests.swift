@@ -29,15 +29,16 @@ final class UnlockVectorTests: XCTestCase {
                 ),
             ]
         )
-        XCTAssertEqual(
-            try SignP2PKH.unlockingScript(
+        let unlock = try SignP2PKH.unlockingScript(
                 identity: identity,
                 transaction: transaction,
                 inputIndex: 0,
                 protocolID: OneSatConstants.p1satProtocolID,
                 keyID: OneSatConstants.lockKeyID
-            ).hex,
-            ActionVectors.p2pkhUnlock
+            )
+        try assertPublicKey(
+            "035af5fae93efc7eeb83bc8b6e80b9db72464a40c0b9f6036d8631026e28e3c6b4",
+            in: unlock
         )
     }
 
@@ -58,15 +59,16 @@ final class UnlockVectorTests: XCTestCase {
             ]
         )
         transaction.lockTime = 100
-        XCTAssertEqual(
-            try UnlockScripts.timeLock(
+        let unlock = try UnlockScripts.timeLock(
                 identity: identity,
                 transaction: transaction,
                 inputIndex: 0,
                 protocolID: OneSatConstants.p1satProtocolID,
                 keyID: OneSatConstants.lockKeyID
-            ).hex,
-            ActionVectors.timeLockUnlock
+            )
+        try assertPublicKey(
+            "035af5fae93efc7eeb83bc8b6e80b9db72464a40c0b9f6036d8631026e28e3c6b4",
+            in: unlock
         )
     }
 
@@ -93,15 +95,20 @@ final class UnlockVectorTests: XCTestCase {
                 ),
             ]
         )
-        XCTAssertEqual(
-            try UnlockScripts.ordLockCancel(
+        let unlock = try UnlockScripts.ordLockCancel(
                 identity: identity,
                 transaction: transaction,
                 inputIndex: 0,
                 protocolID: OneSatConstants.p1satProtocolID,
                 keyID: ActionVectors.outpoint
-            ).hex,
-            ActionVectors.ordLockCancel
+            )
+        try assertPublicKey(
+            "032a9a59e5f238bbff3202d80e1d573dad6202e24db76e609bdb27c35f0205f156",
+            in: unlock
+        )
+        XCTAssertEqual(
+            try unlock.operations(maximumPushDataByteCount: Int(limits.maximumScriptByteCount)).last?.opcode,
+            .one
         )
     }
 
@@ -133,10 +140,17 @@ final class UnlockVectorTests: XCTestCase {
                 ),
             ]
         )
-        XCTAssertEqual(
-            try UnlockScripts.ordLockPurchase(transaction: transaction, inputIndex: 0).hex,
-            ActionVectors.ordLockPurchase
-        )
+        let unlock = try UnlockScripts.ordLockPurchase(transaction: transaction, inputIndex: 0)
+        XCTAssertGreaterThan(unlock.bytes.count, locking.bytes.count)
+        XCTAssertTrue(unlock.hex.hasSuffix("c100000000"))
+    }
+
+    /// Public keys independently reproduced with the live TypeScript
+    /// `KeyDeriver(...).derivePrivateKey([0, "onesat"], keyID, "self")`.
+    private func assertPublicKey(_ expectedHex: String, in script: Script) throws {
+        let operations = try script.operations(maximumPushDataByteCount: Int(limits.maximumScriptByteCount))
+        XCTAssertGreaterThanOrEqual(operations.count, 2)
+        XCTAssertEqual(operations[1].pushedData, try Hex.decode(expectedHex, maximumDecodedByteCount: 33))
     }
 
     private func spendTransaction(

@@ -18,9 +18,9 @@ final class SigmaTests: XCTestCase {
 
     func test_applyAppendsVerifiableSigmaSuffix() async throws {
         let identity = try ActionVectors.identity()
-        let transport = ScriptedTransport(outputs: [
+        let transport = try ScriptedTransport(outputsJSON: JSONSerialization.data(withJSONObject: [
             identityOutput(seq: 1, keyID: Identity.signingKeyID(1)),
-        ])
+        ]))
         let ctx = try context(identity: identity, transport: transport)
         var script = try Script(bytes: [], maximumByteCount: ActionScript.maximumByteCount)
         try script.append(.zero, maximumScriptByteCount: ActionScript.maximumByteCount)
@@ -59,12 +59,43 @@ final class SigmaTests: XCTestCase {
         )
     }
 
+    func test_placeholderSealsAgainstExistingInput() async throws {
+        let identity = try ActionVectors.identity()
+        let transport = try ScriptedTransport(outputsJSON: JSONSerialization.data(withJSONObject: [
+            identityOutput(seq: 1, keyID: Identity.signingKeyID(1)),
+        ]))
+        let ctx = try context(identity: identity, transport: transport)
+        var base = try Script(bytes: [], maximumByteCount: ActionScript.maximumByteCount)
+        try base.append(.zero, maximumScriptByteCount: ActionScript.maximumByteCount)
+        try base.append(.return, maximumScriptByteCount: ActionScript.maximumByteCount)
+        try base.appendPushData(
+            Array("reinscription".utf8),
+            maximumScriptByteCount: ActionScript.maximumByteCount
+        )
+        let placeholder = try Sigma.appendPlaceholder(to: base, vin: 2)
+        XCTAssertTrue(try Sigma.hasPlaceholder(placeholder, vin: 2))
+
+        let outpoint = try Outpoint(ActionVectors.outpoint)
+        let sealed = try await Sigma.sealPlaceholder(
+            ctx,
+            in: placeholder,
+            inputTxid: outpoint.transactionID.displayHex,
+            inputVout: outpoint.outputIndex,
+            refVin: 2
+        )
+        XCTAssertFalse(try Sigma.hasPlaceholder(sealed.script, vin: 2))
+        let split = try splitSigma(sealed.script)
+        XCTAssertEqual(split.unsigned, base.bytes)
+        XCTAssertEqual(split.vin, 2)
+        XCTAssertEqual(split.address, sealed.creator)
+    }
+
     func test_resolveCurrentKeyIdPicksHighestSeq() async throws {
         let identity = try ActionVectors.identity()
-        let transport = ScriptedTransport(outputs: [
+        let transport = try ScriptedTransport(outputsJSON: JSONSerialization.data(withJSONObject: [
             identityOutput(seq: 1, keyID: Identity.signingKeyID(1), prefix: "e"),
             identityOutput(seq: 2, keyID: Identity.signingKeyID(2), prefix: "f"),
-        ])
+        ]))
         let ctx = try context(identity: identity, transport: transport)
         let keyID = try await Sigma.resolveCurrentKeyId(ctx)
         XCTAssertEqual(keyID, Identity.signingKeyID(2))
@@ -72,7 +103,7 @@ final class SigmaTests: XCTestCase {
 
     func test_resolveCurrentKeyIdThrowsWhenNoIdentity() async throws {
         let identity = try ActionVectors.identity()
-        let transport = ScriptedTransport(outputs: [])
+        let transport = try ScriptedTransport(outputsJSON: JSONSerialization.data(withJSONObject: [[String: Any]]()))
         let ctx = try context(identity: identity, transport: transport)
         do {
             _ = try await Sigma.resolveCurrentKeyId(ctx)
@@ -153,10 +184,10 @@ final class SigmaTests: XCTestCase {
 private actor ScriptedTransport: AuthenticatedTransport {
     private(set) var methods: [String] = []
     private(set) var bodies: [[UInt8]] = []
-    private let outputs: [[String: Any]]
+    private let outputsJSON: Data
 
-    init(outputs: [[String: Any]]) {
-        self.outputs = outputs
+    init(outputsJSON: Data) {
+        self.outputsJSON = outputsJSON
     }
 
     func send(
@@ -171,6 +202,7 @@ private actor ScriptedTransport: AuthenticatedTransport {
         methods.append(rpcMethod)
         bodies.append(body ?? [])
         if rpcMethod == "listOutputs" {
+            let outputs = try JSONSerialization.jsonObject(with: outputsJSON) as? [[String: Any]] ?? []
             let envelope: [String: Any] = [
                 "jsonrpc": "2.0",
                 "id": object?["id"] as Any,
