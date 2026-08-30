@@ -1,6 +1,10 @@
 import Foundation
 import ToolboxCore
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 /// One transport for every OpnsClient request, GET and POST alike.
 public protocol OneSatHTTPTransport: Sendable {
     func send(
