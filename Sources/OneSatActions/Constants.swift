@@ -53,9 +53,12 @@ public enum OneSatConstants {
     /// `purchaseOrdinal` `unlockingScriptLength`.
     public static let purchaseUnlockingScriptLength: UInt32 = 1_368
 
-    /// `LEGACY_P1SAT_BASKET_MIGRATIONS` plus Swift's own `p 1sat bsv20` filing.
+    /// `LEGACY_P1SAT_BASKET_MIGRATIONS` plus leftover filings JS never listed:
+    /// Swift's own `p 1sat bsv20`, and theme-token's hardcoded `ordinals`
+    /// basket (`b-open-io/theme-token` `package-builder.ts` Mar–Jun 2026).
     public static let legacyP1SatBasketMigrations: [(from: String, to: String)] = [
         ("p 1sat ordinals", onesatBasket),
+        ("ordinals", onesatBasket),
         ("p 1sat bsv21", bsv21Basket),
         ("p 1sat opns", opnsBasket),
         ("p 1sat hosting", hostingBasket),

@@ -44,6 +44,7 @@ final class ConstantsAndDerivationTests: XCTestCase {
     func test_legacyBasketMigrationsMatchTypesPackage() {
         XCTAssertEqual(OneSatConstants.legacyP1SatBasketMigrations.map(\.from), [
             "p 1sat ordinals",
+            "ordinals",
             "p 1sat bsv21",
             "p 1sat opns",
             "p 1sat hosting",
@@ -53,6 +54,7 @@ final class ConstantsAndDerivationTests: XCTestCase {
             "p 1sat bsv20",
         ])
         XCTAssertEqual(OneSatConstants.legacyP1SatBasketMigrations.map(\.to), [
+            "1sat",
             "1sat",
             "bsv21",
             "opns",
