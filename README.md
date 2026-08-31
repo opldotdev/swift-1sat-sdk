@@ -27,9 +27,10 @@ It is the Swift counterpart of [`b-open-io/1sat-sdk`](https://github.com/b-open-
 The tree now has more than sweep and read-only balances. **Sweep** still moves coins from a
 foreign or legacy key into a wallet's own address — generic over source, destination, and UTXO
 provider; the client still reads categorised owner outputs from the 1Sat indexer. Alongside that:
-P1SAT deposit addresses, 1Sat locking templates, MNEE and OpNS clients, and the `@1sat/actions`
-families (ordinals, inscriptions, token transfers, locks, collections, identity, OpNS, MNEE,
-and asset sweep onto P1SAT outputs).
+P1SAT deposit addresses, 1Sat locking templates, MNEE and OpNS clients, and major
+`@1sat/actions` families (ordinals, inscriptions, token transfers, locks, collections, identity,
+OpNS, MNEE, and asset sweep onto P1SAT outputs). Actions also cover cancellable legacy-basket
+migration and WalletPermissionsManager collection metadata/name handling.
 
 Sweep stays **partial by design**. Further `@1sat` surface lands as the wallet needs it.
 
@@ -39,9 +40,9 @@ Sweep stays **partial by design**. Further `@1sat` surface lands as the wallet n
 |---|---|
 | `OneSatClient` | Read-only ordinals and BSV-21 balances; MNEE and OpNS clients; 1sat-stack services |
 | `OneSatSweep` | Categorise an address, sweep its fundable BSV, report the rest |
-| `OneSatTemplates` | Locking scripts: inscription, OrdLock, BSV-20/21, Cosign, TimeLock, BAP, BitCom |
-| `OneSatAddresses` | P1SAT deposit addresses (`[0, "p 1sat"]`, keyID `"1sat <index>"`) |
-| `OneSatActions` | Action families from `@1sat/actions`, including spend-side unlock templates |
+| `OneSatTemplates` | Locking scripts: inscription, OrdLock, BSV-20/21, Cosign, TimeLock, BAP, BitCom, public `MAPTemplate` |
+| `OneSatAddresses` | P1SAT deposit addresses (`[0, "onesat"]`, keyID `"1sat <index>"`) |
+| `OneSatActions` | Major `@1sat/actions` families, spend-side unlock templates, cancellable legacy-basket migration, WPM collection metadata/name handling |
 | `OneSat` | Umbrella, re-exporting the above |
 
 ## Sweep

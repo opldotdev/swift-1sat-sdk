@@ -7,7 +7,7 @@ import PackageDescription
 /// the third layer above `swift-sdk` (primitives) and `swift-wallet-toolbox` (the generic wallet).
 ///
 /// Sweep still moves coins from a legacy or foreign key into the wallet's own scheme — the first
-/// thing a real wallet needs from this layer. The tree already ships the `@1sat/actions` surface
+/// thing a real wallet needs from this layer. The tree already ships major `@1sat/actions` families
 /// — ordinals, BSV21, OpNS, MNEE — alongside templates, addresses, and clients.
 let publicModules = [
     "OneSatClient",
@@ -63,8 +63,8 @@ let package = Package(
         ),
 
         // 1Sat locking scripts: inscription envelope, OrdLock, BSV-20, BSV-21, Cosign, BAP,
-        // BitCom, and CLTV time-lock. Byte-exact with `@1sat/templates`. Unlock templates live
-        // with the action families.
+        // BitCom, public MAPTemplate, and CLTV time-lock. Byte-exact with `@1sat/templates`.
+        // Unlock templates live with the action families.
         .target(
             name: "OneSatTemplates",
             dependencies: [
