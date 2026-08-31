@@ -90,6 +90,7 @@ public enum BasketMigration {
             results.append(result)
             totalMoved += result.moved
         }
+        try Task.checkCancellation()
         return MigrateResult(results: results, totalMoved: totalMoved)
     }
 
@@ -108,6 +109,7 @@ public enum BasketMigration {
         var complete = false
         var seen = Set<String>()
         while true {
+            try Task.checkCancellation()
             let page = try await moveBasketOutputs(
                 ctx,
                 internalizer: internalizer,
@@ -115,6 +117,7 @@ public enum BasketMigration {
                 to: to,
                 limit: limit
             )
+            try Task.checkCancellation()
             moved += page.moved
             skipped += page.skipped
             outpoints.append(contentsOf: page.outpoints)
@@ -180,6 +183,7 @@ public enum BasketMigration {
                 pagination: try WalletPagination(limit: UInt32(limit), offset: UInt32(offset))
             )
         )
+        try Task.checkCancellation()
         return try await moveBasketOutputs(
             from: from,
             to: to,
@@ -227,6 +231,7 @@ public enum BasketMigration {
         var skipped = 0
 
         for output in listed.outputs {
+            try Task.checkCancellation()
             let outpoint = output.outpoint.description
             let atomic: AtomicBEEF
             do {
@@ -263,9 +268,14 @@ public enum BasketMigration {
                     ]
                 )
                 _ = try await internalizer.internalizeAction(request)
+                try Task.checkCancellation()
                 moved += 1
                 outpoints.append(outpoint)
             } catch {
+                try Task.checkCancellation()
+                if error is CancellationError {
+                    throw error
+                }
                 skipped += 1
                 errors.append(
                     MoveError(outpoint: outpoint, error: error.localizedDescription)
@@ -273,6 +283,7 @@ public enum BasketMigration {
             }
         }
 
+        try Task.checkCancellation()
         return MoveResult(
             from: from,
             to: to,
