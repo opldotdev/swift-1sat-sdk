@@ -274,6 +274,73 @@ final class CollectionParseTests: XCTestCase {
         XCTAssertEqual(CollectionParse.collectionId(fromOrigin: "\(originTxid).0"), "\(originTxid)_0")
     }
 
+    func test_groupReadsCanonicalAndHistoricalCollectionTags() throws {
+        let canonical = try walletOutput(
+            outpoint: "\(originTxid).1",
+            tags: [CollectionParse.itemTag, "\(CollectionParse.collectionTagPrefix)\(itemCollectionId)"]
+        )
+        let historical = try walletOutput(
+            outpoint: "\(originTxid).2",
+            tags: [CollectionParse.itemTag, "\(CollectionParse.collectionIdTagPrefix)\(itemCollectionId)"]
+        )
+
+        XCTAssertEqual(
+            CollectionParse.group(ordinalOutputs: [canonical, historical])
+                .itemsByCollectionId[itemCollectionId],
+            [canonical, historical]
+        )
+    }
+
+    func test_groupPrefersCanonicalCollectionTagWhenBothExist() throws {
+        let historicalId = String(repeating: "c", count: 64) + "_2"
+        let output = try walletOutput(
+            outpoint: "\(originTxid).1",
+            tags: [
+                CollectionParse.itemTag,
+                "\(CollectionParse.collectionIdTagPrefix)\(historicalId)",
+                "\(CollectionParse.collectionTagPrefix)\(itemCollectionId)",
+            ]
+        )
+
+        let grouping = CollectionParse.group(ordinalOutputs: [output])
+        XCTAssertEqual(grouping.itemsByCollectionId[itemCollectionId], [output])
+        XCTAssertNil(grouping.itemsByCollectionId[historicalId])
+    }
+
+    func test_legacyNameTagMovesToCustomInstructionsNameWithoutReemitting() {
+        let resolved = Ordinals.resolveOrdinalTags(
+            outpoint: "\(originTxid).0",
+            tags: ["type:image/png", "origin", "name:Legacy Ape"]
+        )
+
+        XCTAssertEqual(resolved.name, "Legacy Ape")
+        XCTAssertFalse(resolved.tags.contains { $0.hasPrefix("name:") })
+    }
+
+    func test_resolveOrdinalTagsMatchesCanonicalTypeAndOriginVector() {
+        let resolved = Ordinals.resolveOrdinalTags(
+            outpoint: "\(originTxid).0",
+            tags: [
+                "type:image",
+                "type:image/png; charset=utf-8",
+                "type:application/json",
+                "origin:\(originTxid).7",
+            ]
+        )
+
+        XCTAssertEqual(resolved.tags, ["type:image/png", "origin:\(originTxid)_7"])
+    }
+
+    func test_resolveOrdinalTagsDoesNotInventMissingOrigin() {
+        let resolved = Ordinals.resolveOrdinalTags(
+            outpoint: "\(originTxid).0",
+            tags: nil,
+            contentType: "image/png"
+        )
+
+        XCTAssertEqual(resolved.tags, ["type:image/png"])
+    }
+
     private func walletOutput(outpoint: String, tags: [String]) throws -> WalletOutput {
         try WalletOutput(
             satoshis: 1,

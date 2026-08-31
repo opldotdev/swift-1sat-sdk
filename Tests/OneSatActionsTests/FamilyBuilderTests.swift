@@ -288,6 +288,94 @@ final class FamilyBuilderTests: XCTestCase {
         XCTAssertEqual(prepared.outputs[0].lockingScript, expected.bytes)
     }
 
+    func test_ordinalSpendBuildersMoveLegacyNamesIntoCustomInstructions() throws {
+        let identity = try ActionVectors.identity()
+        let ctx = try dummyContext(identity: identity)
+        let legacyOnly = try walletOutput(
+            tags: ["type:image/png", "name:Legacy Ape", "id:list_0"],
+            instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
+        )
+        let canonical = try walletOutput(
+            tags: ["type:image/png", "name:Legacy Ape", "id:list_0"],
+            instructions: try CustomInstructions(
+                keyID: ActionVectors.outpoint,
+                name: "Canonical Ape"
+            ).encoded()
+        )
+        let partialCanonical = try walletOutput(
+            tags: ["name:Legacy Ape"],
+            instructions: "{\"name\":\"Canonical Ape\"}"
+        )
+
+        XCTAssertEqual(Ordinals.sourceName(from: partialCanonical), "Canonical Ape")
+
+        let transfer = try Ordinals.buildTransfer(
+            ctx,
+            Ordinals.TransferRequest(
+                transfers: [Ordinals.TransferItem(ordinal: legacyOnly, toSelf: true)]
+            )
+        )
+        let listing = try Ordinals.buildList(
+            ctx,
+            Ordinals.ListRequest(
+                ordinal: canonical,
+                price: 50_000,
+                payAddress: ActionVectors.payAddress
+            )
+        )
+        let cancel = try Ordinals.buildCancel(
+            ctx,
+            Ordinals.CancelRequest(listing: legacyOnly)
+        ).prepared
+
+        XCTAssertEqual(
+            try CustomInstructions.parse(XCTUnwrap(transfer.outputs[0].customInstructions)).name,
+            "Legacy Ape"
+        )
+        XCTAssertEqual(
+            try CustomInstructions.parse(XCTUnwrap(listing.outputs[0].customInstructions)).name,
+            "Canonical Ape"
+        )
+        XCTAssertEqual(
+            try CustomInstructions.parse(XCTUnwrap(cancel.outputs[0].customInstructions)).name,
+            "Legacy Ape"
+        )
+        for output in [transfer.outputs[0], listing.outputs[0], cancel.outputs[0]] {
+            XCTAssertFalse(output.tags.contains { $0.hasPrefix("name:") })
+        }
+    }
+
+    func test_ordinalSweepOutputCarriesResolvedBRC147Metadata() throws {
+        let identity = try ActionVectors.identity()
+        let ctx = try dummyContext(identity: identity)
+        let longName = String(repeating: "a", count: 63) + "😀tail"
+        let keyID = Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint)
+        let output = try AssetSweep.ordinalOutput(
+            ctx,
+            input: AssetSweep.OrdinalInput(
+                outpoint: ActionVectors.outpoint,
+                satoshis: 1,
+                lockingScript: [],
+                contentType: "image/png; charset=utf-8",
+                origin: ActionVectors.outpoint,
+                name: longName,
+                key: identity
+            ),
+            keyID: keyID
+        )
+
+        XCTAssertEqual(output.tags, ["type:image/png", "origin:\(keyID)"])
+        let instructions = try XCTUnwrap(output.customInstructions)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(instructions.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(object["protocolID"] as? [AnyHashable], [0, "onesat"])
+        XCTAssertEqual(object["keyID"] as? String, keyID)
+        XCTAssertEqual(object["counterparty"] as? String, "self")
+        XCTAssertEqual(object["origin"] as? String, keyID)
+        XCTAssertEqual(object["name"] as? String, String(repeating: "a", count: 63))
+    }
+
     func test_tokenSelectionAndChangeAccounting() throws {
         let identity = try ActionVectors.identity()
         let first = try walletOutput(

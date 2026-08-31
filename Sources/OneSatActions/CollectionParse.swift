@@ -140,6 +140,7 @@ public enum CollectionParse {
     /// Wallet tag strings mint writes (`collections/index.ts:451-456, 645-651`).
     public static let parentTag = "subType:collection"
     public static let itemTag = "subType:collectionItem"
+    public static let collectionTagPrefix = "collection:"
     public static let collectionIdTagPrefix = "collectionId:"
 
     /// `collectionIdToParentBytes`: 32-byte txid reversed to internal order + 4-byte vout LE.
@@ -239,7 +240,8 @@ public enum CollectionParse {
     public struct Grouping: Equatable, Sendable {
         /// Outputs tagged `subType:collection`, input order preserved.
         public let parents: [WalletOutput]
-        /// Outputs tagged `subType:collectionItem` + `collectionId:{id}`, keyed by the id.
+        /// Outputs tagged `subType:collectionItem` + canonical `collection:{id}` or historical
+        /// `collectionId:{id}`, keyed by the id.
         public let itemsByCollectionId: [String: [WalletOutput]]
         /// Everything else — a lone inscription is not a collection.
         public let standalone: [WalletOutput]
@@ -254,9 +256,13 @@ public enum CollectionParse {
             let tags = output.tags ?? []
             if tags.contains(parentTag) {
                 parents.append(output)
-            } else if tags.contains(itemTag),
-                      let idTag = tags.first(where: { $0.hasPrefix(collectionIdTagPrefix) }) {
-                let id = String(idTag.dropFirst(collectionIdTagPrefix.count))
+            } else if tags.contains(itemTag), let (idTag, prefix) = [
+                collectionTagPrefix,
+                collectionIdTagPrefix,
+            ].compactMap({ prefix in
+                tags.first(where: { $0.hasPrefix(prefix) }).map { ($0, prefix) }
+            }).first {
+                let id = String(idTag.dropFirst(prefix.count))
                 itemsByCollectionId[id, default: []].append(output)
             } else {
                 standalone.append(output)
