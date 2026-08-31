@@ -11,6 +11,7 @@ import PackageDescription
 /// — ordinals, BSV21, OpNS, MNEE — alongside templates, addresses, and clients.
 let publicModules = [
     "OneSatClient",
+    "OneSatPermissions",
     "OneSatSweep",
     "OneSatTemplates",
     "OneSatAddresses",
@@ -97,6 +98,13 @@ let package = Package(
             ]
         ),
 
+        // Serializable, native approval-review models plus best-effort live verification for
+        // 1Sat assets. Canonical BRC-116 grant authority remains in swift-wallet-toolbox.
+        .target(
+            name: "OneSatPermissions",
+            dependencies: ["OneSatClient"]
+        ),
+
         // Action families from `@1sat/actions`: tracked create/sign, ordinals, inscribe,
         // BSV-21 transfer, locks, and marketplace. Spend-side unlock templates live here.
         .target(
@@ -153,6 +161,10 @@ let package = Package(
                 "OneSatClient",
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
             ]
+        ),
+        .testTarget(
+            name: "OneSatPermissionsTests",
+            dependencies: ["OneSatPermissions", "OneSatClient"]
         ),
         .testTarget(
             name: "OneSatActionsTests",

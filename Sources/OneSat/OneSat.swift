@@ -4,5 +4,6 @@
 @_exported import OneSatActions
 @_exported import OneSatAddresses
 @_exported import OneSatClient
+@_exported import OneSatPermissions
 @_exported import OneSatSweep
 @_exported import OneSatTemplates
