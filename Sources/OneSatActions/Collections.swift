@@ -141,23 +141,24 @@ public enum Collections {
                     to: try ActionScript.payToPublicKeyHash(address)
                 )
             ).lock()
-            let nameTag = String(request.name.prefix(64))
+            let displayName = String(request.name.prefix(64))
+            let tags = [
+                typeTag(request.contentType),
+                "origin",
+                "subType:collection",
+            ]
             let result = try await publishWithSigma(
                 ctx,
                 description: "Create collection: \(request.name)",
                 outputDescription: "Collection inscription",
                 lockingScript: lockingScript,
-                tags: [
-                    "type:\(request.contentType)",
-                    "origin",
-                    "name:\(nameTag)",
-                    "subType:collection",
-                ],
-                customInstructions: try CustomInstructions(
+                tags: tags,
+                customInstructions: OrdinalRemittance.buildCustomInstructions(
                     protocolID: try OneSatConstants.p1satProtocolID,
                     keyID: keyID,
-                    name: nameTag
-                ).encoded()
+                    tags: tags,
+                    name: displayName
+                )
             )
             guard let txid = result.txid else {
                 return MintResult(error: OneSatActionError.noTxidReturned.wireMessage)
@@ -237,24 +238,25 @@ public enum Collections {
                     to: try ActionScript.payToPublicKeyHash(address)
                 )
             ).lock()
-            let nameTag = String(request.name.prefix(64))
+            let displayName = String(request.name.prefix(64))
+            let tags = [
+                typeTag(contentType),
+                "origin",
+                "subType:collectionItem",
+                "collection:\(request.collectionId)",
+            ]
             let result = try await publishWithSigma(
                 ctx,
                 description: "Create collection item: \(request.name)",
                 outputDescription: "Collection item inscription",
                 lockingScript: lockingScript,
-                tags: [
-                    "type:\(contentType)",
-                    "origin",
-                    "name:\(nameTag)",
-                    "subType:collectionItem",
-                    "collectionId:\(request.collectionId)",
-                ],
-                customInstructions: try CustomInstructions(
+                tags: tags,
+                customInstructions: OrdinalRemittance.buildCustomInstructions(
                     protocolID: try OneSatConstants.p1satProtocolID,
                     keyID: keyID,
-                    name: nameTag
-                ).encoded()
+                    tags: tags,
+                    name: displayName
+                )
             )
             guard result.txid != nil else {
                 return ActionResult.failure(OneSatActionError.noTxidReturned)
@@ -372,5 +374,14 @@ public enum Collections {
             of: #"^(_\d+|[0-9a-fA-F]{64}_\d+(:-?\d+)?)$"#,
             options: .regularExpression
         ) != nil
+    }
+
+    private static func typeTag(_ contentType: String) -> String {
+        let base = contentType.split(
+            separator: ";",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        return "type:\(base.isEmpty ? contentType : base)"
     }
 }

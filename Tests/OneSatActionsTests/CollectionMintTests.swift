@@ -29,7 +29,7 @@ final class CollectionMintTests: XCTestCase {
             ctx,
             Collections.MintRequest(
                 base64Content: "cm9vdA==",
-                contentType: "text/plain",
+                contentType: "text/plain; charset=utf-8",
                 name: "Root",
                 description: "Collection root",
                 quantity: 2
@@ -44,7 +44,7 @@ final class CollectionMintTests: XCTestCase {
             ctx,
             Collections.MintItemRequest(
                 base64Content: "aW1hZ2U=",
-                contentType: "image/png",
+                contentType: "image/png; profile=test",
                 name: metadataName,
                 collectionId: Self.collectionId,
                 mintNumber: 1,
@@ -113,13 +113,30 @@ final class CollectionMintTests: XCTestCase {
             XCTAssertEqual(publish.outputs[0].satoshis, 1)
             XCTAssertEqual(publish.outputs[0].basket, "1sat")
             XCTAssertTrue(publish.outputs[0].tags.contains("origin"))
+            XCTAssertFalse(publish.outputs[0].tags.contains { $0.hasPrefix("name:") })
+            XCTAssertEqual(
+                try CustomInstructions.parse(XCTUnwrap(publish.outputs[0].customInstructions)).name,
+                index == 0 ? "Root" : metadataName
+            )
+            let instructions = try XCTUnwrap(
+                JSONSerialization.jsonObject(
+                    with: Data(XCTUnwrap(publish.outputs[0].customInstructions).utf8)
+                ) as? [String: Any]
+            )
             if index == 0 {
                 XCTAssertTrue(publish.outputs[0].tags.contains("subType:collection"))
                 XCTAssertTrue(publish.outputs[0].tags.contains("type:text/plain"))
-                XCTAssertTrue(publish.outputs[0].tags.contains("name:Root"))
+                XCTAssertFalse(publish.outputs[0].tags.contains("type:text/plain; charset=utf-8"))
+                XCTAssertNil(instructions["collection"])
             } else {
                 XCTAssertTrue(publish.outputs[0].tags.contains("subType:collectionItem"))
-                XCTAssertTrue(publish.outputs[0].tags.contains("collectionId:\(Self.collectionId)"))
+                XCTAssertTrue(publish.outputs[0].tags.contains("collection:\(Self.collectionId)"))
+                XCTAssertFalse(publish.outputs[0].tags.contains { $0.hasPrefix("collectionId:") })
+                XCTAssertEqual(instructions["collection"] as? String, Self.collectionId)
+                if index == 1 {
+                    XCTAssertTrue(publish.outputs[0].tags.contains("type:image/png"))
+                    XCTAssertFalse(publish.outputs[0].tags.contains("type:image/png; profile=test"))
+                }
             }
             let address = try expectValidSigma(scripts[index], outpoint: outpoint)
             addresses.append(address)
@@ -241,7 +258,8 @@ final class CollectionMintTests: XCTestCase {
                     satoshis: (output["satoshis"] as? NSNumber)?.uint64Value ?? 0,
                     basket: output["basket"] as? String,
                     lockingScript: output["lockingScript"] as? String ?? "",
-                    tags: output["tags"] as? [String] ?? []
+                    tags: output["tags"] as? [String] ?? [],
+                    customInstructions: output["customInstructions"] as? String
                 )
             }
             let inputs = (args["inputs"] as? [[String: Any]] ?? []).map { input in
@@ -321,6 +339,7 @@ private struct CapturedOutput {
     let basket: String?
     let lockingScript: String
     let tags: [String]
+    let customInstructions: String?
 }
 
 private struct CapturedInput {

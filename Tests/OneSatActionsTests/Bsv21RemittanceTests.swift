@@ -4,6 +4,26 @@ import XCTest
 @testable import OneSatActions
 
 final class Bsv21RemittanceTests: XCTestCase {
+    func test_ordinalDisplayNameUsesJavaScriptUTF16LimitWithoutInvalidSurrogates() {
+        let fitsExactly = String(repeating: "a", count: 62) + "😀"
+        XCTAssertEqual(OrdinalRemittance.displayName(fitsExactly), fitsExactly)
+        XCTAssertEqual(OrdinalRemittance.displayName(fitsExactly)?.utf16.count, 64)
+
+        let splitSurrogate = String(repeating: "a", count: 63) + "😀tail"
+        let safePrefix = String(repeating: "a", count: 63)
+        XCTAssertEqual(OrdinalRemittance.displayName(splitSurrogate), safePrefix)
+        XCTAssertEqual(OrdinalRemittance.displayName(splitSurrogate)?.utf16.count, 63)
+    }
+
+    func test_ordinalDisplayNameReadsPartialCustomInstructionsJSON() {
+        XCTAssertEqual(
+            OrdinalRemittance.displayName(
+                fromCustomInstructions: "{\"name\":\"Canonical Ape\"}"
+            ),
+            "Canonical Ape"
+        )
+    }
+
     func test_filterTags() {
         XCTAssertEqual(Bsv21Remittance.filterTags(tokenId: "abc_0"), ["bsv21:abc_0"])
         XCTAssertEqual(Bsv21Remittance.filterTags(deploy: true), ["bsv21:deploy"])

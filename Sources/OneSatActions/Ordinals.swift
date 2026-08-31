@@ -180,15 +180,29 @@ public enum Ordinals {
         contentType: String? = nil,
         origin: String? = nil,
         name: String? = nil
-    ) -> (tags: [String], basket: String) {
-        var contentTypes: [String] = contentType.map { [$0] } ?? []
+    ) -> (tags: [String], basket: String, name: String?) {
+        func baseContentType(_ value: String) -> String {
+            String(value.split(
+                separator: ";",
+                maxSplits: 1,
+                omittingEmptySubsequences: false
+            )[0])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var resolvedContentType = contentType.map(baseContentType).flatMap { $0.isEmpty ? nil : $0 }
         var resolvedOrigin = origin
         var resolvedName = name
         if let tags {
             for tag in tags {
                 if tag.hasPrefix("type:") {
-                    let value = String(tag.dropFirst(5))
-                    if !contentTypes.contains(value) { contentTypes.append(value) }
+                    let value = baseContentType(String(tag.dropFirst(5)))
+                    if !value.isEmpty,
+                       resolvedContentType == nil
+                        || (resolvedContentType?.contains("/") == false && value.contains("/"))
+                    {
+                        resolvedContentType = value
+                    }
                 }
                 if resolvedOrigin == nil, tag == "origin" {
                     resolvedOrigin = outpoint
@@ -200,15 +214,14 @@ public enum Ordinals {
                 }
             }
         }
-        let resolvedContentType = contentTypes.last
-        resolvedOrigin = resolvedOrigin ?? outpoint
-        var next: [String] = contentTypes.map { "type:\($0)" }
-        if let resolvedOrigin { next.append("origin:\(resolvedOrigin)") }
-        if let resolvedName { next.append("name:\(String(resolvedName.prefix(64)))") }
+        var next: [String] = resolvedContentType.map { ["type:\($0)"] } ?? []
+        if let resolvedOrigin {
+            next.append("origin:\(Bsv21Remittance.formatOrdinalOutpoint(resolvedOrigin))")
+        }
         let basket = resolvedContentType == "application/op-ns"
             ? OneSatConstants.opnsBasket
             : OneSatConstants.ordinalsBasket
-        return (next, basket)
+        return (next, basket, OrdinalRemittance.displayName(resolvedName))
     }
 
     /// `ordinalSeedTags` from `packages/actions/src/utils/ordinalSeedTags.ts`.
@@ -351,12 +364,7 @@ public enum Ordinals {
                 lockingScript = try Sigma.appendPlaceholder(to: lockingScript, vin: inputs.count - 1)
             }
             if item.toSelf {
-                var sourceName: String?
-                if let instructions = item.ordinal.customInstructions,
-                   let parsed = try? CustomInstructions.parse(instructions)
-                {
-                    sourceName = parsed.name
-                }
+                let sourceName = sourceName(from: item.ordinal)
                 try outputs.append(
                     WalletCreateActionOutput(
                         lockingScript: lockingScript.bytes,
@@ -493,12 +501,7 @@ public enum Ordinals {
         tags.append("ordlock")
         tags.append("price:\(request.price)")
 
-        var sourceName: String?
-        if let instructions = request.ordinal.customInstructions,
-           let parsed = try? CustomInstructions.parse(instructions)
-        {
-            sourceName = parsed.name
-        }
+        let sourceName = sourceName(from: request.ordinal)
 
         let inputID = OneSatConstants.assetID(in: request.ordinal.tags)
         let labels = inputID.map {
@@ -586,12 +589,7 @@ public enum Ordinals {
             network: ctx.chain.network
         )
         let tags = seedTags(source: request.listing)
-        var sourceName: String?
-        if let instructions = request.listing.customInstructions,
-           let source = try? CustomInstructions.parse(instructions)
-        {
-            sourceName = source.name
-        }
+        let sourceName = sourceName(from: request.listing)
         let inputID = OneSatConstants.assetID(in: request.listing.tags)
         let labels = inputID.map {
             [OneSatConstants.inputAssetLabel(basket: OneSatConstants.ordinalsBasket, id: $0)]
@@ -699,7 +697,7 @@ public enum Ordinals {
                     protocolID: try OneSatConstants.p1satProtocolID,
                     keyID: outpointText,
                     tags: resolved.tags,
-                    name: name
+                    name: resolved.name
                 ),
                 tags: resolved.tags
             ),
@@ -856,6 +854,18 @@ public enum Ordinals {
             for index in 0..<8 { value |= UInt64(bytes[1 + index]) << (index * 8) }
             return (value, 9)
         }
+    }
+
+    static func sourceName(from output: WalletOutput) -> String? {
+        if let displayName = OrdinalRemittance.displayName(
+            fromCustomInstructions: output.customInstructions
+        ) {
+            return displayName
+        }
+        let legacyName = output.tags?.first(where: { $0.hasPrefix("name:") }).map {
+            String($0.dropFirst(5))
+        }
+        return OrdinalRemittance.displayName(legacyName)
     }
 
     static func signP2PKHInputs(

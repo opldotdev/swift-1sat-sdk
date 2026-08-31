@@ -95,35 +95,7 @@ public enum AssetSweep {
                         unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
                     )
                 )
-                let address = try P1SATKey.address(
-                    identity: ctx.identity,
-                    keyID: keyID,
-                    counterparty: .self,
-                    forSelf: true,
-                    network: ctx.chain.network
-                )
-                let resolved = Ordinals.resolveOrdinalTags(
-                    outpoint: keyID,
-                    tags: nil,
-                    contentType: input.contentType,
-                    origin: input.origin,
-                    name: input.name
-                )
-                let name = input.name.map { String($0.prefix(64)) }
-                outputs.append(
-                    try WalletCreateActionOutput(
-                        lockingScript: try ActionScript.payToPublicKeyHash(address).bytes,
-                        satoshis: 1,
-                        outputDescription: "Ordinal \(input.origin ?? keyID)",
-                        basket: resolved.basket,
-                        customInstructions: try CustomInstructions(
-                            protocolID: try OneSatConstants.p1satProtocolID,
-                            keyID: keyID,
-                            name: name
-                        ).encoded(),
-                        tags: resolved.tags
-                    )
-                )
+                outputs.append(try ordinalOutput(ctx, input: input, keyID: keyID))
             }
 
             let keyMap = keysByOutpoint
@@ -143,6 +115,41 @@ public enum AssetSweep {
         } catch {
             return ActionResult.failure(error.localizedDescription)
         }
+    }
+
+    static func ordinalOutput(
+        _ ctx: OneSatContext,
+        input: OrdinalInput,
+        keyID: String
+    ) throws -> WalletCreateActionOutput {
+        let address = try P1SATKey.address(
+            identity: ctx.identity,
+            keyID: keyID,
+            counterparty: .self,
+            forSelf: true,
+            network: ctx.chain.network
+        )
+        let resolved = Ordinals.resolveOrdinalTags(
+            outpoint: keyID,
+            tags: nil,
+            contentType: input.contentType,
+            origin: input.origin,
+            name: input.name
+        )
+        return try WalletCreateActionOutput(
+            lockingScript: try ActionScript.payToPublicKeyHash(address).bytes,
+            satoshis: 1,
+            outputDescription: "Ordinal \(input.origin ?? keyID)",
+            basket: resolved.basket,
+            customInstructions: OrdinalRemittance.buildCustomInstructions(
+                protocolID: try OneSatConstants.p1satProtocolID,
+                keyID: keyID,
+                counterparty: "self",
+                tags: resolved.tags,
+                name: resolved.name
+            ),
+            tags: resolved.tags
+        )
     }
 
     /// Consolidates one tick-based BSV-20 token onto a P1SAT-derived transfer output.

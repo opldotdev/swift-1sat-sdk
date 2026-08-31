@@ -31,7 +31,28 @@ public enum OrdinalRemittance {
         guard let name else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return nil }
-        return String(trimmed.prefix(maxNameLength))
+        var result = ""
+        var utf16Count = 0
+        for scalar in trimmed.unicodeScalars {
+            let width = scalar.value > 0xFFFF ? 2 : 1
+            // JS slice can leave a lone surrogate at this boundary. Swift keeps valid Unicode,
+            // so omit the split non-BMP scalar and return at most 63 units in that edge case.
+            guard utf16Count + width <= maxNameLength else { break }
+            result.unicodeScalars.append(scalar)
+            utf16Count += width
+        }
+        return result
+    }
+
+    /// Read a display name without requiring derivation fields in the CI JSON object.
+    public static func displayName(fromCustomInstructions instructions: String?) -> String? {
+        guard let instructions,
+              let object = try? JSONSerialization.jsonObject(with: Data(instructions.utf8)),
+              let dictionary = object as? [String: Any]
+        else {
+            return nil
+        }
+        return displayName(dictionary["name"] as? String)
     }
 
     /// Load-bearing remittance fields mirrored from filter tags. Outpoints become `_`.
