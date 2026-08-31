@@ -40,7 +40,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "e0628f2ef9aa9fcaf62c2a0c0a1b0e8e2e2f392d"
+            revision: "5d8f7812539fa55539242d30fd720ecaea2c5908"
         ),
     ],
     targets: [
@@ -102,7 +102,16 @@ let package = Package(
         // 1Sat assets. Canonical BRC-116 grant authority remains in swift-wallet-toolbox.
         .target(
             name: "OneSatPermissions",
-            dependencies: ["OneSatClient"]
+            dependencies: [
+                "OneSatClient",
+                "OneSatTemplates",
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVCrypto", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxPermissions", package: "swift-wallet-toolbox"),
+            ]
         ),
 
         // Action families from `@1sat/actions`: tracked create/sign, ordinals, inscribe,
@@ -164,7 +173,16 @@ let package = Package(
         ),
         .testTarget(
             name: "OneSatPermissionsTests",
-            dependencies: ["OneSatPermissions", "OneSatClient"]
+            dependencies: [
+                "OneSatPermissions",
+                "OneSatClient",
+                "OneSatTemplates",
+                .product(name: "BSVScript", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxPermissions", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
+            ]
         ),
         .testTarget(
             name: "OneSatActionsTests",

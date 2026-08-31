@@ -61,6 +61,10 @@ public struct OneSatAssetPermissionReview: Codable, Equatable, Sendable {
         }
     }
 
+    /// Unique identity assigned by the protocol-neutral registry to this exact invocation.
+    /// Hosts must include it in prompt deduplication so two byte-identical calls cannot share
+    /// one user decision.
+    public let requestID: UUID
     public let originator: String
     public let title: String
     public let summary: String
@@ -69,6 +73,7 @@ public struct OneSatAssetPermissionReview: Codable, Equatable, Sendable {
     public let bsv21Verification: Bsv21PermissionVerificationContext?
 
     public init(
+        requestID: UUID,
         originator: String,
         title: String = "Transaction Request",
         summary: String,
@@ -76,6 +81,7 @@ public struct OneSatAssetPermissionReview: Codable, Equatable, Sendable {
         trust: OneSatPermissionTrust? = nil,
         bsv21Verification: Bsv21PermissionVerificationContext? = nil
     ) {
+        self.requestID = requestID
         self.originator = originator
         self.title = title
         self.summary = summary
@@ -86,6 +92,7 @@ public struct OneSatAssetPermissionReview: Codable, Equatable, Sendable {
 
     public func applying(_ verification: OneSatPermissionTrust) -> Self {
         Self(
+            requestID: requestID,
             originator: originator,
             title: title,
             summary: summary,
@@ -169,20 +176,25 @@ public struct Bsv21PermissionVerifier: Sendable {
             )
         }
 
-        if !context.inputOutpoints.isEmpty, let validate = services.validateOutputs {
+        if !context.inputOutpoints.isEmpty {
+            guard let validate = services.validateOutputs else {
+                return .init(
+                    state: .unverified,
+                    note: "Token input validation is unavailable"
+                )
+            }
             guard let outputs = await resolve({
                 try await validate(context.tokenID, context.inputOutpoints)
             }) else {
                 return .init(state: .unverified)
             }
             let valid = Set(outputs.map { Self.canonicalOutpoint($0.outpoint) })
-            let missing = context.inputOutpoints.filter {
-                !valid.contains(Self.canonicalOutpoint($0))
-            }
-            if !missing.isEmpty {
+            let requested = Set(context.inputOutpoints.map(Self.canonicalOutpoint))
+            if valid != requested || outputs.count != requested.count {
+                let missing = requested.subtracting(valid)
                 return .init(
                     state: .mismatch,
-                    note: missing.count == 1
+                    note: missing.count <= 1
                         ? "A spent token output is not valid on the overlay"
                         : "\(missing.count) spent token outputs are not valid on the overlay"
                 )

@@ -92,6 +92,26 @@ final class Bsv21PermissionVerifierTests: XCTestCase {
         XCTAssertEqual(validationResult.state, .unverified)
     }
 
+    func test_tokenInputsCannotVerifyWithoutAnOutputValidator() async {
+        let verifier = Bsv21PermissionVerifier(services: .init(tokenDetails: { [tokenID] _ in
+            .init(
+                tokenID: tokenID,
+                token: .init(id: tokenID, symbol: "GOLD", decimals: "2", icon: nil),
+                status: .init(isActive: true)
+            )
+        }))
+
+        let result = await verifier.verify(.init(
+            tokenID: tokenID,
+            inputOutpoints: [input]
+        ))
+
+        XCTAssertEqual(result, .init(
+            state: .unverified,
+            note: "Token input validation is unavailable"
+        ))
+    }
+
     func test_timeoutDoesNotAwaitAnOperationThatIgnoresCancellation() async {
         let verifier = Bsv21PermissionVerifier(
             services: .init(tokenDetails: { [tokenID] _ in
@@ -120,6 +140,7 @@ final class Bsv21PermissionVerifierTests: XCTestCase {
 
     func test_reviewRoundTripsAcrossProcessBoundaryAndAcceptsVerification() throws {
         let review = OneSatAssetPermissionReview(
+            requestID: UUID(),
             originator: "example.com",
             summary: "Send BSV21",
             panels: [.init(
