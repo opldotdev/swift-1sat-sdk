@@ -27,6 +27,9 @@ public enum BasketMigration {
         public let skipped: Int
         public let outpoints: [String]
         public let errors: [MoveError]
+        /// True only when the source listed empty (or from == to). Partial
+        /// moves and skipped rows are never complete.
+        public let complete: Bool
 
         public init(
             from: String,
@@ -34,7 +37,8 @@ public enum BasketMigration {
             moved: Int,
             skipped: Int,
             outpoints: [String],
-            errors: [MoveError]
+            errors: [MoveError],
+            complete: Bool
         ) {
             self.from = from
             self.to = to
@@ -42,25 +46,32 @@ public enum BasketMigration {
             self.skipped = skipped
             self.outpoints = outpoints
             self.errors = errors
+            self.complete = complete
         }
     }
 
     public struct MigrateResult: Equatable, Sendable {
         public let results: [MoveResult]
         public let totalMoved: Int
+        /// True only when every source basket listed empty.
+        public let complete: Bool
 
         public init(results: [MoveResult], totalMoved: Int) {
             self.results = results
             self.totalMoved = totalMoved
+            self.complete = results.allSatisfy(\.complete)
         }
     }
 
-    /// `LEGACY_P1SAT_BASKET_MIGRATIONS` plus Swift's own `p 1sat bsv20` filing.
+    /// `LEGACY_P1SAT_BASKET_MIGRATIONS` plus leftover `ordinals` / `p 1sat bsv20`.
     public static var legacyMigrations: [(from: String, to: String)] {
         OneSatConstants.legacyP1SatBasketMigrations
     }
 
-    /// Move every known legacy `p 1sat …` basket into its preferred plain name.
+    /// Move every known leftover inventory basket into its preferred name.
+    /// Drains each source (offset 0 after each successful page) until empty.
+    /// `complete` is true only when every source listed empty. Errors stop
+    /// that pair; remaining pairs still run.
     public static func migrateLegacyP1SatBaskets(
         _ ctx: OneSatContext,
         internalizer: any ActionInternalizer,
@@ -69,7 +80,7 @@ public enum BasketMigration {
         var results: [MoveResult] = []
         var totalMoved = 0
         for pair in legacyMigrations {
-            let result = try await moveBasketOutputs(
+            let result = try await drainBasket(
                 ctx,
                 internalizer: internalizer,
                 from: pair.from,
@@ -80,6 +91,58 @@ public enum BasketMigration {
             totalMoved += result.moved
         }
         return MigrateResult(results: results, totalMoved: totalMoved)
+    }
+
+    /// Re-list from offset 0 until the source is empty or a page skips.
+    private static func drainBasket(
+        _ ctx: OneSatContext,
+        internalizer: any ActionInternalizer,
+        from: String,
+        to: String,
+        limit: Int
+    ) async throws -> MoveResult {
+        var moved = 0
+        var skipped = 0
+        var outpoints: [String] = []
+        var errors: [MoveError] = []
+        var complete = false
+        var seen = Set<String>()
+        while true {
+            let page = try await moveBasketOutputs(
+                ctx,
+                internalizer: internalizer,
+                from: from,
+                to: to,
+                limit: limit
+            )
+            moved += page.moved
+            skipped += page.skipped
+            outpoints.append(contentsOf: page.outpoints)
+            errors.append(contentsOf: page.errors)
+            if page.complete {
+                complete = errors.isEmpty && skipped == 0
+                break
+            }
+            if !page.errors.isEmpty || page.skipped > 0 {
+                complete = false
+                break
+            }
+            let fresh = Set(page.outpoints)
+            if fresh.isEmpty || !fresh.isDisjoint(with: seen) {
+                complete = false
+                break
+            }
+            seen.formUnion(fresh)
+        }
+        return MoveResult(
+            from: from,
+            to: to,
+            moved: moved,
+            skipped: skipped,
+            outpoints: outpoints,
+            errors: errors,
+            complete: complete
+        )
     }
 
     public static func moveBasketOutputs(
@@ -96,7 +159,15 @@ public enum BasketMigration {
             throw OneSatActionError.moveBasketBasketsRequired
         }
         if from == to {
-            return MoveResult(from: from, to: to, moved: 0, skipped: 0, outpoints: [], errors: [])
+            return MoveResult(
+                from: from,
+                to: to,
+                moved: 0,
+                skipped: 0,
+                outpoints: [],
+                errors: [],
+                complete: true
+            )
         }
 
         let listed = try await ctx.storage.listOutputs(
@@ -125,10 +196,26 @@ public enum BasketMigration {
         internalizer: any ActionInternalizer
     ) async throws -> MoveResult {
         if from == to {
-            return MoveResult(from: from, to: to, moved: 0, skipped: 0, outpoints: [], errors: [])
+            return MoveResult(
+                from: from,
+                to: to,
+                moved: 0,
+                skipped: 0,
+                outpoints: [],
+                errors: [],
+                complete: true
+            )
         }
         if listed.outputs.isEmpty {
-            return MoveResult(from: from, to: to, moved: 0, skipped: 0, outpoints: [], errors: [])
+            return MoveResult(
+                from: from,
+                to: to,
+                moved: 0,
+                skipped: 0,
+                outpoints: [],
+                errors: [],
+                complete: true
+            )
         }
         guard let beef = listed.beef else {
             throw OneSatActionError.moveBasketMissingBEEF(basket: from)
@@ -192,7 +279,8 @@ public enum BasketMigration {
             moved: moved,
             skipped: skipped,
             outpoints: outpoints,
-            errors: errors
+            errors: errors,
+            complete: false
         )
     }
 }
