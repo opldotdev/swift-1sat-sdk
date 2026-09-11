@@ -260,14 +260,35 @@ final class FamilyBuilderTests: XCTestCase {
         XCTAssertThrowsError(try Locks.maturedLocks(outputs: [output], currentHeight: 99))
     }
 
-    func test_listBuilderUsesOrdLockAndCancelDerivation() throws {
+    func test_listBuilderRefusesCreate() throws {
         let identity = try ActionVectors.identity()
         let ctx = try dummyContext(identity: identity)
         let ordinal = try walletOutput(
             tags: ["type:image/png", "id:list_0"],
             instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
         )
-        let prepared = try Ordinals.buildList(
+        XCTAssertThrowsError(
+            try Ordinals.buildList(
+                ctx,
+                Ordinals.ListRequest(
+                    ordinal: ordinal,
+                    price: 50_000,
+                    payAddress: ActionVectors.payAddress
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? OneSatActionError, .listingCreateDisabled)
+        }
+    }
+
+    func test_listActionRefusesCreate() async throws {
+        let identity = try ActionVectors.identity()
+        let ctx = try dummyContext(identity: identity)
+        let ordinal = try walletOutput(
+            tags: ["type:image/png", "id:list_0"],
+            instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
+        )
+        let result = await Ordinals.list(
             ctx,
             Ordinals.ListRequest(
                 ordinal: ordinal,
@@ -275,17 +296,8 @@ final class FamilyBuilderTests: XCTestCase {
                 payAddress: ActionVectors.payAddress
             )
         )
-        XCTAssertTrue(prepared.outputs[0].tags.contains("ordlock"))
-        XCTAssertTrue(prepared.outputs[0].tags.contains("price:50000"))
-        XCTAssertEqual(prepared.outputs[0].basket, OneSatConstants.ordinalsBasket)
-        XCTAssertEqual(prepared.outputs[0].satoshis, 1)
-        let cancel = try Ordinals.cancelAddress(identity: identity, outpoint: ActionVectors.outpoint)
-        let expected = try OrdLock.lock(
-            cancelAddress: cancel.description,
-            payAddress: ActionVectors.payAddress,
-            price: 50_000
-        )
-        XCTAssertEqual(prepared.outputs[0].lockingScript, expected.bytes)
+        XCTAssertEqual(result.error, OneSatActionError.listingCreateDisabled.wireMessage)
+        XCTAssertNil(result.txid)
     }
 
     func test_ordinalSpendBuildersMoveLegacyNamesIntoCustomInstructions() throws {
@@ -315,14 +327,18 @@ final class FamilyBuilderTests: XCTestCase {
                 transfers: [Ordinals.TransferItem(ordinal: legacyOnly, toSelf: true)]
             )
         )
-        let listing = try Ordinals.buildList(
-            ctx,
-            Ordinals.ListRequest(
-                ordinal: canonical,
-                price: 50_000,
-                payAddress: ActionVectors.payAddress
+        XCTAssertThrowsError(
+            try Ordinals.buildList(
+                ctx,
+                Ordinals.ListRequest(
+                    ordinal: canonical,
+                    price: 50_000,
+                    payAddress: ActionVectors.payAddress
+                )
             )
-        )
+        ) { error in
+            XCTAssertEqual(error as? OneSatActionError, .listingCreateDisabled)
+        }
         let cancel = try Ordinals.buildCancel(
             ctx,
             Ordinals.CancelRequest(listing: legacyOnly)
@@ -333,14 +349,10 @@ final class FamilyBuilderTests: XCTestCase {
             "Legacy Ape"
         )
         XCTAssertEqual(
-            try CustomInstructions.parse(XCTUnwrap(listing.outputs[0].customInstructions)).name,
-            "Canonical Ape"
-        )
-        XCTAssertEqual(
             try CustomInstructions.parse(XCTUnwrap(cancel.outputs[0].customInstructions)).name,
             "Legacy Ape"
         )
-        for output in [transfer.outputs[0], listing.outputs[0], cancel.outputs[0]] {
+        for output in [transfer.outputs[0], cancel.outputs[0]] {
             XCTAssertFalse(output.tags.contains { $0.hasPrefix("name:") })
         }
     }
