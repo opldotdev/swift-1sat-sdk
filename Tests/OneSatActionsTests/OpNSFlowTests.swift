@@ -297,6 +297,39 @@ final class OpNSFlowTests: XCTestCase {
         XCTAssertEqual(instructions.counterparty, .self)
     }
 
+    func test_cancelListingRestoresOpnsMetadataAndReportsFundingFailure() async throws {
+        let fixture = try beefFixture()
+        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
+        let ctx = try context(identity: ActionVectors.identity(), transport: transport)
+        let listing = try walletOutput(tags: [
+            "opns", "type:application/op-ns", "origin:\(ActionVectors.outpoint)",
+            "name:alice", "ordlock", "opns:published", "id:aa_0",
+        ])
+        let result = await OpNS.cancelListing(ctx, OpNS.Request(ordinal: listing, inputBEEF: fixture))
+        XCTAssertNotNil(result.error, "failed funding cannot be reported as a completed cancellation")
+        XCTAssertNil(result.txid)
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["createAction"])
+        let bodies = await transport.bodies
+        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(bodies[0])) as? [String: Any])
+        let params = try XCTUnwrap(envelope["params"] as? [Any])
+        let args = try XCTUnwrap(params[1] as? [String: Any])
+        XCTAssertEqual(args["description"] as? String, "Cancel OpNS listing alice")
+        let outputs = try XCTUnwrap(args["outputs"] as? [[String: Any]])
+        XCTAssertEqual(outputs[0]["basket"] as? String, OneSatConstants.opnsBasket)
+        let tags = try XCTUnwrap(outputs[0]["tags"] as? [String])
+        XCTAssertTrue(tags.contains("opns"))
+        XCTAssertTrue(tags.contains("type:application/op-ns"))
+        XCTAssertFalse(tags.contains("ordlock"))
+        XCTAssertFalse(tags.contains("opns:published"))
+        let instructions = try CustomInstructions.parse(try XCTUnwrap(outputs[0]["customInstructions"] as? String))
+        XCTAssertEqual(instructions.name, "alice")
+        XCTAssertEqual(instructions.keyID, ActionVectors.outpoint)
+        XCTAssertEqual(args["labels"] as? [String], [OneSatConstants.inputAssetLabel(basket: OneSatConstants.opnsBasket, id: "aa_0")])
+        let options = try XCTUnwrap(args["options"] as? [String: Any])
+        XCTAssertEqual(options["randomizeOutputs"] as? Bool, false)
+    }
+
     private func walletOutput(tags: [String]) throws -> WalletOutput {
         try WalletOutput(
             satoshis: 1,

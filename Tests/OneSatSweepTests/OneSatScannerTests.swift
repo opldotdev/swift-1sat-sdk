@@ -1,13 +1,15 @@
 import XCTest
 import BSVKeys
 import BSVScript
+import BSVTransaction
+import OneSatTemplates
 import ToolboxServices
 @testable import OneSatSweep
 
 /// Reading categorised outputs from the 1Sat indexer's SSE stream.
 ///
 /// The unit tests parse a canned SSE body in the exact frame format the endpoint emits
-/// (`event: txo` / `event: done`), so the parsing and the P2PKH-script reconstruction are checked
+/// (`event: txo` / `event: done`), so parsing and source-script resolution are checked
 /// offline. The live test confirms the shape still holds against `api.1sat.app`.
 final class OneSatScannerTests: XCTestCase {
 
@@ -18,11 +20,6 @@ final class OneSatScannerTests: XCTestCase {
     }
 
     private let address = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"
-
-    private func p2pkh(_ address: String) throws -> [UInt8] {
-        try Script.payToPublicKeyHash(Address(address).publicKeyHash, maximumByteCount: 1 << 20)
-            .bytes
-    }
 
     /// A stream with a plain coin, a token, a lock, and the done marker.
     private let sse = """
@@ -47,19 +44,19 @@ final class OneSatScannerTests: XCTestCase {
         """
 
     func test_theStreamParsesIntoCategorisedOutputs() throws {
-        let outputs = try OneSatScanner.parse(sse: Array(sse.utf8), lockingScript: try p2pkh(address))
+        let outputs = try OneSatScanner.parse(sse: Array(sse.utf8))
 
         XCTAssertEqual(outputs.count, 3)
         XCTAssertEqual(outputs[0].satoshis, 100_000)
         XCTAssertEqual(outputs[0].kind, .fundable)
-        XCTAssertEqual(outputs[0].lockingScript, try p2pkh(address))
+        XCTAssertEqual(outputs[0].lockingScript, [], "source bytes are resolved during scan")
         XCTAssertEqual(outputs[1].kind, .bsv21(tokenID: "gold"))
         XCTAssertEqual(outputs[2].kind, .locked(until: 830_000))
     }
 
     /// The whole point: through the plan, only the coin is swept.
     func test_theScanFeedsASafePlan() throws {
-        let outputs = try OneSatScanner.parse(sse: Array(sse.utf8), lockingScript: try p2pkh(address))
+        let outputs = try OneSatScanner.parse(sse: Array(sse.utf8))
 
         let plan = SweepPlan.from(scan: outputs)
 
@@ -80,7 +77,7 @@ final class OneSatScannerTests: XCTestCase {
 
             """
         let outputs = try OneSatScanner.parse(
-            sse: Array(withSpend.utf8), lockingScript: try p2pkh(address)
+            sse: Array(withSpend.utf8)
         )
 
         XCTAssertTrue(outputs.isEmpty, "an already-spent output is not swept")
@@ -96,7 +93,7 @@ final class OneSatScannerTests: XCTestCase {
 
             """
         let outputs = try OneSatScanner.parse(
-            sse: Array(onlyControl.utf8), lockingScript: try p2pkh(address)
+            sse: Array(onlyControl.utf8)
         )
 
         XCTAssertTrue(outputs.isEmpty)
@@ -108,6 +105,94 @@ final class OneSatScannerTests: XCTestCase {
         )
         XCTAssertNil(OneSatScanner.splitOutpoint(String(repeating: "b", count: 64) + "_7"))
         XCTAssertNil(OneSatScanner.splitOutpoint("not-an-outpoint"))
+    }
+
+    func test_scanResolvesAnOrdLockSourceAndCachesTheTransaction() async throws {
+        let script = try OrdLock.lock(
+            cancelAddress: address, payAddress: address, price: 1_000
+        )
+        let source = Transaction(version: 1, inputs: [], outputs: [
+            TransactionOutput(satoshis: 1, lockingScript: script),
+            TransactionOutput(satoshis: 1, lockingScript: try Script(bytes: [0x51], maximumByteCount: 10)),
+        ], lockTime: 0)
+        let txid = try source.transactionID(limits: Sweep.defaultLimits).displayHex
+        let rows = """
+            event: txo
+            data: {"outpoint":"\(txid).0","satoshis":1,"events":["ordlock"]}
+
+            event: txo
+            data: {"outpoint":"\(txid).1","satoshis":1,"events":["ord"]}
+
+            event: done
+            data: {}
+
+            """
+        let http = SourceHTTP(stream: Array(rows.utf8), raw: try source.serialized(limits: Sweep.defaultLimits))
+        let outputs = try await OneSatScanner(http: http).scan(address: address)
+        XCTAssertEqual(outputs.map(\.lockingScript), source.outputs.map { $0.lockingScript.bytes })
+        XCTAssertEqual(outputs[0].kind, .ordinal)
+        let paths = await http.paths
+        XCTAssertEqual(paths.count, 2, "fetch each source transaction once")
+        XCTAssertEqual(paths[1], "/1sat/beef/\(txid)/tx")
+    }
+
+    func test_plainFundingRowWithoutEventsResolvesAndRemainsFundable() async throws {
+        let script = try Script.payToPublicKeyHash(
+            Address(address).publicKeyHash, maximumByteCount: 10_000
+        )
+        let source = Transaction(version: 1, inputs: [], outputs: [
+            TransactionOutput(satoshis: 100_000, lockingScript: script),
+        ], lockTime: 0)
+        let txid = try source.transactionID(limits: Sweep.defaultLimits).displayHex
+        // The owner API's events,omitempty omits the field when this output has no events.
+        let rows = """
+            event: txo
+            data: {"outpoint":"\(txid).0","score":1,"satoshis":100000}
+
+            event: done
+            data: {}
+
+            """
+        let http = SourceHTTP(stream: Array(rows.utf8), raw: try source.serialized(limits: Sweep.defaultLimits))
+        let outputs = try await OneSatScanner(http: http).scan(address: address)
+        XCTAssertEqual(outputs.count, 1)
+        XCTAssertEqual(outputs[0].events, [])
+        XCTAssertEqual(outputs[0].kind, .fundable)
+        XCTAssertEqual(outputs[0].lockingScript, script.bytes)
+        XCTAssertEqual(SweepPlan.from(scan: outputs).fundable.first?.satoshis, 100_000)
+
+        for malformed in ["null", "true", "{}", "[1]", "[\"ordlock\",1]"] {
+            let invalid = rows.replacingOccurrences(
+                of: "\"satoshis\":100000", with: "\"satoshis\":100000,\"events\":\(malformed)"
+            )
+            XCTAssertThrowsError(try OneSatScanner.parse(sse: Array(invalid.utf8)))
+        }
+        XCTAssertThrowsError(try OneSatScanner.parse(sse: Array(
+            rows.replacingOccurrences(of: ",\"satoshis\":100000", with: "").utf8
+        )))
+    }
+
+    func test_incompleteStreamsAndScanLimitFailExplicitly() throws {
+        XCTAssertThrowsError(try OneSatScanner.parse(sse: Array(sse.utf8), limit: 3)) { error in
+            XCTAssertEqual(error as? AssetScannerError, .scanLimitReached(limit: 3))
+        }
+        let incomplete = sse.components(separatedBy: "event: done")[0]
+        XCTAssertThrowsError(try OneSatScanner.parse(sse: Array(incomplete.utf8)))
+        let failed = incomplete + "event: error\ndata: failed\n\nevent: done\ndata: {}\n\n"
+        XCTAssertThrowsError(try OneSatScanner.parse(sse: Array(failed.utf8)))
+    }
+
+    private actor SourceHTTP: HTTPGet {
+        let stream: [UInt8]
+        let raw: [UInt8]
+        private(set) var paths: [String] = []
+
+        init(stream: [UInt8], raw: [UInt8]) { self.stream = stream; self.raw = raw }
+
+        func get(_ url: URL) async throws -> (status: Int, body: [UInt8]) {
+            paths.append(url.path)
+            return (200, url.path.hasSuffix("/txos") ? stream : raw)
+        }
     }
 
     /// Against the real indexer. Skipped unless asked for.

@@ -79,12 +79,17 @@ public enum AssetSweep {
                 )
             }
 
+            let sources = try sourceOutputs(inputBEEF)
             var createInputs: [WalletCreateActionInput] = []
             var outputs: [WalletCreateActionOutput] = []
             var keysByOutpoint: [String: PrivateKey] = [:]
 
-            for input in inputs {
+            for (index, input) in inputs.enumerated() {
                 let parsed = try parseOutpoint(input.outpoint)
+                guard let source = sources[parsed.description] else {
+                    throw OneSatActionError.missingSourceTransaction(inputIndex: index)
+                }
+                guard source.satoshis == 1 else { throw OneSatActionError.invalidSatoshis }
                 let keyID = parsed.ordinalDescription
                 keysByOutpoint[parsed.description] = input.key
                 keysByOutpoint[parsed.ordinalDescription] = input.key
@@ -99,6 +104,7 @@ public enum AssetSweep {
             }
 
             let keyMap = keysByOutpoint
+            let outpoints = createInputs.map(\.outpoint)
             return try await TrackedAction.execute(
                 ctx,
                 description: "Sweep \(inputs.count) ordinal\(inputs.count == 1 ? "" : "s")",
@@ -107,7 +113,10 @@ public enum AssetSweep {
                 outputs: outputs,
                 options: TrackedAction.Options(randomizeOutputs: false),
                 sign: { tx in
-                    try signLegacyInputs(transaction: tx, keysByOutpoint: keyMap)
+                    guard tx.inputs.prefix(outpoints.count).map(\.previousOutput) == outpoints else {
+                        throw LegacySweepError.ordinalInputOrderChanged
+                    }
+                    return try signLegacyInputs(transaction: tx, keysByOutpoint: keyMap, inputBEEF: inputBEEF)
                 }
             )
         } catch let error as OneSatActionError {
@@ -211,7 +220,7 @@ public enum AssetSweep {
                 labels: ["p 1sat bsv20 \(tick)"],
                 options: TrackedAction.Options(randomizeOutputs: false),
                 sign: { tx in
-                    try signLegacyInputs(transaction: tx, keysByOutpoint: prepared.keysByOutpoint)
+                    try signLegacyInputs(transaction: tx, keysByOutpoint: prepared.keysByOutpoint, inputBEEF: inputBEEF)
                 }
             )
         } catch let error as OneSatActionError {
@@ -307,7 +316,7 @@ public enum AssetSweep {
                 labels: [OneSatConstants.tokenLabel(tokenID)],
                 options: TrackedAction.Options(randomizeOutputs: false),
                 sign: { tx in
-                    try signLegacyInputs(transaction: tx, keysByOutpoint: prepared.keysByOutpoint)
+                    try signLegacyInputs(transaction: tx, keysByOutpoint: prepared.keysByOutpoint, inputBEEF: inputBEEF)
                 }
             )
             if let tx = result.tx {
@@ -341,27 +350,58 @@ public enum AssetSweep {
         return (createInputs, keysByOutpoint)
     }
 
-    private static func signLegacyInputs(
+    static func signLegacyInputs(
         transaction: Transaction,
-        keysByOutpoint: [String: PrivateKey]
+        keysByOutpoint: [String: PrivateKey],
+        inputBEEF: BEEF
     ) throws -> [UInt32: Script] {
+        let sources = try sourceOutputs(inputBEEF)
+        var transaction = transaction
         var spends: [UInt32: Script] = [:]
         for (index, input) in transaction.inputs.enumerated() {
             let parsed = input.previousOutput
             guard let key = keysByOutpoint[parsed.description]
                 ?? keysByOutpoint[parsed.ordinalDescription]
             else { continue }
-            spends[UInt32(index)] = try SignP2PKH.unlockingScript(
-                privateKey: key,
-                transaction: transaction,
-                inputIndex: index
-            )
+            guard let source = sources[parsed.description] else {
+                throw OneSatActionError.missingSourceTransaction(inputIndex: index)
+            }
+            transaction.inputs[index].sourceOutput = source
+            if OrdLock.isOrdLock(source.lockingScript) {
+                spends[UInt32(index)] = try UnlockScripts.ordLockCancel(
+                    privateKey: key, transaction: transaction, inputIndex: index
+                )
+            } else {
+                spends[UInt32(index)] = try SignP2PKH.unlockingScript(
+                    privateKey: key,
+                    transaction: transaction,
+                    inputIndex: index,
+                    hashType: ForkIDSignatureHashType(outputs: .all, anyoneCanPay: true)
+                )
+            }
         }
         return spends
+    }
+
+    private static func sourceOutputs(_ beef: BEEF) throws -> [String: TransactionOutput] {
+        var outputs: [String: TransactionOutput] = [:]
+        for transaction in beef.transactions.compactMap(\.transaction) {
+            let txid = try transaction.transactionID(limits: WalletTransactionLimits.standard)
+            for (index, output) in transaction.outputs.enumerated() {
+                outputs[Outpoint(transactionID: txid, outputIndex: UInt32(index)).description] = output
+            }
+        }
+        return outputs
     }
 
     private static func parseOutpoint(_ value: String) throws -> Outpoint {
         if let parsed = try? Outpoint(value) { return parsed }
         return try Outpoint(ordinal: value)
     }
+}
+
+private enum LegacySweepError: LocalizedError {
+    case ordinalInputOrderChanged
+
+    var errorDescription: String? { "Ordinal input order changed during funding" }
 }

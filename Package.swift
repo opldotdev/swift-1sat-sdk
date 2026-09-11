@@ -141,6 +141,7 @@ let package = Package(
             name: "OneSatSweepTests",
             dependencies: [
                 "OneSatSweep",
+                "OneSatTemplates",
                 .product(name: "BSVKeys", package: "swift-sdk"),
                 .product(name: "BSVTransaction", package: "swift-sdk"),
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
@@ -190,6 +191,7 @@ let package = Package(
                 "OneSatActions",
                 "OneSatTemplates",
                 .product(name: "BSVCompat", package: "swift-sdk"),
+                .product(name: "BSVInterpreter", package: "swift-sdk"),
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
                 .product(name: "BSVScript", package: "swift-sdk"),

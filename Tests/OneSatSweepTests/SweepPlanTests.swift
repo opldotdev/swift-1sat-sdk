@@ -45,6 +45,26 @@ final class SweepPlanTests: XCTestCase {
         XCTAssertFalse(plan.remaining.isEmpty, "assets remain, so the key must be preserved")
     }
 
+    func test_ownerIndexerTransferAndLockEventsRemainOutsideFunding() {
+        let origin = "8ac7230489e80000000000000000000000000000000000000000000000000001.0"
+        let owner = "p2pkh:1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"
+        let plan = SweepPlan.from(scan: [
+            out(0, sats: 100_000, events: [owner]),
+            out(1, sats: 1, events: ["1sat", owner, "origin:\(origin)", "type:image/png"]),
+            out(2, sats: 1, events: [owner, "origin:\(origin)", "type:application/op-ns"]),
+            out(3, sats: 1, events: ["1sat", owner]),
+            out(4, sats: 5_000, events: ["lock", owner]),
+            out(5, sats: 1, events: ["1sat", "bsv21:gold", owner]),
+        ])
+        XCTAssertEqual(plan.fundable.map(\.vout), [0])
+        XCTAssertEqual(plan.remaining.ordinals.map(\.vout), [1, 2, 3])
+        XCTAssertEqual(plan.remaining.locked.map(\.vout), [4])
+        XCTAssertEqual(plan.remaining.locked.first?.until, 0)
+        XCTAssertNil(plan.remaining.nextUnlockHeight)
+        XCTAssertEqual(plan.remaining.bsv21.first?.tokenID, "gold")
+        XCTAssertFalse(plan.remaining.isEmpty)
+    }
+
     func test_anAllPlainAddressLeavesNothingBehind() {
         let plan = SweepPlan.from(scan: [out(0, sats: 1000), out(1, sats: 2000)])
 

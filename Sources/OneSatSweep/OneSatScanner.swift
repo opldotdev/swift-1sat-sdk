@@ -1,5 +1,5 @@
 import BSVKeys
-import BSVScript
+import BSVTransaction
 import Foundation
 import ToolboxCore
 import ToolboxServices
@@ -10,47 +10,35 @@ import ToolboxServices
 /// ordinal marker) so an ordinal is never mistaken for a coin. WhatsOnChain cannot do this, which
 /// is why it does not conform to `AssetScanner`.
 ///
-/// The endpoint streams Server-Sent Events — `event: txo` frames with the output JSON, ended by an
-/// `event: done` frame. The response carries the outpoint, satoshis and events, but **not** the
-/// locking script; for a fundable P2PKH output the script is the P2PKH of the scanned address, so
-/// it is reconstructed the same way `WhatsOnChainUTXOSource` does. Non-fundable outputs are only
-/// reported, never spent, so their script is not needed.
+/// The owner stream supplies asset events. Source transaction bytes supply the actual locking
+/// scripts: an owner may control an OrdLock cancellation key, not just a P2PKH address.
+/// A capped or interrupted response is refused so callers retain the source keys and retry.
 public struct OneSatScanner: AssetScanner {
     /// The 1Sat-stack API base. `https://api.1sat.app` for mainnet.
     public let baseURL: URL
-    private let network: BitcoinNetwork
     private let http: any HTTPGet
-    /// The most outputs to read in one scan. An address with more than this is paginated by score
-    /// in a later revision; for now it is a high bound that covers any real wallet.
+    /// Maximum rows per scan. Reaching this bound is an explicit incomplete-scan error.
     private let limit: Int
 
     public init(
         baseURL: URL = URL(string: "https://api.1sat.app")!,
-        network: BitcoinNetwork = .mainnet,
+        network _: BitcoinNetwork = .mainnet,
         http: any HTTPGet = URLSessionHTTPGet(),
         limit: Int = 10_000
     ) {
         self.baseURL = baseURL
-        self.network = network
         self.http = http
         self.limit = limit
     }
 
     public func scan(address: String) async throws -> [ScannedOutput] {
-        // Fundable outputs are P2PKH to the scanned address. Deriving it once, and refusing an
-        // address with no P2PKH script, beats returning outputs a sweep could not sign.
-        let script: [UInt8]
-        do {
-            script = try Script.payToPublicKeyHash(
-                try Address(address).publicKeyHash, maximumByteCount: 1 << 20
-            ).bytes
-        } catch {
+        guard limit > 0, (try? Address(address)) != nil else {
             throw AssetScannerError.unreadableResponse
         }
 
         guard let url = URL(
             // Defaults on the endpoint already give unspent-only, satoshis, events and block.
-            string: "\(baseURL.absoluteString)/1sat/owner/\(address)/txos?limit=\(limit)"
+            string: "\(baseURL.absoluteString)/1sat/owner/\(address)/txos?limit=\(limit)&unspent=true&sats=true&events=true&spend=true"
         ) else {
             throw AssetScannerError.unreadableResponse
         }
@@ -59,7 +47,39 @@ public struct OneSatScanner: AssetScanner {
         guard (200..<300).contains(status) else {
             throw AssetScannerError.httpFailure(statusCode: status)
         }
-        return try Self.parse(sse: body, lockingScript: script)
+        let scanned = try Self.parse(sse: body, limit: limit)
+        var transactions: [String: Transaction] = [:]
+        var resolved: [ScannedOutput] = []
+        for output in scanned {
+            let transaction: Transaction
+            if let cached = transactions[output.txid] {
+                transaction = cached
+            } else {
+                // Matches BeefClient.getRawTx in @1sat/client.
+                let sourceURL = baseURL.appendingPathComponent("1sat/beef/\(output.txid)/tx")
+                let (sourceStatus, sourceBody) = try await http.get(sourceURL)
+                guard (200..<300).contains(sourceStatus) else {
+                    throw AssetScannerError.httpFailure(statusCode: sourceStatus)
+                }
+                transaction = try Transaction(bytes: sourceBody, limits: Sweep.defaultLimits)
+                guard try transaction.transactionID(limits: Sweep.defaultLimits).displayHex == output.txid else {
+                    throw AssetScannerError.unreadableResponse
+                }
+                transactions[output.txid] = transaction
+            }
+            guard transaction.outputs.indices.contains(Int(output.vout)) else {
+                throw AssetScannerError.unreadableResponse
+            }
+            let source = transaction.outputs[Int(output.vout)]
+            guard source.satoshis == output.satoshis else {
+                throw AssetScannerError.unreadableResponse
+            }
+            resolved.append(ScannedOutput(
+                txid: output.txid, vout: output.vout, satoshis: source.satoshis,
+                lockingScript: source.lockingScript.bytes, events: output.events
+            ))
+        }
+        return resolved
     }
 
     /// Parses the SSE stream into outputs.
@@ -67,9 +87,11 @@ public struct OneSatScanner: AssetScanner {
     /// Only `event: txo` frames carry outputs; `sync` frames are progress and `done` ends the
     /// stream. A frame that names an output but cannot be read is a refusal — a dropped output on
     /// an import is money the wallet never learns it has.
-    static func parse(sse body: [UInt8], lockingScript: [UInt8]) throws -> [ScannedOutput] {
-        let text = String(decoding: body, as: UTF8.self)
+    static func parse(sse body: [UInt8], limit: Int = .max) throws -> [ScannedOutput] {
+        let text = String(decoding: body, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n")
         var outputs: [ScannedOutput] = []
+        var count = 0
+        var complete = false
 
         for frame in text.components(separatedBy: "\n\n") {
             var event = "message"
@@ -81,7 +103,11 @@ public struct OneSatScanner: AssetScanner {
                     data = String(line.dropFirst("data:".count).drop(while: { $0 == " " }))
                 }
             }
+            if event == "error" { throw AssetScannerError.unreadableResponse }
+            if event == "done" { complete = true; break }
             guard event == "txo", !data.isEmpty else { continue }
+            count += 1
+            guard count < limit else { throw AssetScannerError.scanLimitReached(limit: limit) }
 
             guard let json = try? JSONDecoder().decode(JSONValue.self, from: Data(data.utf8)),
                   let outpoint = json["outpoint"]?.stringValue,
@@ -92,16 +118,22 @@ public struct OneSatScanner: AssetScanner {
             // but a stray one is skipped rather than swept.
             if let spend = json["spend"]?.stringValue, !spend.isEmpty { continue }
 
-            let satoshis = json["satoshis"]?.intValue.flatMap { UInt64(exactly: $0) } ?? 0
-            let events = json["events"]?.arrayValue?.compactMap(\.stringValue) ?? []
+            guard let satoshis = json["satoshis"]?.intValue.flatMap({ UInt64(exactly: $0) }),
+                  // The owner API omits events for plain funding outputs.
+                  let eventValues = (json["events"] ?? .array([])).arrayValue,
+                  eventValues.allSatisfy({ $0.stringValue != nil }) else {
+                throw AssetScannerError.unreadableResponse
+            }
+            let events = eventValues.compactMap(\.stringValue)
 
             outputs.append(
                 ScannedOutput(
                     txid: txid, vout: vout, satoshis: satoshis,
-                    lockingScript: lockingScript, events: events
+                    lockingScript: [], events: events
                 )
             )
         }
+        guard complete else { throw AssetScannerError.unreadableResponse }
         return outputs
     }
 
@@ -110,12 +142,26 @@ public struct OneSatScanner: AssetScanner {
         guard let index = outpoint.lastIndex(of: ".") else { return nil }
         let txid = String(outpoint[..<index])
         guard let vout = UInt32(outpoint[outpoint.index(after: index)...]),
-              txid.count == 64 else { return nil }
+              txid.count == 64,
+              txid.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) })
+        else { return nil }
         return (txid, vout)
     }
 }
 
-public enum AssetScannerError: Error, Equatable, Sendable {
+public enum AssetScannerError: LocalizedError, Equatable, Sendable {
     case unreadableResponse
+    case scanLimitReached(limit: Int)
     case httpFailure(statusCode: Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case .scanLimitReached(let limit):
+            "Asset discovery reached its \(limit)-output limit; the scan is incomplete. Retain the source keys and retry with a larger limit."
+        case .unreadableResponse:
+            "Asset discovery returned an incomplete or unreadable response."
+        case .httpFailure(let status):
+            "Asset discovery failed (HTTP \(status))."
+        }
+    }
 }
