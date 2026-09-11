@@ -513,18 +513,15 @@ public enum Ordinals {
 
     /// Wallet-row NFT vs FT. Transfer inscriptions come from `Tokens.transferScript`.
     public static func listingKind(from output: WalletOutput) throws -> ListingKind {
-        let tags = output.tags ?? []
-        let type = tags.first(where: { $0.hasPrefix("type:") }).map { String($0.dropFirst(5)) }
-        let looksToken = isTokenContentType(type)
-            || tags.contains(where: { $0.hasPrefix("bsv21:") || $0.hasPrefix("bsv20:") })
+        let type = output.tags?.first(where: { $0.hasPrefix("type:") }).map { String($0.dropFirst(5)) }
         let fields = Bsv21Remittance.fields(from: output)
+        if !isTokenContentType(type) && fields.tokenId == nil { return .nft }
         var tick: String?
         if let text = output.customInstructions,
            let data = text.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let value = object["tick"] as? String,
-           !value.isEmpty,
-           value.count <= 32
+           !value.isEmpty
         {
             tick = value
         }
@@ -534,8 +531,7 @@ public enum Ordinals {
         if let tick, let amt = fields.amt, UInt64(amt) != nil, fields.tokenId == nil {
             return .bsv20(tick: tick, amt: amt)
         }
-        if looksToken { throw OneSatActionError.tokenListingRequiresTransferIdentity }
-        return .nft
+        throw OneSatActionError.tokenListingRequiresTransferIdentity
     }
 
     public static func buildCancel(
