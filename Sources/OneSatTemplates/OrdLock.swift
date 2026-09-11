@@ -4,7 +4,9 @@ import BSVScript
 
 /// Marketplace listing lock: cancel with the seller key, or buy by paying the listed price.
 ///
-/// Matches `@1sat/templates` `OrdLock`.
+/// Matches `@1sat/templates` `OrdLock`. Script encoding stays so existing
+/// listings can be decoded, bought, and cancelled. New listing create through
+/// `Ordinals.list` / `buildList` is off (OPL-4694).
 public enum OrdLock {
     public static let prefix = TimeLock.prefix
 

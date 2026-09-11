@@ -34,6 +34,8 @@ migration and WalletPermissionsManager collection metadata/name handling.
 
 Sweep stays **partial by design**. Further `@1sat` surface lands as the wallet needs it.
 
+**OrdLock listing create is off** (`Ordinals.list` / `buildList`, OPL-4694). Buy and cancel of existing listings stay on. `OrdLock.lock` remains the script encoder for decode and spend-side tests.
+
 ## Modules
 
 | Module | Responsibility |

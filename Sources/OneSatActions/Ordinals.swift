@@ -6,9 +6,11 @@ import BSVWallet
 import OneSatTemplates
 import ToolboxActions
 
-/// Ordinals transfer, list, cancel, purchase, and wallet listing.
+/// Ordinals transfer, cancel, purchase, and wallet listing.
 ///
 /// Semantics from `packages/actions/src/ordinals/index.ts`.
+/// OrdLock listing create (`list` / `buildList`) is off (OPL-4694). Buy and
+/// cancel of existing listings stay on.
 public enum Ordinals {
     public struct TransferItem: Sendable {
         public let ordinal: WalletOutput
@@ -479,98 +481,20 @@ public enum Ordinals {
         }
     }
 
+    /// OPL-4694: OrdLock listing create is off. Signatures stay so callers fail closed.
     public static func buildList(
-        _ ctx: OneSatContext,
-        _ request: ListRequest
+        _: OneSatContext,
+        _: ListRequest
     ) throws -> PreparedAction {
-        guard !request.payAddress.isEmpty else { throw OneSatActionError.missingPayAddress }
-        guard request.price > 0 else { throw OneSatActionError.invalidPrice }
-
-        let outpoint = request.ordinal.outpoint.description
-        let cancel = try cancelAddress(
-            identity: ctx.identity,
-            outpoint: outpoint,
-            network: ctx.chain.network
-        )
-        let lockingScript = try OrdLock.lock(
-            cancelAddress: cancel.description,
-            payAddress: request.payAddress,
-            price: request.price
-        )
-        var tags = seedTags(source: request.ordinal)
-        tags.append("ordlock")
-        tags.append("price:\(request.price)")
-
-        let sourceName = sourceName(from: request.ordinal)
-
-        let inputID = OneSatConstants.assetID(in: request.ordinal.tags)
-        let labels = inputID.map {
-            [OneSatConstants.inputAssetLabel(basket: OneSatConstants.ordinalsBasket, id: $0)]
-        } ?? []
-
-        guard let instructions = request.ordinal.customInstructions else {
-            throw OneSatActionError.missingCustomInstructions
-        }
-        let parsed = try CustomInstructions.parse(instructions)
-
-        return PreparedAction(
-            description: "List ordinal for \(request.price) sats",
-            inputs: [
-                try WalletCreateActionInput(
-                    outpoint: request.ordinal.outpoint,
-                    inputDescription: "Ordinal to list",
-                    unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
-                ),
-            ],
-            outputs: [
-                try WalletCreateActionOutput(
-                    lockingScript: lockingScript.bytes,
-                    satoshis: 1,
-                    outputDescription: "List ordinal for \(request.price) sats",
-                    basket: OneSatConstants.ordinalsBasket,
-                    customInstructions: OrdinalRemittance.buildCustomInstructions(
-                        protocolID: try OneSatConstants.p1satProtocolID,
-                        keyID: outpoint,
-                        tags: tags,
-                        name: sourceName
-                    ),
-                    tags: tags
-                ),
-            ],
-            labels: labels,
-            signers: [
-                P2PKHSigner(
-                    outpoint: request.ordinal.outpoint,
-                    protocolID: parsed.protocolID,
-                    keyID: parsed.keyID,
-                    counterparty: parsed.counterparty
-                ),
-            ]
-        )
+        throw OneSatActionError.listingCreateDisabled
     }
 
+    /// OPL-4694: OrdLock listing create is off. Buy and cancel stay on.
     public static func list(
-        _ ctx: OneSatContext,
-        _ request: ListRequest
+        _: OneSatContext,
+        _: ListRequest
     ) async -> ActionResult {
-        do {
-            let prepared = try buildList(ctx, request)
-            return try await TrackedAction.execute(
-                ctx,
-                description: prepared.description,
-                inputBEEF: try TrackedAction.parseInputBEEF(request.inputBEEF),
-                inputs: prepared.inputs,
-                outputs: prepared.outputs,
-                labels: prepared.labels,
-                options: TrackedAction.Options(randomizeOutputs: false)
-            ) { transaction in
-                try signP2PKHInputs(ctx.identity, transaction, prepared.signers)
-            }
-        } catch let error as OneSatActionError {
-            return ActionResult.failure(error)
-        } catch {
-            return ActionResult.failure(error.localizedDescription)
-        }
+        ActionResult.failure(.listingCreateDisabled)
     }
 
     public static func buildCancel(

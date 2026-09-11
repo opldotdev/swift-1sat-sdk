@@ -26,6 +26,7 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case missingSourceTransaction(inputIndex: Int)
     case noSignableTransaction
     case servicesRequiredForPurchase
+    case listingCreateDisabled
     case listingTransactionNotFound
     case listingOutputNotFound
     case notAnOrdLockListing
@@ -101,6 +102,8 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "missing-source-transaction-for-input-\(index)"
         case .noSignableTransaction:
             return "no-signable-transaction"
+        case .listingCreateDisabled:
+            return "listing-create-disabled"
         case .servicesRequiredForPurchase:
             return "services-required-for-purchase"
         case .listingTransactionNotFound:
