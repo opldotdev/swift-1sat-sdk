@@ -5,6 +5,8 @@ import BSVScript
 /// Marketplace listing lock: cancel with the seller key, or buy by paying the listed price.
 ///
 /// Matches `@1sat/templates` `OrdLock`.
+public struct OrdLockCreateDisabled: Error, Equatable, Sendable {}
+
 public enum OrdLock {
     public static let prefix = TimeLock.prefix
 
@@ -17,6 +19,16 @@ public enum OrdLock {
     }
 
     public static func lock(
+        cancelAddress: String,
+        payAddress: String,
+        price: UInt64
+    ) throws -> Script {
+        // ORDLOCK_LISTING_DISABLED — restore when the replacement listing contract ships.
+        throw OrdLockCreateDisabled()
+    }
+
+    /// Historical constructor for tests and purchase fixtures. Do not emit on-chain.
+    static func legacyLock(
         cancelAddress: String,
         payAddress: String,
         price: UInt64

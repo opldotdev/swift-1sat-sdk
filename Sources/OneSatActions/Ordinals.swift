@@ -483,6 +483,8 @@ public enum Ordinals {
         _ ctx: OneSatContext,
         _ request: ListRequest
     ) throws -> PreparedAction {
+        // ORDLOCK_LISTING_DISABLED — restore when the replacement listing contract ships.
+        throw OneSatActionError.ordlockListingDisabled
         guard !request.payAddress.isEmpty else { throw OneSatActionError.missingPayAddress }
         guard request.price > 0 else { throw OneSatActionError.invalidPrice }
 
@@ -492,7 +494,7 @@ public enum Ordinals {
             outpoint: outpoint,
             network: ctx.chain.network
         )
-        let lockingScript = try OrdLock.lock(
+        let lockingScript = try OrdLock.legacyLock(
             cancelAddress: cancel.description,
             payAddress: request.payAddress,
             price: request.price

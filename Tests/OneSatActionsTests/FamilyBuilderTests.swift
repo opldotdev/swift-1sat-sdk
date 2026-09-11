@@ -267,6 +267,17 @@ final class FamilyBuilderTests: XCTestCase {
             tags: ["type:image/png", "id:list_0"],
             instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
         )
+        XCTAssertThrowsError(try Ordinals.buildList(
+            ctx,
+            Ordinals.ListRequest(
+                ordinal: ordinal,
+                price: 50_000,
+                payAddress: ActionVectors.payAddress
+            )
+        )) { error in
+            XCTAssertEqual(error as? OneSatActionError, .ordlockListingDisabled)
+        }
+        return
         let prepared = try Ordinals.buildList(
             ctx,
             Ordinals.ListRequest(
@@ -280,7 +291,7 @@ final class FamilyBuilderTests: XCTestCase {
         XCTAssertEqual(prepared.outputs[0].basket, OneSatConstants.ordinalsBasket)
         XCTAssertEqual(prepared.outputs[0].satoshis, 1)
         let cancel = try Ordinals.cancelAddress(identity: identity, outpoint: ActionVectors.outpoint)
-        let expected = try OrdLock.lock(
+        let expected = try OrdLock.legacyLock(
             cancelAddress: cancel.description,
             payAddress: ActionVectors.payAddress,
             price: 50_000
@@ -585,7 +596,7 @@ final class FamilyBuilderTests: XCTestCase {
         let identity = try ActionVectors.identity()
         let ctx = try dummyContext(identity: identity)
         let cancel = try Ordinals.cancelAddress(identity: identity, outpoint: ActionVectors.outpoint)
-        let listing = try OrdLock.lock(
+        let listing = try OrdLock.legacyLock(
             cancelAddress: cancel.description,
             payAddress: ActionVectors.payAddress,
             price: 50_000

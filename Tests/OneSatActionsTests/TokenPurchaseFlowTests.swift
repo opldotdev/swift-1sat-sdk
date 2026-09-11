@@ -257,7 +257,7 @@ final class TokenPurchaseFlowTests: XCTestCase {
             identity: identity,
             outpoint: ActionVectors.outpoint
         )
-        let locking = try OrdLock.lock(
+        let locking = try OrdLock.legacyLock(
             cancelAddress: cancel.description,
             payAddress: ActionVectors.payAddress,
             price: 50_000
@@ -451,7 +451,7 @@ final class TokenPurchaseFlowTests: XCTestCase {
             identity: identity,
             outpoint: ActionVectors.outpoint
         )
-        let listing = try script ?? OrdLock.lock(
+        let listing = try script ?? OrdLock.legacyLock(
             cancelAddress: cancel.description,
             payAddress: ActionVectors.payAddress,
             price: 50_000

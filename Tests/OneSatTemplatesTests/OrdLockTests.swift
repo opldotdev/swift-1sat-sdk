@@ -18,15 +18,19 @@ final class OrdLockTests: XCTestCase {
         )
     }
 
+    func test_lockRefusesNewListings() {
+        XCTAssertThrowsError(try OrdLock.lock(cancelAddress: seller, payAddress: pay, price: 50_000))
+    }
+
     func test_lockMatchesTheTypeScriptScript() throws {
         XCTAssertEqual(
-            try OrdLock.lock(cancelAddress: seller, payAddress: pay, price: 50_000).hex,
+            try OrdLock.legacyLock(cancelAddress: seller, payAddress: pay, price: 50_000).hex,
             OrdLockVectors.lock50k
         )
     }
 
     func test_decodeReadsTheSellerAndPrice() throws {
-        let script = try OrdLock.lock(cancelAddress: seller, payAddress: pay, price: 50_000)
+        let script = try OrdLock.legacyLock(cancelAddress: seller, payAddress: pay, price: 50_000)
         let decoded = try XCTUnwrap(OrdLock.decode(script))
         XCTAssertEqual(decoded.seller, seller)
         XCTAssertEqual(decoded.price, 50_000)

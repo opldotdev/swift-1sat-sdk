@@ -29,6 +29,7 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case listingTransactionNotFound
     case listingOutputNotFound
     case notAnOrdLockListing
+    case ordlockListingDisabled
     case listingNotFoundInOverlay
     case malformedPurchaseTransaction
     case missingSourceTxid
@@ -109,6 +110,8 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "listing-output-not-found"
         case .notAnOrdLockListing:
             return "not-an-ordlock-listing"
+        case .ordlockListingDisabled:
+            return "OrdLock listing creation is deprecated pending a replacement contract. Existing listings can still be cancelled or bought."
         case .listingNotFoundInOverlay:
             return "listing-not-found-in-overlay"
         case .malformedPurchaseTransaction:
