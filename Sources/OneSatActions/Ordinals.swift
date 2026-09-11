@@ -508,13 +508,7 @@ public enum Ordinals {
     }
 
     public static func isTokenContentType(_ type: String?) -> Bool {
-        guard let raw = type?.split(separator: ";").first else { return false }
-        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "application/bsv-20", "application/bsv20", "application/bsv-21", "application/bsv21":
-            return true
-        default:
-            return false
-        }
+        type == "application/bsv-20"
     }
 
     /// Wallet-row NFT vs FT. Transfer inscriptions come from `Tokens.transferScript`.
@@ -522,10 +516,7 @@ public enum Ordinals {
         let tags = output.tags ?? []
         let type = tags.first(where: { $0.hasPrefix("type:") }).map { String($0.dropFirst(5)) }
         let looksToken = isTokenContentType(type)
-            || tags.contains(where: {
-                let lower = $0.lowercased()
-                return lower.hasPrefix("bsv21:") || lower.hasPrefix("bsv-21") || lower.hasPrefix("bsv20:")
-            })
+            || tags.contains(where: { $0.hasPrefix("bsv21:") || $0.hasPrefix("bsv20:") })
         let fields = Bsv21Remittance.fields(from: output)
         var tick: String?
         if let text = output.customInstructions,
