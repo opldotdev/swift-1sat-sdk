@@ -55,7 +55,10 @@ public struct ScannedOutput: Equatable, Sendable {
             let until = UInt64(lock.dropFirst("lock:".count)) ?? 0
             return .locked(until: until)
         }
-        if events.contains(where: { $0.hasPrefix("ord") || $0.hasPrefix("insc") }) {
+        if events.contains("lock") { return .locked(until: 0) }
+        if events.contains(where: {
+            $0 == "1sat" || $0.hasPrefix("origin:") || $0.hasPrefix("ord") || $0.hasPrefix("insc")
+        }) {
             return .ordinal
         }
         return .fundable

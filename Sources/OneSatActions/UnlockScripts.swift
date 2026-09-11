@@ -53,18 +53,41 @@ public enum UnlockScripts {
         counterparty: WalletCounterparty = .self,
         limits: TransactionLimits = WalletTransactionLimits.standard
     ) throws -> Script {
-        let hashType = ForkIDSignatureHashType(outputs: .all, anyoneCanPay: true)
-        let signature = try SignP2PKH.unlockingScript(
-            identity: identity,
+        let key = try WalletKeyDeriver(rootKey: identity).derivePrivateKey(
+            protocolID: protocolID,
+            keyID: WalletKeyID(keyID),
+            counterparty: counterparty
+        )
+        return try ordLockCancel(
+            privateKey: key, transaction: transaction, inputIndex: inputIndex, limits: limits
+        )
+    }
+
+    /// Raw-key `OrdLock.cancelListing(key, "all", true)` used by legacy imports.
+    public static func ordLockCancel(
+        privateKey: PrivateKey,
+        transaction: Transaction,
+        inputIndex: Int,
+        limits: TransactionLimits = WalletTransactionLimits.standard
+    ) throws -> Script {
+        guard transaction.inputs.indices.contains(inputIndex),
+              let source = transaction.inputs[inputIndex].sourceOutput else {
+            throw OneSatActionError.missingSourceLockingScript(inputIndex: inputIndex)
+        }
+        guard let listing = OrdLock.decode(source.lockingScript) else {
+            throw OneSatActionError.notAnOrdLockListing
+        }
+        guard try Address(listing.seller).publicKeyHash
+            == Address(publicKey: privateKey.publicKey, network: .mainnet).publicKeyHash else {
+            throw OneSatActionError.invalidCustomInstructions
+        }
+        var script = try SignP2PKH.unlockingScript(
+            privateKey: privateKey,
             transaction: transaction,
             inputIndex: inputIndex,
-            protocolID: protocolID,
-            keyID: keyID,
-            counterparty: counterparty,
-            hashType: hashType,
+            hashType: ForkIDSignatureHashType(outputs: .all, anyoneCanPay: true),
             limits: limits
         )
-        var script = signature
         try script.append(Opcode.one, maximumScriptByteCount: Int(limits.maximumScriptByteCount))
         return script
     }
