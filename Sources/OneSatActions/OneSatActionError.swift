@@ -2,6 +2,7 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case noTransfers
     case mustProvideCounterpartyOrAddress
     case cannotTransferBsv20(outpoint: String)
+    case tokenListingRequiresTransferIdentity
     case missingPayAddress
     case invalidPrice
     case inscriptionTooLarge(bytes: Int)
@@ -56,6 +57,8 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "must-provide-counterparty-or-address"
         case .cannotTransferBsv20(let outpoint):
             return "Cannot transfer BSV-20 token \(outpoint) through ordinal transfer — use BSV-21 transfer instead"
+        case .tokenListingRequiresTransferIdentity:
+            return "token-listing-requires-transfer-identity"
         case .missingPayAddress:
             return "missing-pay-address"
         case .invalidPrice:
