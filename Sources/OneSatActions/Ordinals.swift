@@ -555,67 +555,31 @@ public enum Ordinals {
         let labels = inputID.map {
             [OneSatConstants.inputAssetLabel(basket: OneSatConstants.ordinalsBasket, id: $0)]
         } ?? []
-        let kind = try listingKind(from: request.listing)
-        let output: WalletCreateActionOutput
-        switch kind {
-        case .nft:
-            output = try WalletCreateActionOutput(
-                lockingScript: try ActionScript.payToPublicKeyHash(cancel).bytes,
-                satoshis: 1,
-                outputDescription: "Cancelled listing",
-                basket: OneSatConstants.ordinalsBasket,
-                customInstructions: OrdinalRemittance.buildCustomInstructions(
-                    protocolID: try OneSatConstants.p1satProtocolID,
-                    keyID: newKeyID,
-                    tags: tags,
-                    name: sourceName
-                ),
-                tags: tags
-            )
-        case .bsv21(let id, let amt):
-            guard let amount = UInt64(amt), amount > 0 else {
-                throw OneSatActionError.tokenListingRequiresTransferIdentity
-            }
-            let script = try Tokens.transferScript(
-                tokenId: id,
-                amount: amount,
-                recipient: try ActionScript.payToPublicKeyHash(cancel)
-            )
-            output = try WalletCreateActionOutput(
-                lockingScript: script.bytes,
-                satoshis: 1,
-                outputDescription: "Cancelled token listing",
-                basket: OneSatConstants.bsv21Basket,
-                customInstructions: Bsv21Remittance.buildCustomInstructions(
-                    token: Bsv21Remittance.Fields(id: id, amt: amt, op: "transfer"),
-                    protocolID: try OneSatConstants.p1satProtocolID,
-                    keyID: newKeyID,
-                    counterparty: "self"
-                ),
-                tags: Bsv21Remittance.filterTags(tokenId: id)
-            )
-        case .bsv20(let tick, let amt):
-            guard let amount = UInt64(amt), amount > 0 else {
-                throw OneSatActionError.tokenListingRequiresTransferIdentity
-            }
-            let script = try Tokens.transferBsv20Script(
-                tick: tick,
-                amount: amount,
-                recipient: try ActionScript.payToPublicKeyHash(cancel)
-            )
-            output = try WalletCreateActionOutput(
-                lockingScript: script.bytes,
-                satoshis: 1,
-                outputDescription: "Cancelled token listing"
+        if try listingKind(from: request.listing) != .nft {
+            throw OneSatActionError.cannotCancelTokenAsOrdinal(
+                outpoint: request.listing.outpoint.description
             )
         }
+        let output = try WalletCreateActionOutput(
+            lockingScript: try ActionScript.payToPublicKeyHash(cancel).bytes,
+            satoshis: 1,
+            outputDescription: "Cancelled listing",
+            basket: OneSatConstants.ordinalsBasket,
+            customInstructions: OrdinalRemittance.buildCustomInstructions(
+                protocolID: try OneSatConstants.p1satProtocolID,
+                keyID: newKeyID,
+                tags: tags,
+                name: sourceName
+            ),
+            tags: tags
+        )
 
         let prepared = PreparedAction(
-            description: kind == .nft ? "Cancel ordinal listing" : "Cancel token listing",
+            description: "Cancel ordinal listing",
             inputs: [
                 try WalletCreateActionInput(
                     outpoint: request.listing.outpoint,
-                    inputDescription: kind == .nft ? "Listed ordinal" : "Listed token",
+                    inputDescription: "Listed ordinal",
                     unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
                 ),
             ],
@@ -632,36 +596,12 @@ public enum Ordinals {
     ) async -> ActionResult {
         do {
             let built = try buildCancel(ctx, request)
-            var outputs = built.prepared.outputs
-            if case .bsv21(let id, _) = try listingKind(from: request.listing) {
-                guard let overlay = ctx.bsv21 else { throw OneSatActionError.servicesRequired }
-                let details = try await overlay.tokenDetails(tokenId: id)
-                guard details.isActive else { throw OneSatActionError.tokenNotActive }
-                let valid = try await overlay.validateUnspentOutputs(
-                    tokenId: id,
-                    outpoints: [request.listing.outpoint.description]
-                )
-                let wanted = request.listing.outpoint.description.replacingOccurrences(of: ".", with: "_")
-                guard valid.contains(where: { $0.replacingOccurrences(of: ".", with: "_") == wanted }) else {
-                    throw OneSatActionError.listingNotFoundInOverlay
-                }
-                if details.feePerOutput > 0 {
-                    try outputs.append(
-                        WalletCreateActionOutput(
-                            lockingScript: try ActionScript.payToPublicKeyHash(details.feeAddress).bytes,
-                            satoshis: details.feePerOutput,
-                            outputDescription: "Overlay processing fee",
-                            tags: ["fee:overlay"]
-                        )
-                    )
-                }
-            }
             return try await TrackedAction.execute(
                 ctx,
                 description: built.prepared.description,
                 inputBEEF: try TrackedAction.parseInputBEEF(request.inputBEEF),
                 inputs: built.prepared.inputs,
-                outputs: outputs,
+                outputs: built.prepared.outputs,
                 labels: built.prepared.labels,
                 options: TrackedAction.Options(randomizeOutputs: false)
             ) { transaction in

@@ -371,7 +371,15 @@ final class FamilyBuilderTests: XCTestCase {
             )
         )
         XCTAssertEqual(try Ordinals.listingKind(from: listing), .bsv21(id: tokenID, amt: "1111"))
-        let cancel = try Ordinals.buildCancel(
+        XCTAssertThrowsError(
+            try Ordinals.buildCancel(ctx, Ordinals.CancelRequest(listing: listing))
+        ) { error in
+            XCTAssertEqual(
+                error as? OneSatActionError,
+                .cannotCancelTokenAsOrdinal(outpoint: listing.outpoint.description)
+            )
+        }
+        let cancel = try Tokens.buildCancel(
             ctx,
             Ordinals.CancelRequest(listing: listing)
         ).prepared
@@ -393,7 +401,7 @@ final class FamilyBuilderTests: XCTestCase {
             instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
         )
         XCTAssertThrowsError(
-            try Ordinals.buildCancel(ctx, Ordinals.CancelRequest(listing: typedOnly))
+            try Tokens.buildCancel(ctx, Ordinals.CancelRequest(listing: typedOnly))
         ) { error in
             XCTAssertEqual(error as? OneSatActionError, .tokenListingRequiresTransferIdentity)
         }
