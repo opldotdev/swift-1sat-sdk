@@ -357,6 +357,56 @@ final class FamilyBuilderTests: XCTestCase {
         }
     }
 
+    func test_cancelTokenListingUsesTransferInscription() throws {
+        let identity = try ActionVectors.identity()
+        let ctx = try dummyContext(identity: identity)
+        let tokenID = ActionVectors.tokenID
+        let listing = try walletOutput(
+            tags: ["type:application/bsv-20", "bsv21:\(tokenID)", "amt:1111", "id:listing_0"],
+            instructions: Bsv21Remittance.buildCustomInstructions(
+                token: Bsv21Remittance.Fields(id: tokenID, amt: "1111", op: "transfer"),
+                protocolID: try OneSatConstants.p1satProtocolID,
+                keyID: ActionVectors.outpoint,
+                counterparty: "self"
+            )
+        )
+        XCTAssertEqual(try Ordinals.listingKind(from: listing), .bsv21(id: tokenID, amt: "1111"))
+        XCTAssertThrowsError(
+            try Ordinals.buildCancel(ctx, Ordinals.CancelRequest(listing: listing))
+        ) { error in
+            XCTAssertEqual(
+                error as? OneSatActionError,
+                .cannotCancelTokenAsOrdinal(outpoint: listing.outpoint.description)
+            )
+        }
+        let cancel = try Tokens.buildCancel(
+            ctx,
+            Ordinals.CancelRequest(listing: listing)
+        ).prepared
+        let script = try Script(bytes: cancel.outputs[0].lockingScript, maximumByteCount: 10_000)
+        XCTAssertEqual(BSV21.decode(script)?.tokenData.amount, "1111")
+        XCTAssertEqual(BSV21.decode(script)?.tokenData.tokenID, tokenID)
+        XCTAssertEqual(cancel.outputs[0].basket, OneSatConstants.bsv21Basket)
+        XCTAssertNotEqual(
+            cancel.outputs[0].lockingScript,
+            try ActionScript.payToPublicKeyHash(
+                try Ordinals.cancelAddress(
+                    identity: identity,
+                    outpoint: listing.outpoint.description
+                )
+            ).bytes
+        )
+        let typedOnly = try walletOutput(
+            tags: ["type:application/bsv-20", "id:abc_0"],
+            instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
+        )
+        XCTAssertThrowsError(
+            try Tokens.buildCancel(ctx, Ordinals.CancelRequest(listing: typedOnly))
+        ) { error in
+            XCTAssertEqual(error as? OneSatActionError, .tokenListingRequiresTransferIdentity)
+        }
+    }
+
     func test_ordinalSweepOutputCarriesResolvedBRC147Metadata() throws {
         let identity = try ActionVectors.identity()
         let ctx = try dummyContext(identity: identity)

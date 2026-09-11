@@ -85,6 +85,140 @@ public enum Tokens {
         try BSV20.transfer(tick: tick, amount: String(amount)).lock(lockingScript: recipient)
     }
 
+    public static func buildCancel(
+        _ ctx: OneSatContext,
+        _ request: Ordinals.CancelRequest
+    ) throws -> (prepared: Ordinals.PreparedAction, signProtocolID: WalletProtocolID, signKeyID: String, signCounterparty: WalletCounterparty) {
+        guard let instructions = request.listing.customInstructions else {
+            throw OneSatActionError.missingCustomInstructions
+        }
+        let parsed = try CustomInstructions.parse(instructions)
+        let outpoint = request.listing.outpoint.description
+        let cancel = try Ordinals.cancelAddress(
+            identity: ctx.identity,
+            outpoint: outpoint,
+            network: ctx.chain.network
+        )
+        let inputID = OneSatConstants.assetID(in: request.listing.tags)
+        let labels = inputID.map {
+            [OneSatConstants.inputAssetLabel(basket: OneSatConstants.ordinalsBasket, id: $0)]
+        } ?? []
+        let kind = try Ordinals.listingKind(from: request.listing)
+        let output: WalletCreateActionOutput
+        switch kind {
+        case .nft:
+            throw OneSatActionError.notATokenListing
+        case .bsv21(let id, let amt):
+            guard let amount = UInt64(amt), amount > 0 else {
+                throw OneSatActionError.tokenListingRequiresTransferIdentity
+            }
+            let script = try transferScript(
+                tokenId: id,
+                amount: amount,
+                recipient: try ActionScript.payToPublicKeyHash(cancel)
+            )
+            output = try WalletCreateActionOutput(
+                lockingScript: script.bytes,
+                satoshis: 1,
+                outputDescription: "Cancelled token listing",
+                basket: OneSatConstants.bsv21Basket,
+                customInstructions: Bsv21Remittance.buildCustomInstructions(
+                    token: Bsv21Remittance.Fields(id: id, amt: amt, op: "transfer"),
+                    protocolID: try OneSatConstants.p1satProtocolID,
+                    keyID: outpoint,
+                    counterparty: "self"
+                ),
+                tags: Bsv21Remittance.filterTags(tokenId: id)
+            )
+        case .bsv20(let tick, let amt):
+            guard let amount = UInt64(amt), amount > 0 else {
+                throw OneSatActionError.tokenListingRequiresTransferIdentity
+            }
+            let script = try transferBsv20Script(
+                tick: tick,
+                amount: amount,
+                recipient: try ActionScript.payToPublicKeyHash(cancel)
+            )
+            output = try WalletCreateActionOutput(
+                lockingScript: script.bytes,
+                satoshis: 1,
+                outputDescription: "Cancelled token listing"
+            )
+        }
+        let prepared = Ordinals.PreparedAction(
+            description: "Cancel token listing",
+            inputs: [
+                try WalletCreateActionInput(
+                    outpoint: request.listing.outpoint,
+                    inputDescription: "Listed token",
+                    unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
+                ),
+            ],
+            outputs: [output],
+            labels: labels,
+            signers: []
+        )
+        return (prepared, parsed.protocolID, parsed.keyID, parsed.counterparty)
+    }
+
+    public static func cancelListing(
+        _ ctx: OneSatContext,
+        _ request: Ordinals.CancelRequest
+    ) async -> ActionResult {
+        do {
+            let built = try buildCancel(ctx, request)
+            var outputs = built.prepared.outputs
+            if case .bsv21(let id, _) = try Ordinals.listingKind(from: request.listing) {
+                guard let overlay = ctx.bsv21 else { throw OneSatActionError.servicesRequired }
+                let details = try await overlay.tokenDetails(tokenId: id)
+                guard details.isActive else { throw OneSatActionError.tokenNotActive }
+                let valid = try await overlay.validateUnspentOutputs(
+                    tokenId: id,
+                    outpoints: [request.listing.outpoint.description]
+                )
+                let wanted = request.listing.outpoint.description.replacingOccurrences(of: ".", with: "_")
+                guard valid.contains(where: { $0.replacingOccurrences(of: ".", with: "_") == wanted }) else {
+                    throw OneSatActionError.listingNotFoundInOverlay
+                }
+                if details.feePerOutput > 0 {
+                    try outputs.append(
+                        WalletCreateActionOutput(
+                            lockingScript: try ActionScript.payToPublicKeyHash(details.feeAddress).bytes,
+                            satoshis: details.feePerOutput,
+                            outputDescription: "Overlay processing fee",
+                            tags: ["fee:overlay"]
+                        )
+                    )
+                }
+            }
+            return try await TrackedAction.execute(
+                ctx,
+                description: built.prepared.description,
+                inputBEEF: try TrackedAction.parseInputBEEF(request.inputBEEF),
+                inputs: built.prepared.inputs,
+                outputs: outputs,
+                labels: built.prepared.labels,
+                options: TrackedAction.Options(randomizeOutputs: false)
+            ) { transaction in
+                let index = try Ordinals.inputIndex(request.listing.outpoint, in: transaction)
+                return [
+                    UInt32(index): try UnlockScripts.ordLockCancel(
+                        identity: ctx.identity,
+                        transaction: transaction,
+                        inputIndex: index,
+                        protocolID: built.signProtocolID,
+                        keyID: built.signKeyID,
+                        counterparty: built.signCounterparty
+                    ),
+                ]
+            }
+        } catch let error as OneSatActionError {
+            return ActionResult.failure(error)
+        } catch {
+            return ActionResult.failure(error.localizedDescription)
+        }
+    }
+
     public static func selectInputs(
         outputs: [WalletOutput],
         tokenId: String,

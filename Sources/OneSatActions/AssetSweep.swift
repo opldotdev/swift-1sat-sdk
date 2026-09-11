@@ -73,7 +73,7 @@ public enum AssetSweep {
     ) async -> ActionResult {
         do {
             guard !inputs.isEmpty else { return ActionResult.failure("no-inputs") }
-            if inputs.contains(where: { $0.contentType == "application/bsv-20" }) {
+            if inputs.contains(where: { Ordinals.isTokenContentType($0.contentType) }) {
                 return ActionResult.failure(
                     "Cannot sweep BSV-20 through ordinal sweep — use a token transfer."
                 )
