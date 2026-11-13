@@ -108,7 +108,7 @@ final class OneSatScannerTests: XCTestCase {
     }
 
     func test_scanResolvesAnOrdLockSourceAndCachesTheTransaction() async throws {
-        let script = try OrdLock.lock(
+        let script = try OrdLockV2.lock(
             cancelAddress: address, payAddress: address, price: 1_000
         )
         let source = Transaction(version: 1, inputs: [], outputs: [
@@ -118,7 +118,7 @@ final class OneSatScannerTests: XCTestCase {
         let txid = try source.transactionID(limits: Sweep.defaultLimits).displayHex
         let rows = """
             event: txo
-            data: {"outpoint":"\(txid).0","satoshis":1,"events":["ordlock"]}
+            data: {"outpoint":"\(txid).0","satoshis":1,"events":["ordlock2"]}
 
             event: txo
             data: {"outpoint":"\(txid).1","satoshis":1,"events":["ord"]}

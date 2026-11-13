@@ -10,7 +10,9 @@ import ToolboxActions
 ///
 /// Semantics from `packages/actions/src/ordinals/index.ts`.
 /// OrdLock listing create (`list` / `buildList`) is off (OPL-4694). Buy and
-/// cancel of existing listings stay on.
+/// cancel of existing listings stay on, OrdLock v2 only. b-open-io/1sat-sdk
+/// 8fb809d5 removed v1 detection and the v1 sweep cancel after the v1 listings
+/// were cancelled; TS buy/cancel keep a vestigial v1 fallback that Swift drops on purpose.
 public enum Ordinals {
     public struct TransferItem: Sendable {
         public let ordinal: WalletOutput
@@ -505,6 +507,10 @@ public enum Ordinals {
             throw OneSatActionError.missingCustomInstructions
         }
         let parsed = try CustomInstructions.parse(instructions)
+        if let script = request.listing.lockingScript,
+           !OrdLockV2.isOrdLockV2(try Script(bytes: script, maximumByteCount: ActionScript.maximumByteCount)) {
+            throw OneSatActionError.notAnOrdLockListing
+        }
         let outpoint = request.listing.outpoint.description
         let newKeyID = outpoint
         let cancel = try cancelAddress(
@@ -525,7 +531,7 @@ public enum Ordinals {
                 try WalletCreateActionInput(
                     outpoint: request.listing.outpoint,
                     inputDescription: "Listed ordinal",
-                    unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
+                    unlockingScriptLength: UInt32(OrdLockV2.cancelUnlockLength)
                 ),
             ],
             outputs: [
@@ -566,7 +572,7 @@ public enum Ordinals {
             ) { transaction in
                 let index = try inputIndex(request.listing.outpoint, in: transaction)
                 return [
-                    UInt32(index): try UnlockScripts.ordLockCancel(
+                    UInt32(index): try UnlockScripts.ordLockV2Cancel(
                         identity: ctx.identity,
                         transaction: transaction,
                         inputIndex: index,
@@ -583,6 +589,11 @@ public enum Ordinals {
         }
     }
 
+    /// The purchase draft: `outputs[0]` is the buyer's 1-sat receive, `outputs[1]`
+    /// the seller payout read from the listing, then the optional marketplace fee.
+    /// The listing input reserves the exact v2 purchase unlock length.
+    /// ``purchase(_:_:)`` hands this to ``OrdLockV2Purchase``, which adds the front
+    /// funding and moves the payout to the listing's input index.
     public static func buildPurchase(
         _ ctx: OneSatContext,
         outpoint: Outpoint,
@@ -594,7 +605,7 @@ public enum Ordinals {
         origin: String? = nil,
         name: String? = nil
     ) throws -> PreparedAction {
-        guard let decoded = OrdLock.decode(listingScript, network: ctx.chain.network) else {
+        guard OrdLockV2.isOrdLockV2(listingScript) else {
             throw OneSatActionError.notAnOrdLockListing
         }
         let outpointText = outpoint.description
@@ -627,7 +638,7 @@ public enum Ordinals {
             ),
         ]
 
-        let payout = try payoutOutput(decoded.payout)
+        let payout = try OrdLockV2.payoutOutput(listingScript)
         try outputs.append(
             WalletCreateActionOutput(
                 lockingScript: payout.script.bytes,
@@ -658,7 +669,7 @@ public enum Ordinals {
                 try WalletCreateActionInput(
                     outpoint: outpoint,
                     inputDescription: "Listed ordinal",
-                    unlockingScriptLength: OneSatConstants.purchaseUnlockingScriptLength
+                    unlockingScriptLength: UInt32(try OrdLockV2.estimatePurchaseUnlockLength(listingScript))
                 ),
             ],
             outputs: outputs,
@@ -700,22 +711,17 @@ public enum Ordinals {
                 origin: request.origin,
                 name: request.name
             )
-            return try await TrackedAction.execute(
+            return try await OrdLockV2Purchase.execute(
                 ctx,
                 description: prepared.description,
-                inputBEEF: parsed,
-                inputs: prepared.inputs,
-                outputs: prepared.outputs,
-                labels: prepared.labels,
-                options: TrackedAction.Options(randomizeOutputs: false)
-            ) { transaction in
-                let index = try inputIndex(request.outpoint, in: transaction)
-                return [
-                    UInt32(index): try UnlockScripts.ordLockPurchase(
-                        transaction: transaction, inputIndex: index
-                    ),
-                ]
-            }
+                listingOutpoint: request.outpoint,
+                listingScript: listingOutput.lockingScript,
+                listingInputDescription: "Listed ordinal",
+                listingBEEF: parsed,
+                receive: prepared.outputs[0],
+                extras: Array(prepared.outputs.dropFirst(2)),
+                labels: prepared.labels
+            )
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {
@@ -741,45 +747,6 @@ public enum Ordinals {
         return result.outputs
     }
 
-    public static func payoutOutput(_ payout: [UInt8]) throws -> (satoshis: UInt64, script: Script) {
-        guard payout.count >= 9 else { throw OneSatActionError.notAnOrdLockListing }
-        var satoshis: UInt64 = 0
-        for index in 0..<8 {
-            satoshis |= UInt64(payout[index]) << (index * 8)
-        }
-        let rest = Array(payout[8...])
-        let prefix = try readCompactSize(rest)
-        let scriptStart = prefix.consumed
-        let scriptEnd = scriptStart + Int(prefix.value)
-        guard rest.count >= scriptEnd else { throw OneSatActionError.notAnOrdLockListing }
-        let script = try Script(
-            bytes: Array(rest[scriptStart..<scriptEnd]),
-            maximumByteCount: ActionScript.maximumByteCount
-        )
-        return (satoshis, script)
-    }
-
-    private static func readCompactSize(_ bytes: [UInt8]) throws -> (value: UInt64, consumed: Int) {
-        guard let first = bytes.first else { throw OneSatActionError.notAnOrdLockListing }
-        switch first {
-        case 0x00...0xfc:
-            return (UInt64(first), 1)
-        case 0xfd:
-            guard bytes.count >= 3 else { throw OneSatActionError.notAnOrdLockListing }
-            return (UInt64(bytes[1]) | UInt64(bytes[2]) << 8, 3)
-        case 0xfe:
-            guard bytes.count >= 5 else { throw OneSatActionError.notAnOrdLockListing }
-            var value: UInt64 = 0
-            for index in 0..<4 { value |= UInt64(bytes[1 + index]) << (index * 8) }
-            return (value, 5)
-        default:
-            guard bytes.count >= 9 else { throw OneSatActionError.notAnOrdLockListing }
-            var value: UInt64 = 0
-            for index in 0..<8 { value |= UInt64(bytes[1 + index]) << (index * 8) }
-            return (value, 9)
-        }
-    }
-
     static func sourceName(from output: WalletOutput) -> String? {
         if let displayName = OrdinalRemittance.displayName(
             fromCustomInstructions: output.customInstructions
@@ -800,7 +767,7 @@ public enum Ordinals {
         var spends: [UInt32: Script] = [:]
         for signer in signers {
             let index = try inputIndex(signer.outpoint, in: transaction)
-            spends[UInt32(index)] = try SignP2PKH.unlockingScript(
+            spends[UInt32(index)] = try SignOrdinalInput.unlockingScript(
                 identity: identity,
                 transaction: transaction,
                 inputIndex: index,

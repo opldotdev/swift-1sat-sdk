@@ -71,14 +71,14 @@ final class ScriptVectorTests: XCTestCase {
         )
     }
 
-    func test_ordLockMatchesTheFrozenTemplateVector() throws {
+    func test_ordLockV2MatchesTheFrozenTemplateVector() throws {
         XCTAssertEqual(
-            try OrdLock.lock(
+            try OrdLockV2.lock(
                 cancelAddress: ActionVectors.templateAddress,
                 payAddress: ActionVectors.payAddress,
                 price: 50_000
             ).hex,
-            ActionVectors.lock50k
+            ActionVectors.lock50kV2
         )
     }
 }

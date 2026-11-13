@@ -1,3 +1,4 @@
+import Foundation
 import BSVWallet
 
 /// String constants from `1sat-sdk/packages/types/src/constants.ts`.
@@ -18,6 +19,8 @@ public enum OneSatConstants {
     public static let lockBasket = "lock"
     /// `OPNS_BASKET`
     public static let opnsBasket = "opns"
+    /// `OPNS_PUBLISHED_TAG`: wallet tag on a published (identity-bound) OpNS name.
+    public static let opnsPublishedTag = "opns:published"
     /// `SIGMA_BASKET`
     public static let sigmaBasket = "sigma"
     /// `HOSTING_BASKET`
@@ -50,23 +53,42 @@ public enum OneSatConstants {
     public static let p2pkhUnlockingScriptLength: UInt32 = 108
     /// `unlockBsv` `unlockingScriptLength`.
     public static let timeLockUnlockingScriptLength: UInt32 = 1_205
-    /// `purchaseOrdinal` `unlockingScriptLength`.
-    public static let purchaseUnlockingScriptLength: UInt32 = 1_368
+    /// `ORDLOCK_V2_TAG`: basket tag and junglebus output type of OrdLock v2 listings.
+    public static let ordlockV2Tag = "ordlock2"
+    /// `ORDLOCK_FUNDING_TAG`: deposit-basket outputs prepared as OrdLock v2 front funding.
+    public static let ordlockFundingTag = "ordlock-funding"
+    /// `ORDLOCK_FUNDING_KEY_PREFIX`: P1SAT keyID prefix (counterparty self) of funding outputs.
+    public static let ordlockFundingKeyPrefix = "ordlock-funding"
+    /// `ORDLOCK_FUNDING_HOLD_MS`: how long front funding and its cushion stay out of `sweepDeposit`.
+    public static let ordlockFundingHoldMilliseconds: UInt64 = 5 * 60_000
+    /// `DEPOSIT_HOLD_TAG_PREFIX`: `hold:<absolute unix ms>` on deposit outputs not to sweep yet.
+    public static let depositHoldTagPrefix = "hold:"
 
-    /// `LEGACY_P1SAT_BASKET_MIGRATIONS` plus leftover filings JS never listed:
-    /// Swift's own `p 1sat bsv20`, and theme-token's hardcoded `ordinals`
-    /// basket (`b-open-io/theme-token` `package-builder.ts` Mar–Jun 2026).
-    public static let legacyP1SatBasketMigrations: [(from: String, to: String)] = [
-        ("p 1sat ordinals", onesatBasket),
-        ("ordinals", onesatBasket),
-        ("p 1sat bsv21", bsv21Basket),
-        ("p 1sat opns", opnsBasket),
-        ("p 1sat hosting", hostingBasket),
-        ("p 1sat lock", lockBasket),
-        ("p 1sat sigma", sigmaBasket),
-        ("p 1sat bsocial", bsocialBasket),
-        ("p 1sat bsv20", bsv20Basket),
-    ]
+    /// `depositHoldTag(untilMs)`.
+    public static func depositHoldTag(untilMilliseconds: UInt64) -> String {
+        "\(depositHoldTagPrefix)\(untilMilliseconds)"
+    }
+
+    /// `depositHoldUntil(tags)`: the latest `hold:` expiry, or nil when there is none.
+    public static func depositHoldUntil(_ tags: [String]?) -> UInt64? {
+        var until: UInt64?
+        for tag in tags ?? [] where tag.hasPrefix(depositHoldTagPrefix) {
+            guard let value = UInt64(tag.dropFirst(depositHoldTagPrefix.count)) else { continue }
+            if until.map({ value > $0 }) ?? true { until = value }
+        }
+        return until
+    }
+
+    /// `isDepositHeld(tags, nowMs)`: true while a `hold:` tag has not lapsed.
+    public static func isDepositHeld(_ tags: [String]?, nowMilliseconds: UInt64) -> Bool {
+        guard let until = depositHoldUntil(tags) else { return false }
+        return until > nowMilliseconds
+    }
+
+    /// Wallet clock in unix milliseconds, as `Date.now()` reads it.
+    public static func nowMilliseconds() -> UInt64 {
+        UInt64((Date().timeIntervalSince1970 * 1_000).rounded(.down))
+    }
 
     public static var p1satProtocolID: WalletProtocolID {
         get throws {

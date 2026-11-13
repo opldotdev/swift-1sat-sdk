@@ -8,9 +8,6 @@ import ToolboxActions
 
 /// BSV-21 transfer from `packages/actions/src/tokens/index.ts` `sendBsv21`.
 public enum Tokens {
-    /// `tokens/index.ts:876` `unlockingScriptLength` for token purchase. Not the ordinal 1368.
-    public static let purchaseUnlockingScriptLength: UInt32 = 1_402
-
     public struct Recipient: Sendable {
         public let amount: UInt64
         public let destination: Destination
@@ -53,6 +50,97 @@ public enum Tokens {
         }
     }
 
+    /// Overlay state of a token outpoint (`Bsv21OutputState` in `@1sat/types`).
+    public enum OutputState: String, Equatable, Sendable {
+        /// Indexed and unspent.
+        case valid
+        /// Indexed and spent.
+        case spent
+        /// Waiting in the token's indexing queue.
+        case queued
+        /// Neither indexed nor queued.
+        case unknown
+    }
+
+    public struct OutputStatus: Equatable, Sendable {
+        /// The outpoint exactly as it was sent.
+        public let outpoint: String
+        public let state: OutputState
+
+        public init(outpoint: String, state: OutputState) {
+            self.outpoint = outpoint
+            self.state = state
+        }
+    }
+
+    /// Payment outputs that fund a token's overlay (`Bsv21FundingTemplate`).
+    public struct FundingTemplate: Equatable, Sendable {
+        public struct Output: Equatable, Sendable {
+            public let lockingScript: [UInt8]
+            public let satoshis: UInt64
+            public let outputDescription: String
+
+            public init(lockingScript: [UInt8], satoshis: UInt64, outputDescription: String) {
+                self.lockingScript = lockingScript
+                self.satoshis = satoshis
+                self.outputDescription = outputDescription
+            }
+        }
+
+        public let outputs: [Output]
+
+        public init(outputs: [Output]) {
+            self.outputs = outputs
+        }
+    }
+
+    /// The token's overlay status (`TokenStatus`) after a funding submission.
+    public struct OverlayStatus: Equatable, Sendable {
+        public let isActive: Bool?
+        public let feeAddress: String?
+        public let feePerOutput: UInt64?
+        public let minFunding: UInt64?
+
+        public init(
+            isActive: Bool?,
+            feeAddress: String? = nil,
+            feePerOutput: UInt64? = nil,
+            minFunding: UInt64? = nil
+        ) {
+            self.isActive = isActive
+            self.feeAddress = feeAddress
+            self.feePerOutput = feePerOutput
+            self.minFunding = minFunding
+        }
+    }
+
+    /// `fundBsv21Overlay` response: the payment's action fields plus the overlay status.
+    public struct FundOverlayResult: Equatable, Sendable {
+        public let txid: String?
+        public let tx: [UInt8]?
+        public let actionId: String?
+        public let error: String?
+        public let status: OverlayStatus?
+
+        public init(
+            txid: String? = nil,
+            tx: [UInt8]? = nil,
+            actionId: String? = nil,
+            error: String? = nil,
+            status: OverlayStatus? = nil
+        ) {
+            self.txid = txid
+            self.tx = tx
+            self.actionId = actionId
+            self.error = error
+            self.status = status
+        }
+
+        public static func failure(_ error: OneSatActionError, actionId: String? = nil) -> Self {
+            Self(actionId: actionId, error: error.wireMessage)
+        }
+    }
+
     public struct SelectedInput: Equatable, Sendable {
         public let output: WalletOutput
         public let amount: UInt64
@@ -85,31 +173,50 @@ public enum Tokens {
         try BSV20.transfer(tick: tick, amount: String(amount)).lock(lockingScript: recipient)
     }
 
+    /// Walks token outputs in list order. With `states` (keyed by wallet outpoint `txid.vout`),
+    /// only `valid` outputs are spent and `queued` ones are tallied to tell a shortfall that
+    /// indexing will resolve (`tokens-queued`) from one it will not (`insufficient-valid-tokens`).
     public static func selectInputs(
         outputs: [WalletOutput],
         tokenId: String,
         amount: UInt64,
-        validOutpoints: Set<String>?
+        states: [String: OutputState]?
     ) throws -> (selected: [SelectedInput], totalIn: UInt64) {
         let wanted = Bsv21Remittance.normalizeTokenId(tokenId)
         var selected: [SelectedInput] = []
         var totalIn: UInt64 = 0
+        var queuedIn: UInt64 = 0
         for output in outputs {
             if totalIn >= amount { break }
+            guard matchesToken(output, normalizedTokenId: wanted) else { continue }
             let fields = Bsv21Remittance.fields(from: output)
-            guard let id = fields.tokenId,
-                  Bsv21Remittance.normalizeTokenId(id) == wanted
-            else { continue }
             guard let amtText = fields.amt, let utxoAmount = UInt64(amtText), utxoAmount > 0
             else { continue }
-            if let validOutpoints, !validOutpoints.contains(output.outpoint.description) {
-                continue
+            if let states {
+                let state = states[output.outpoint.description]
+                if state == .queued {
+                    let (sum, overflow) = queuedIn.addingReportingOverflow(utxoAmount)
+                    queuedIn = overflow ? .max : sum
+                }
+                guard state == .valid else { continue }
             }
             selected.append(SelectedInput(output: output, amount: utxoAmount))
             totalIn += utxoAmount
         }
-        if totalIn < amount { throw OneSatActionError.insufficientTokens }
+        if totalIn < amount {
+            guard states != nil else { throw OneSatActionError.insufficientTokens }
+            // Queued outputs are not invalid, just not indexed yet.
+            let (pending, overflow) = totalIn.addingReportingOverflow(queuedIn)
+            throw overflow || pending >= amount
+                ? OneSatActionError.tokensQueued
+                : OneSatActionError.insufficientValidTokens
+        }
         return (selected, totalIn)
+    }
+
+    static func matchesToken(_ output: WalletOutput, normalizedTokenId: String) -> Bool {
+        guard let id = Bsv21Remittance.fields(from: output).tokenId else { return false }
+        return Bsv21Remittance.normalizeTokenId(id) == normalizedTokenId
     }
 
     public static func buildSend(
@@ -290,7 +397,12 @@ public enum Tokens {
             guard let bsv21 = ctx.bsv21 else {
                 return ActionResult.failure(.servicesRequired)
             }
-            let details = try await bsv21.tokenDetails(tokenId: request.tokenId)
+            let details: Bsv21TokenDetails
+            do {
+                details = try await bsv21.tokenDetails(tokenId: request.tokenId)
+            } catch {
+                return ActionResult.failure(.tokenNotFound)
+            }
             guard details.isActive else { return ActionResult.failure(.tokenNotActive) }
 
             let listed = try await ctx.storage.listOutputs(
@@ -303,21 +415,29 @@ public enum Tokens {
                     pagination: WalletPagination(limit: 10_000)
                 )
             )
-            let valid: Set<String>
-            do {
-                valid = try await bsv21.validateUnspentOutputs(
-                    tokenId: request.tokenId,
-                    outpoints: listed.outputs.map(\.outpoint.description)
-                )
-            } catch {
-                return ActionResult.failure(.overlayValidationFailed)
+            let wanted = Bsv21Remittance.normalizeTokenId(request.tokenId)
+            let tokenOutputs = listed.outputs.filter { matchesToken($0, normalizedTokenId: wanted) }
+            // Spend only tips the overlay reports valid.
+            var states: [String: OutputState] = [:]
+            if !tokenOutputs.isEmpty {
+                do {
+                    let statuses = try await bsv21.outputStatus(
+                        tokenId: request.tokenId,
+                        outpoints: tokenOutputs.map(\.outpoint.description)
+                    )
+                    for status in statuses {
+                        states[status.outpoint] = status.state
+                    }
+                } catch {
+                    return ActionResult.failure(.overlayValidationFailed)
+                }
             }
             let totalAmount = request.recipients.reduce(UInt64(0)) { $0 + $1.amount }
             let selected = try selectInputs(
-                outputs: listed.outputs,
+                outputs: tokenOutputs,
                 tokenId: request.tokenId,
                 amount: totalAmount,
-                validOutpoints: valid
+                states: states
             )
             let changeKeyID = "\(request.tokenId)-\(Int(Date().timeIntervalSince1970 * 1000))"
             let prepared = try buildSend(
@@ -366,10 +486,13 @@ public enum Tokens {
                 return ActionResult.failure(.servicesRequiredForPurchase)
             }
             do {
-                try await bsv21.validateOutput(
+                let statuses = try await bsv21.outputStatus(
                     tokenId: request.tokenId,
-                    outpoint: request.outpoint.ordinalDescription
+                    outpoints: [request.outpoint.ordinalDescription]
                 )
+                guard statuses.first?.state == .valid else {
+                    return ActionResult.failure(.listingNotFoundInOverlay)
+                }
             } catch {
                 return ActionResult.failure(.listingNotFoundInOverlay)
             }
@@ -388,10 +511,8 @@ public enum Tokens {
                 return ActionResult.failure(.listingOutputNotFound)
             }
             let listingOutput = listingTx.outputs[vout]
-            guard let decoded = OrdLock.decode(
-                listingOutput.lockingScript,
-                network: ctx.chain.network
-            ) else {
+            // OrdLock v2 only; the vestigial TS v1 fallback is dropped on purpose (8fb809d5).
+            guard OrdLockV2.isOrdLockV2(listingOutput.lockingScript) else {
                 return ActionResult.failure(.notAnOrdLockListing)
             }
 
@@ -404,6 +525,7 @@ public enum Tokens {
                 network: ctx.chain.network
             )
             let protocolID = try OneSatConstants.p1satProtocolID
+            // Draft shape (TS): receive, payout, fees. The apply step lays it out.
             var outputs: [WalletCreateActionOutput] = [
                 try WalletCreateActionOutput(
                     lockingScript: try transferScript(
@@ -431,7 +553,7 @@ public enum Tokens {
                 ),
             ]
 
-            let payout = try Ordinals.payoutOutput(decoded.payout)
+            let payout = try OrdLockV2.payoutOutput(listingOutput.lockingScript)
             try outputs.append(
                 WalletCreateActionOutput(
                     lockingScript: payout.script.bytes,
@@ -469,28 +591,17 @@ public enum Tokens {
                 )
             }
 
-            let result = try await TrackedAction.execute(
+            let result = try await OrdLockV2Purchase.execute(
                 ctx,
                 description: "Purchase \(request.amount) tokens for \(payout.satoshis) sats",
-                inputBEEF: parsed,
-                inputs: [
-                    try WalletCreateActionInput(
-                        outpoint: request.outpoint,
-                        inputDescription: "Listed token",
-                        unlockingScriptLength: purchaseUnlockingScriptLength
-                    ),
-                ],
-                outputs: outputs,
-                labels: [OneSatConstants.tokenLabel(request.tokenId)],
-                options: TrackedAction.Options(randomizeOutputs: false)
-            ) { transaction in
-                let index = try Ordinals.inputIndex(request.outpoint, in: transaction)
-                return [
-                    UInt32(index): try UnlockScripts.ordLockPurchase(
-                        transaction: transaction, inputIndex: index
-                    ),
-                ]
-            }
+                listingOutpoint: request.outpoint,
+                listingScript: listingOutput.lockingScript,
+                listingInputDescription: "Listed token",
+                listingBEEF: parsed,
+                receive: outputs[0],
+                extras: Array(outputs.dropFirst(2)),
+                labels: [OneSatConstants.tokenLabel(request.tokenId)]
+            )
             if let tx = result.tx {
                 try? await bsv21.submitTransfer(tx: tx, tokenId: request.tokenId)
             }
@@ -499,6 +610,56 @@ public enum Tokens {
             return ActionResult.failure(error)
         } catch {
             return ActionResult.failure(error.localizedDescription)
+        }
+    }
+
+    /// `tokens/index.ts` `fundBsv21Overlay`: pays the overlay's funding template as a plain
+    /// payment, then submits it so the overlay starts indexing the token.
+    public static func fundOverlay(
+        _ ctx: OneSatContext,
+        tokenId: String
+    ) async -> FundOverlayResult {
+        do {
+            guard let bsv21 = ctx.bsv21 else { return .failure(.servicesRequired) }
+            let template = try await bsv21.fundingTemplate(tokenId: tokenId)
+            guard let first = template.outputs.first else { return .failure(.fundingNotNeeded) }
+            let outputs = try template.outputs.map { output in
+                try WalletCreateActionOutput(
+                    lockingScript: output.lockingScript,
+                    satoshis: output.satoshis,
+                    outputDescription: output.outputDescription,
+                    tags: []
+                )
+            }
+            let result = try await TrackedAction.execute(
+                ctx,
+                description: first.outputDescription,
+                outputs: outputs,
+                options: TrackedAction.Options(acceptDelayedBroadcast: false)
+            )
+            if let error = result.error {
+                return FundOverlayResult(actionId: result.actionId, error: error)
+            }
+            guard let txid = result.txid, let tx = result.tx else {
+                return .failure(.noTxidReturned, actionId: result.actionId)
+            }
+            // The payment is broadcast either way; if the overlay misses this submission
+            // it still finds the payment on its next fee-address check.
+            do {
+                let status = try await bsv21.submitFunding(tokenId: tokenId, beef: tx)
+                return FundOverlayResult(txid: txid, tx: tx, actionId: result.actionId, status: status)
+            } catch {
+                return FundOverlayResult(
+                    txid: txid,
+                    tx: tx,
+                    actionId: result.actionId,
+                    error: OneSatActionError.fundingSubmitFailed.wireMessage
+                )
+            }
+        } catch let error as OneSatActionError {
+            return .failure(error)
+        } catch {
+            return FundOverlayResult(error: error.localizedDescription)
         }
     }
 

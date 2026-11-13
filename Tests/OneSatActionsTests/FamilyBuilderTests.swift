@@ -402,7 +402,7 @@ final class FamilyBuilderTests: XCTestCase {
             outputs: [first, second],
             tokenId: ActionVectors.tokenID,
             amount: 100,
-            validOutpoints: nil
+            states: nil
         )
         XCTAssertEqual(selected.selected.count, 2)
         XCTAssertEqual(selected.totalIn, 120)
@@ -451,7 +451,7 @@ final class FamilyBuilderTests: XCTestCase {
             outputs: [output],
             tokenId: ActionVectors.tokenID,
             amount: 80,
-            validOutpoints: nil
+            states: nil
         )
         XCTAssertEqual(selected.totalIn, 80)
         XCTAssertEqual(selected.selected[0].amount, 80)
@@ -597,11 +597,21 @@ final class FamilyBuilderTests: XCTestCase {
         let identity = try ActionVectors.identity()
         let ctx = try dummyContext(identity: identity)
         let cancel = try Ordinals.cancelAddress(identity: identity, outpoint: ActionVectors.outpoint)
-        let listing = try OrdLock.lock(
+        let listing = try OrdLockV2.lock(
             cancelAddress: cancel.description,
             payAddress: ActionVectors.payAddress,
             price: 50_000
         )
+        XCTAssertThrowsError(
+            try Ordinals.buildPurchase(
+                ctx,
+                outpoint: try Outpoint(ActionVectors.outpoint),
+                listingScript: try ActionScript.payToPublicKeyHash(ActionVectors.payAddress),
+                listingSatoshis: 1
+            )
+        ) { error in
+            XCTAssertEqual(error as? OneSatActionError, .notAnOrdLockListing)
+        }
         let prepared = try Ordinals.buildPurchase(
             ctx,
             outpoint: try Outpoint(ActionVectors.outpoint),
@@ -615,6 +625,14 @@ final class FamilyBuilderTests: XCTestCase {
         XCTAssertEqual(prepared.outputs[1].satoshis, 50_000)
         XCTAssertEqual(prepared.outputs[2].satoshis, 1_000)
         XCTAssertEqual(prepared.outputs[0].basket, OneSatConstants.ordinalsBasket)
+        XCTAssertEqual(
+            prepared.outputs[1].lockingScript,
+            try ActionScript.payToPublicKeyHash(ActionVectors.payAddress).bytes
+        )
+        XCTAssertEqual(
+            prepared.inputs[0].unlocking,
+            .scriptLength(UInt32(try OrdLockV2.estimatePurchaseUnlockLength(listing)))
+        )
     }
 
     private func walletOutput(

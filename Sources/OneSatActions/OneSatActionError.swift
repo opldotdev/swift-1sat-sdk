@@ -14,6 +14,13 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case tokenNotActive
     case overlayValidationFailed
     case insufficientTokens
+    case insufficientValidTokens
+    /// Queued overlay outputs would cover the amount once indexed.
+    case tokensQueued
+    case tokenNotFound
+    case unvalidatedInputs
+    case fundingNotNeeded
+    case fundingSubmitFailed
     case noBeefAvailable
     case noLockRequests
     case invalidSatoshis
@@ -31,7 +38,10 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case listingOutputNotFound
     case notAnOrdLockListing
     case listingNotFoundInOverlay
-    case malformedPurchaseTransaction
+    /// An OrdLock v2 purchase or cancel guard refused to sign; the message says why.
+    case ordLockV2Refused(String)
+    /// Front-funding preparation failed; carries the wallet error when there is one.
+    case ordLockV2FrontFundingFailed(String?)
     case missingSourceTxid
     case inputNotInTransaction(outpoint: String)
     case mneeClientRequired
@@ -44,8 +54,6 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case noBapIdentity
     case signWithBapRequiresInscription
     case sigmaPlaceholderMissing
-    case moveBasketMissingBEEF(basket: String)
-    case moveBasketBasketsRequired
 
     /// Exact `error` strings from `@1sat/actions`.
     public var wireMessage: String {
@@ -80,6 +88,18 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "overlay-validation-failed"
         case .insufficientTokens:
             return "insufficient-tokens"
+        case .insufficientValidTokens:
+            return "insufficient-valid-tokens"
+        case .tokensQueued:
+            return "tokens-queued"
+        case .tokenNotFound:
+            return "token-not-found"
+        case .unvalidatedInputs:
+            return "unvalidated-inputs"
+        case .fundingNotNeeded:
+            return "funding-not-needed"
+        case .fundingSubmitFailed:
+            return "funding-submit-failed"
         case .noBeefAvailable:
             return "no-beef-available"
         case .noLockRequests:
@@ -114,8 +134,10 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "not-an-ordlock-listing"
         case .listingNotFoundInOverlay:
             return "listing-not-found-in-overlay"
-        case .malformedPurchaseTransaction:
-            return "Malformed transaction: requires at least 2 outputs"
+        case .ordLockV2Refused(let message):
+            return message
+        case .ordLockV2FrontFundingFailed(let reason):
+            return reason ?? "ordlock.purchase apply: front funding preparation failed"
         case .missingSourceTxid:
             return "sourceTXID is required"
         case .inputNotInTransaction(let outpoint):
@@ -140,10 +162,6 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "sign-with-bap-requires-inscription"
         case .sigmaPlaceholderMissing:
             return "sigma seal: no zeroed placeholder tape on the script"
-        case .moveBasketMissingBEEF(let basket):
-            return "moveBasket: listOutputs returned no BEEF for basket \(basket)"
-        case .moveBasketBasketsRequired:
-            return "moveBasket: from and to baskets required"
         }
     }
 }

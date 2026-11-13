@@ -70,7 +70,7 @@ let package = Package(
         // Pure Swift, no dependencies. Used by 1Color payloads (and later the OpNS record).
         .target(name: "OneSatCBOR", dependencies: []),
 
-        // 1Sat locking scripts: inscription envelope, OrdLock, BSV-20, BSV-21, 1Color (BRC-162),
+        // 1Sat locking scripts: inscription envelope, OrdLock v2, BSV-20, BSV-21, 1Color (BRC-162),
         // Cosign, BAP, BitCom, public MAPTemplate, and CLTV time-lock. Byte-exact with
         // `@1sat/templates`. Unlock templates live with the action families.
         .target(
@@ -171,6 +171,7 @@ let package = Package(
             dependencies: [
                 "OneSatTemplates",
                 "OneSatAddresses",
+                "OneSatCBOR",
                 .product(name: "BSVCompat", package: "swift-sdk"),
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
@@ -294,6 +295,7 @@ let package = Package(
                 .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
                 "OneSatAddresses",
+                "OneSatCBOR",
             ]
         ),
     ],

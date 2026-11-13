@@ -4,6 +4,7 @@ import BSVKeys
 import BSVScript
 import BSVTransaction
 import BSVWallet
+import OneSatTemplates
 import ToolboxActions
 import ToolboxAuth
 import ToolboxServices
@@ -20,9 +21,167 @@ final class OpNSFlowTests: XCTestCase {
     /// Released `[0, "onesat"]` derivation with counterparty self and `forSelf: true`.
     private static let selfAddress = "1F5UNyuueGgsrGjevcLuicSwtQv8oXxMeS"
 
-    func test_toSelfBuilderBasketsOpNSAndWritesIdKey() throws {
+    func test_registerBuildsTheSignedIdentityBind() async throws {
+        let fixture = try beefFixture()
+        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
         let identity = try ActionVectors.identity()
         XCTAssertEqual(Hex.encode(identity.publicKey.compressedBytes), Self.identityPubKeyHex)
+        let ctx = try context(identity: identity, transport: transport)
+        let result = await OpNS.register(
+            ctx,
+            OpNS.RegisterRequest(
+                ordinal: try walletOutput(tags: Self.nameTags),
+                profile: OpNS.Profile(
+                    domain: "1sat.name",
+                    name: "Alice",
+                    avatar: String(repeating: "ef", count: 32) + "_1"
+                ),
+                inputBEEF: fixture
+            )
+        )
+        XCTAssertNotNil(result.error, "the offline transport fails funding")
+        XCTAssertNil(result.txid)
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["createAction"])
+
+        let args = try await createActionArgs(transport)
+        XCTAssertEqual(args["description"] as? String, "Publish OpNS alice")
+        let wireBeef = try XCTUnwrap(args["inputBEEF"] as? [NSNumber]).map { UInt8(truncating: $0) }
+        XCTAssertEqual(wireBeef, fixture)
+        XCTAssertEqual(
+            args["labels"] as? [String],
+            [OneSatConstants.inputAssetLabel(basket: OneSatConstants.opnsBasket, id: "aa_0")]
+        )
+        let options = try XCTUnwrap(args["options"] as? [String: Any])
+        XCTAssertEqual(options["randomizeOutputs"] as? Bool, false)
+        let inputs = try XCTUnwrap(args["inputs"] as? [[String: Any]])
+        XCTAssertEqual(inputs.count, 1)
+        XCTAssertEqual(inputs[0]["outpoint"] as? String, ActionVectors.outpoint)
+        XCTAssertEqual(inputs[0]["inputDescription"] as? String, "OpNS name to register")
+        XCTAssertEqual((inputs[0]["unlockingScriptLength"] as? NSNumber)?.intValue, 108)
+
+        let outputs = try XCTUnwrap(args["outputs"] as? [[String: Any]])
+        XCTAssertEqual(outputs.count, 1)
+        XCTAssertEqual((outputs[0]["satoshis"] as? NSNumber)?.uint64Value, 1)
+        XCTAssertEqual(outputs[0]["basket"] as? String, OneSatConstants.opnsBasket)
+        XCTAssertEqual(outputs[0]["outputDescription"] as? String, "OpNS identity bind")
+        XCTAssertEqual(outputs[0]["lockingScript"] as? String, SignOrdinalInputTests.lockFull)
+        let tags = try XCTUnwrap(outputs[0]["tags"] as? [String])
+        XCTAssertEqual(Array(tags.dropLast()), [
+            "opns",
+            "type:application/op-ns",
+            "origin:\(Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint))",
+            OneSatConstants.opnsPublishedTag,
+        ])
+        XCTAssertTrue(try XCTUnwrap(tags.last).hasPrefix("id:"))
+        let instructions = try XCTUnwrap(outputs[0]["customInstructions"] as? String)
+        let ci = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(instructions.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(ci["keyID"] as? String, "opns:" + String(repeating: "aa", count: 32) + "_0")
+        XCTAssertEqual(ci["counterparty"] as? String, "anyone")
+        XCTAssertEqual(ci["name"] as? String, "alice")
+        XCTAssertEqual(ci["origin"] as? String, Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint))
+        XCTAssertEqual(try CustomInstructions.parse(instructions).protocolID, try OneSatConstants.p1satProtocolID)
+
+        let record = try XCTUnwrap(OpNS.publishedRecord(
+            from: try Script(hex: SignOrdinalInputTests.lockFull, maximumByteCount: 10_000)
+        ))
+        XCTAssertEqual(record.profile?.avatar, [UInt8](repeating: 0xef, count: 32) + [1, 0, 0, 0])
+        XCTAssertNil(Inscription.decode(
+            try Script(hex: SignOrdinalInputTests.lockFull, maximumByteCount: 10_000)
+        ))
+    }
+
+    func test_registerRejectsAMissingDomainBeforeStorage() async throws {
+        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
+        let ctx = try context(identity: ActionVectors.identity(), transport: transport)
+        let result = await OpNS.register(
+            ctx,
+            OpNS.RegisterRequest(
+                ordinal: try walletOutput(tags: Self.nameTags),
+                profile: OpNS.Profile(domain: ""),
+                inputBEEF: try beefFixture()
+            )
+        )
+        XCTAssertEqual(result.error, "profile domain is required")
+        let methods = await transport.methods
+        XCTAssertEqual(methods, [])
+    }
+
+    func test_registerAppendsTheInscriptionAfterThePushDrop() async throws {
+        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
+        let ctx = try context(identity: ActionVectors.identity(), transport: transport)
+        _ = await OpNS.register(
+            ctx,
+            OpNS.RegisterRequest(
+                ordinal: try walletOutput(tags: Self.nameTags),
+                profile: OpNS.Profile(domain: "1sat.name"),
+                inscription: Ordinals.InscriptionPayload(content: Array("hello".utf8), contentType: "ordfs/dir"),
+                inputBEEF: try beefFixture()
+            )
+        )
+        let args = try await createActionArgs(transport)
+        let outputs = try XCTUnwrap(args["outputs"] as? [[String: Any]])
+        let lockHex = try XCTUnwrap(outputs[0]["lockingScript"] as? String)
+        XCTAssertEqual(lockHex, SignOrdinalInputTests.lockInscribed)
+
+        let lock = try Script(hex: lockHex, maximumByteCount: 10_000)
+        let inscription = try XCTUnwrap(Inscription.decode(lock))
+        XCTAssertEqual(inscription.contentType, "ordfs/dir")
+        XCTAssertEqual(inscription.content, Array("hello".utf8))
+        XCTAssertEqual(inscription.scriptPrefix?.hex, SignOrdinalInputTests.lockDomainOnly)
+        XCTAssertEqual(OpNS.publishedRecord(from: lock)?.profile, OpnsFields.Profile(domain: "1sat.name"))
+    }
+
+    func test_registerNeedsCustomInstructionsAndBEEF() async throws {
+        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
+        let ctx = try context(identity: ActionVectors.identity(), transport: transport)
+        let noTag = await OpNS.register(
+            ctx,
+            OpNS.RegisterRequest(
+                ordinal: try walletOutput(tags: ["type:application/op-ns", "name:alice"]),
+                profile: OpNS.Profile(domain: "1sat.name")
+            )
+        )
+        XCTAssertEqual(noTag.error, "no-beef-available")
+        let bare = try WalletOutput(
+            satoshis: 1,
+            spendable: true,
+            tags: Self.nameTags,
+            outpoint: try Outpoint(ActionVectors.outpoint)
+        )
+        let noCI = await OpNS.register(
+            ctx,
+            OpNS.RegisterRequest(ordinal: bare, profile: OpNS.Profile(domain: "1sat.name"), inputBEEF: try beefFixture())
+        )
+        XCTAssertEqual(noCI.error, "missing-custom-instructions")
+        let methods = await transport.methods
+        XCTAssertEqual(methods, [])
+    }
+
+    func test_deregisterUnbindsToTheP1SatAddress() async throws {
+        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
+        let identity = try ActionVectors.identity()
+        let ctx = try context(identity: identity, transport: transport)
+        let published = try walletOutput(
+            tags: Self.nameTags + [OneSatConstants.opnsPublishedTag, "opns"],
+            customInstructions: OrdinalRemittance.buildCustomInstructions(
+                protocolID: try OneSatConstants.p1satProtocolID,
+                keyID: "opns:" + String(repeating: "aa", count: 32) + "_0",
+                counterparty: "anyone",
+                name: "alice"
+            )
+        )
+        _ = await OpNS.deregister(ctx, OpNS.Request(ordinal: published, inputBEEF: try beefFixture()))
+        let args = try await createActionArgs(transport)
+        XCTAssertEqual(args["description"] as? String, "Unpublish OpNS alice")
+        let inputs = try XCTUnwrap(args["inputs"] as? [[String: Any]])
+        XCTAssertEqual(inputs[0]["inputDescription"] as? String, "OpNS name to deregister")
+        XCTAssertEqual((inputs[0]["unlockingScriptLength"] as? NSNumber)?.intValue, 108)
+        let outputs = try XCTUnwrap(args["outputs"] as? [[String: Any]])
+        XCTAssertEqual(outputs[0]["outputDescription"] as? String, "OpNS name (unbound)")
+        XCTAssertEqual(outputs[0]["basket"] as? String, OneSatConstants.opnsBasket)
         let selfAddr = try P1SATKey.address(
             identity: identity,
             keyID: ActionVectors.outpoint,
@@ -30,120 +189,22 @@ final class OpNSFlowTests: XCTestCase {
             forSelf: true
         )
         XCTAssertEqual(selfAddr.description, Self.selfAddress)
-
-        let ctx = try dummyContext(identity: identity)
-        let ordinal = try walletOutput(
-            tags: [
-                "type:application/op-ns",
-                "origin:\(ActionVectors.outpoint)",
-                "name:alice",
-                "id:aa_0",
-                "opns:published",
-            ]
-        )
-        let prepared = try Ordinals.buildTransfer(
-            ctx,
-            Ordinals.TransferRequest(
-                transfers: [
-                    Ordinals.TransferItem(
-                        ordinal: ordinal,
-                        toSelf: true,
-                        map: [("opns.idKey", Self.identityPubKeyHex)],
-                        extraTags: ["opns:published"],
-                        basket: OneSatConstants.opnsBasket
-                    ),
-                ]
-            )
-        )
-        XCTAssertEqual(prepared.outputs.count, 1)
-        XCTAssertEqual(prepared.outputs[0].satoshis, 1)
-        XCTAssertEqual(prepared.outputs[0].basket, OneSatConstants.opnsBasket)
         XCTAssertEqual(
-            prepared.outputs[0].tags,
-            [
-                "type:application/op-ns",
-                "origin:\(Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint))",
-                "opns:published",
-            ]
+            outputs[0]["lockingScript"] as? String,
+            try ActionScript.payToPublicKeyHash(selfAddr).hex
         )
-        let instructions = try CustomInstructions.parse(
-            try XCTUnwrap(prepared.outputs[0].customInstructions)
-        )
-        XCTAssertEqual(instructions.keyID, ActionVectors.outpoint)
-        XCTAssertEqual(instructions.counterparty, .self)
-        let expected = try MapSuffix.appending(
-            [("opns.idKey", Self.identityPubKeyHex)],
-            to: ActionScript.payToPublicKeyHash(selfAddr)
-        )
-        XCTAssertEqual(prepared.outputs[0].lockingScript, expected.bytes)
-        XCTAssertEqual(prepared.outputs[0].outputDescription, "Ordinal self-transfer")
-        XCTAssertEqual(prepared.inputs.count, 1)
-        XCTAssertEqual(
-            prepared.labels,
-            [OneSatConstants.inputAssetLabel(basket: OneSatConstants.ordinalsBasket, id: "aa_0")]
-        )
-    }
-
-    func test_deregisterBuilderWritesEmptyIdKeyAndDropsPublishedTag() throws {
-        let identity = try ActionVectors.identity()
-        let selfAddr = try P1SATKey.address(
-            identity: identity,
-            keyID: ActionVectors.outpoint,
-            counterparty: .self,
-            forSelf: true
-        )
-        let ctx = try dummyContext(identity: identity)
-        let ordinal = try walletOutput(
-            tags: [
-                "type:application/op-ns",
-                "origin:\(ActionVectors.outpoint)",
-                "name:alice",
-                "id:aa_0",
-                "opns:published",
-            ]
-        )
-        let prepared = try Ordinals.buildTransfer(
-            ctx,
-            Ordinals.TransferRequest(
-                transfers: [
-                    Ordinals.TransferItem(
-                        ordinal: ordinal,
-                        toSelf: true,
-                        map: [("opns.idKey", "")],
-                        extraTags: [],
-                        basket: OneSatConstants.opnsBasket
-                    ),
-                ]
-            )
-        )
-        XCTAssertEqual(prepared.outputs[0].basket, OneSatConstants.opnsBasket)
-        XCTAssertEqual(
-            prepared.outputs[0].tags,
-            [
-                "type:application/op-ns",
-                "origin:\(Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint))",
-            ]
-        )
-        XCTAssertFalse(prepared.outputs[0].tags.contains("opns:published"))
-        let expected = try MapSuffix.appending(
-            [("opns.idKey", "")],
-            to: ActionScript.payToPublicKeyHash(selfAddr)
-        )
-        XCTAssertEqual(prepared.outputs[0].lockingScript, expected.bytes)
-    }
-
-    func test_registerRequiresServicesBeforeStorage() async throws {
-        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
-        let identity = try ActionVectors.identity()
-        let ctx = try context(identity: identity, transport: transport, services: nil)
-        let result = await OpNS.register(
-            ctx,
-            OpNS.Request(ordinal: try walletOutput(tags: ["type:application/op-ns"]))
-        )
-        XCTAssertEqual(result.error, "services-required")
-        XCTAssertNil(result.txid)
-        let methods = await transport.methods
-        XCTAssertEqual(methods, [])
+        let tags = try XCTUnwrap(outputs[0]["tags"] as? [String])
+        XCTAssertEqual(Array(tags.dropLast()), [
+            "opns",
+            "type:application/op-ns",
+            "origin:\(Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint))",
+        ])
+        let ci = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(try XCTUnwrap(outputs[0]["customInstructions"] as? String).utf8)
+        ) as? [String: Any])
+        XCTAssertEqual(ci["keyID"] as? String, ActionVectors.outpoint)
+        XCTAssertEqual(ci["counterparty"] as? String, "self")
+        XCTAssertEqual(ci["name"] as? String, "alice")
     }
 
     func test_toSelfFalseStillRequiresDestination() throws {
@@ -159,26 +220,6 @@ final class OpNSFlowTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? OneSatActionError, .mustProvideCounterpartyOrAddress)
         }
-    }
-
-    func test_registerWithoutIdTagReturnsNoBeefAvailable() async throws {
-        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
-        let identity = try ActionVectors.identity()
-        let ctx = try context(
-            identity: identity,
-            transport: transport,
-            services: StubServices()
-        )
-        let result = await OpNS.register(
-            ctx,
-            OpNS.Request(
-                ordinal: try walletOutput(tags: ["type:application/op-ns", "name:alice"])
-            )
-        )
-        XCTAssertEqual(result.error, "no-beef-available")
-        XCTAssertNil(result.txid)
-        let methods = await transport.methods
-        XCTAssertEqual(methods, [])
     }
 
     func test_getNamesListsOpnsBasketAndReturnsBeef() async throws {
@@ -223,82 +264,6 @@ final class OpNSFlowTests: XCTestCase {
         XCTAssertEqual((args["limit"] as? NSNumber)?.uint32Value, 100)
     }
 
-    func test_registerCreateActionCarriesInputBEEFAndTracking() async throws {
-        let fixture = try beefFixture()
-        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
-        let identity = try ActionVectors.identity()
-        let ctx = try context(
-            identity: identity,
-            transport: transport,
-            services: StubServices()
-        )
-        let ordinal = try walletOutput(
-            tags: [
-                "type:application/op-ns",
-                "origin:\(ActionVectors.outpoint)",
-                "name:alice",
-                "id:aa_0",
-                "opns:published",
-            ]
-        )
-        let result = await OpNS.register(
-            ctx,
-            OpNS.Request(ordinal: ordinal, inputBEEF: fixture)
-        )
-        XCTAssertNotNil(result.error)
-        XCTAssertNil(result.txid)
-
-        let methods = await transport.methods
-        XCTAssertEqual(methods, ["createAction"])
-        let bodies = await transport.bodies
-        let envelope = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(bodies[0])) as? [String: Any]
-        )
-        XCTAssertEqual(envelope["method"] as? String, "createAction")
-        let params = try XCTUnwrap(envelope["params"] as? [Any])
-        XCTAssertGreaterThanOrEqual(params.count, 2)
-        let args = try XCTUnwrap(params[1] as? [String: Any])
-        let wireBeef = try XCTUnwrap(args["inputBEEF"] as? [NSNumber]).map { UInt8(truncating: $0) }
-        XCTAssertEqual(wireBeef, fixture)
-        XCTAssertEqual(args["description"] as? String, "Transfer ordinal")
-        let options = try XCTUnwrap(args["options"] as? [String: Any])
-        XCTAssertEqual(options["randomizeOutputs"] as? Bool, false)
-
-        let outputs = try XCTUnwrap(args["outputs"] as? [[String: Any]])
-        XCTAssertEqual(outputs.count, 1)
-        XCTAssertEqual((outputs[0]["satoshis"] as? NSNumber)?.uint64Value, 1)
-        XCTAssertEqual(outputs[0]["basket"] as? String, OneSatConstants.opnsBasket)
-        XCTAssertEqual(outputs[0]["outputDescription"] as? String, "Ordinal self-transfer")
-        let tags = try XCTUnwrap(outputs[0]["tags"] as? [String])
-        XCTAssertEqual(tags.prefix(3), [
-            "type:application/op-ns",
-            "origin:\(Bsv21Remittance.formatOrdinalOutpoint(ActionVectors.outpoint))",
-            "opns:published",
-        ])
-        let idTag = try XCTUnwrap(tags.last)
-        XCTAssertTrue(idTag.hasPrefix("id:"))
-        XCTAssertTrue(idTag.hasSuffix("_0"))
-        let labels = try XCTUnwrap(args["labels"] as? [String])
-        XCTAssertFalse(labels.contains(OneSatConstants.p1satLabel))
-
-        let selfAddr = try P1SATKey.address(
-            identity: identity,
-            keyID: ActionVectors.outpoint,
-            counterparty: .self,
-            forSelf: true
-        )
-        let expected = try MapSuffix.appending(
-            [("opns.idKey", Self.identityPubKeyHex)],
-            to: ActionScript.payToPublicKeyHash(selfAddr)
-        )
-        XCTAssertEqual(outputs[0]["lockingScript"] as? String, expected.hex)
-        let instructions = try CustomInstructions.parse(
-            try XCTUnwrap(outputs[0]["customInstructions"] as? String)
-        )
-        XCTAssertEqual(instructions.keyID, ActionVectors.outpoint)
-        XCTAssertEqual(instructions.counterparty, .self)
-    }
-
     func test_cancelListingRestoresOpnsMetadataAndReportsFundingFailure() async throws {
         let fixture = try beefFixture()
         let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
@@ -332,11 +297,29 @@ final class OpNSFlowTests: XCTestCase {
         XCTAssertEqual(options["randomizeOutputs"] as? Bool, false)
     }
 
-    private func walletOutput(tags: [String]) throws -> WalletOutput {
+    private static let nameTags = [
+        "type:application/op-ns",
+        "origin:\(ActionVectors.outpoint)",
+        "name:alice",
+        "id:aa_0",
+    ]
+
+    private func createActionArgs(_ transport: ScriptedTransport) async throws -> [String: Any] {
+        let bodies = await transport.bodies
+        let envelope = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(try XCTUnwrap(bodies.first))) as? [String: Any]
+        )
+        XCTAssertEqual(envelope["method"] as? String, "createAction")
+        let params = try XCTUnwrap(envelope["params"] as? [Any])
+        return try XCTUnwrap(params[1] as? [String: Any])
+    }
+
+    private func walletOutput(tags: [String], customInstructions: String? = nil) throws -> WalletOutput {
         try WalletOutput(
             satoshis: 1,
             spendable: true,
-            customInstructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded(),
+            customInstructions: try customInstructions
+                ?? CustomInstructions(keyID: ActionVectors.outpoint).encoded(),
             tags: tags,
             outpoint: try Outpoint(ActionVectors.outpoint)
         )
@@ -380,45 +363,6 @@ final class OpNSFlowTests: XCTestCase {
             auth: AuthID(identityKey: Hex.encode(identity.publicKey.compressedBytes)),
             services: services
         )
-    }
-}
-
-private struct StubServices: WalletServices {
-    func rawTX(txid: String) async throws -> [UInt8] {
-        throw ServiceError.notImplemented("rawTX")
-    }
-    func postBEEF(_ beef: [UInt8], txids: [String]) async throws -> [BroadcastOutcome] {
-        throw ServiceError.notImplemented("postBEEF")
-    }
-    func merklePath(txid: String) async throws -> [UInt8]? {
-        throw ServiceError.notImplemented("merklePath")
-    }
-    func currentHeight() async throws -> UInt32 {
-        throw ServiceError.notImplemented("currentHeight")
-    }
-    func chainTipHeader() async throws -> ChainBlockHeader {
-        throw ServiceError.notImplemented("chainTipHeader")
-    }
-    func header(atHeight height: UInt32) async throws -> ChainBlockHeader {
-        throw ServiceError.notImplemented("header")
-    }
-    func header(forHash hash: String) async throws -> ChainBlockHeader {
-        throw ServiceError.notImplemented("header")
-    }
-    func isValidRoot(_ root: [UInt8], atHeight height: UInt32) async throws -> Bool {
-        throw ServiceError.notImplemented("isValidRoot")
-    }
-    func statusForTXIDs(_ txids: [String]) async throws -> [TransactionStatusReport] {
-        throw ServiceError.notImplemented("status")
-    }
-    func isUTXO(scriptHash: String, txid: String, vout: UInt32) async throws -> Bool {
-        throw ServiceError.notImplemented("isUTXO")
-    }
-    func scriptHashHistory(_ scriptHash: String) async throws -> [ScriptHistoryEntry] {
-        throw ServiceError.notImplemented("history")
-    }
-    func usdPerBSV() async throws -> Double {
-        throw ServiceError.notImplemented("usd")
     }
 }
 

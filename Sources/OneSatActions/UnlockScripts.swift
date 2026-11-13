@@ -5,7 +5,7 @@ import BSVWallet
 import OneSatTemplates
 import ToolboxActions
 
-/// Spend-side scripts for TimeLock and OrdLock. These live in actions, not templates.
+/// Spend-side scripts for TimeLock and OrdLock v2. These live in actions, not templates.
 public enum UnlockScripts {
     /// `Lock.unlock` / `Lock.unlockWithWallet` in `@1sat/templates` `lock/lock.ts`.
     ///
@@ -41,10 +41,11 @@ public enum UnlockScripts {
         )
     }
 
-    /// `OrdLock.cancelWithWallet` in `@1sat/templates` `ordlock/ordlock.ts`.
+    /// `OrdLockV2.cancelWithWallet` in `@1sat/templates` `ordlock/ordlockV2.ts`.
     ///
-    /// P2PKH unlock under `SIGHASH_ALL | ANYONECANPAY | FORKID`, then `OP_1`.
-    public static func ordLockCancel(
+    /// `<"ol2:cancel"> <sig> <pubkey> OP_1`, signed under
+    /// `SIGHASH_ALL | ANYONECANPAY | FORKID` over the whole locking script.
+    public static func ordLockV2Cancel(
         identity: PrivateKey,
         transaction: Transaction,
         inputIndex: Int,
@@ -58,13 +59,13 @@ public enum UnlockScripts {
             keyID: WalletKeyID(keyID),
             counterparty: counterparty
         )
-        return try ordLockCancel(
+        return try ordLockV2Cancel(
             privateKey: key, transaction: transaction, inputIndex: inputIndex, limits: limits
         )
     }
 
-    /// Raw-key `OrdLock.cancelListing(key, "all", true)` used by legacy imports.
-    public static func ordLockCancel(
+    /// Raw-key `OrdLockV2.cancelListing(key, "all", true)`, used by legacy-key sweeps.
+    public static func ordLockV2Cancel(
         privateKey: PrivateKey,
         transaction: Transaction,
         inputIndex: Int,
@@ -74,63 +75,73 @@ public enum UnlockScripts {
               let source = transaction.inputs[inputIndex].sourceOutput else {
             throw OneSatActionError.missingSourceLockingScript(inputIndex: inputIndex)
         }
-        guard let listing = OrdLock.decode(source.lockingScript) else {
+        guard let listing = OrdLockV2.decode(source.lockingScript) else {
             throw OneSatActionError.notAnOrdLockListing
         }
-        guard try Address(listing.seller).publicKeyHash
-            == Address(publicKey: privateKey.publicKey, network: .mainnet).publicKeyHash else {
+        guard listing.sellerPublicKeyHash
+            == Address(publicKey: privateKey.publicKey, network: .mainnet).publicKeyHash.bytes else {
             throw OneSatActionError.invalidCustomInstructions
         }
-        var script = try SignP2PKH.unlockingScript(
+        let scriptMaximum = Int(limits.maximumScriptByteCount)
+        let signature = try SignP2PKH.unlockingScript(
             privateKey: privateKey,
             transaction: transaction,
             inputIndex: inputIndex,
             hashType: ForkIDSignatureHashType(outputs: .all, anyoneCanPay: true),
             limits: limits
         )
-        try script.append(Opcode.one, maximumScriptByteCount: Int(limits.maximumScriptByteCount))
+        var script = try Script(bytes: [], maximumByteCount: scriptMaximum)
+        try script.appendPushData(OrdLockV2.cancelMarker, maximumScriptByteCount: scriptMaximum)
+        script = try Script(bytes: script.bytes + signature.bytes, maximumByteCount: scriptMaximum)
+        try script.append(OrdLockV2.cancelSelector, maximumScriptByteCount: scriptMaximum)
         return script
     }
 
-    /// `buildPurchaseUnlockingScript` in `ordinals/index.ts`.
+    /// `OrdLockV2.purchaseListing(..., { deliveries })` in `ordlock/ordlockV2.ts`.
     ///
-    /// Output 0 bytes, then extra outputs or `OP_0`, then the ANYONECANPAY preimage, then `OP_0`.
-    public static func ordLockPurchase(
+    /// `<preimage> OP_0`. The preimage is built under
+    /// `SIGHASH_SINGLE | ANYONECANPAY | FORKID` over the scriptCode after the
+    /// purchase branch's OP_CODESEPARATOR. Refuses to sign unless output
+    /// `inputIndex` is the listing's payout and the listed satoshi lands on a
+    /// 1-sat receive output (one of `deliveries` when given).
+    public static func ordLockV2Purchase(
         transaction: Transaction,
         inputIndex: Int,
+        deliveries: [OrdLockV2Spend.DeliveryTarget]? = nil,
         limits: TransactionLimits = WalletTransactionLimits.standard
     ) throws -> Script {
-        guard transaction.outputs.count >= 2 else {
-            throw OneSatActionError.malformedPurchaseTransaction
+        guard transaction.inputs.indices.contains(inputIndex),
+              let source = transaction.inputs[inputIndex].sourceOutput else {
+            throw OneSatActionError.missingSourceLockingScript(inputIndex: inputIndex)
         }
-        let scriptMaximum = Int(limits.maximumScriptByteCount)
-        var script = try Script(bytes: [], maximumByteCount: scriptMaximum)
-        try script.appendPushData(
-            OrdLock.buildOutput(
-                satoshis: transaction.outputs[0].satoshis,
-                script: transaction.outputs[0].lockingScript
-            ),
-            maximumScriptByteCount: scriptMaximum
+        guard let listing = OrdLockV2.decode(source.lockingScript) else {
+            throw OneSatActionError.ordLockV2Refused("OrdLockV2: input is not a v2 listing")
+        }
+        guard transaction.outputs.indices.contains(inputIndex) else {
+            throw OneSatActionError.ordLockV2Refused(
+                "OrdLockV2: no output at index \(inputIndex); SIGHASH_SINGLE binds listing input \(inputIndex) to output \(inputIndex)"
+            )
+        }
+        let bound = transaction.outputs[inputIndex]
+        guard OrdLockV2.buildOutput(satoshis: bound.satoshis, script: bound.lockingScript)
+            == listing.payout else {
+            throw OneSatActionError.ordLockV2Refused(
+                "OrdLockV2: output \(inputIndex) must be the listing payout (\(listing.price) sats to the seller's payout script)"
+            )
+        }
+        _ = try OrdLockV2Spend.assertDelivery(
+            transaction: transaction, inputIndex: inputIndex, deliveries: deliveries
         )
-        if transaction.outputs.count > 2 {
-            var extras: [UInt8] = []
-            for output in transaction.outputs.dropFirst(2) {
-                extras.append(contentsOf: OrdLock.buildOutput(
-                    satoshis: output.satoshis,
-                    script: output.lockingScript
-                ))
-            }
-            try script.appendPushData(extras, maximumScriptByteCount: scriptMaximum)
-        } else {
-            try script.append(Opcode.zero, maximumScriptByteCount: scriptMaximum)
-        }
         let preimage = try transaction.forkIDSignaturePreimage(
             inputIndex: inputIndex,
-            hashType: ForkIDSignatureHashType(outputs: .all, anyoneCanPay: true),
+            hashType: ForkIDSignatureHashType(outputs: .single, anyoneCanPay: true),
+            scriptCode: try OrdLockV2.purchaseScriptCode(source.lockingScript),
             limits: limits
         )
+        let scriptMaximum = Int(limits.maximumScriptByteCount)
+        var script = try Script(bytes: [], maximumByteCount: scriptMaximum)
         try script.appendPushData(preimage, maximumScriptByteCount: scriptMaximum)
-        try script.append(Opcode.zero, maximumScriptByteCount: scriptMaximum)
+        try script.append(OrdLockV2.purchaseSelector, maximumScriptByteCount: scriptMaximum)
         return script
     }
 
