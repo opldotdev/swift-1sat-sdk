@@ -37,6 +37,14 @@ final class ConstantsAndDerivationTests: XCTestCase {
         XCTAssertEqual(protocolID.name, "onesat")
     }
 
+    /// `@1sat/types` `HANDLE_CERT_TYPE`: the BRC-169 certificate type, a base64 32-byte digest.
+    func test_handleCertificateTypeMatchesTypesPackage() throws {
+        XCTAssertEqual(OneSatConstants.handleCertificateType, "XgCFdUfxEcI+3xtDjsIuSAjMl5EwzCUjsQc45ds1lC8=")
+        let digest = try XCTUnwrap(Data(base64Encoded: OneSatConstants.handleCertificateType))
+        XCTAssertEqual(digest.count, 32)
+        XCTAssertEqual(digest.base64EncodedString(), OneSatConstants.handleCertificateType)
+    }
+
     func test_bsv20BasketIsPlain() {
         XCTAssertEqual(OneSatConstants.bsv20Basket, "bsv20")
     }

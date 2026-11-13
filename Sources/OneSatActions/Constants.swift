@@ -99,6 +99,10 @@ public enum OneSatConstants {
         }
     }
 
+    /// `HANDLE_CERT_TYPE`: BRC-169 handle certificate type (base64 SHA-256 of the derivation string).
+    /// Held handles are the wallet's certificates of this type.
+    public static let handleCertificateType = "XgCFdUfxEcI+3xtDjsIuSAjMl5EwzCUjsQc45ds1lC8="
+
     /// `BAP_BASKET`
     public static let bapBasket = "bap"
     /// `BAP_PROTOCOL_ID` name. Security level is `everyApp` (1).
