@@ -67,10 +67,15 @@ actor PublishTransport: AuthenticatedTransport {
     private(set) var fundingTransaction: Transaction?
     /// The batch ids `abortActionBatch` was called with.
     private(set) var abortedBatches: [String] = []
+    /// The references `abortAction` was called with.
+    private(set) var abortedReferences: [String] = []
+    /// The `createAction` calls, counted from 0, that answer with an error instead.
+    private let failingCreates: Set<Int>
 
-    init(sendWithStatus: String = "unproven", actionBatch: ActionBatch? = nil) {
+    init(sendWithStatus: String = "unproven", actionBatch: ActionBatch? = nil, failingCreates: Set<Int> = []) {
         self.sendWithStatus = sendWithStatus
         self.actionBatch = actionBatch
+        self.failingCreates = failingCreates
     }
 
     func send(
@@ -100,8 +105,14 @@ actor PublishTransport: AuthenticatedTransport {
                     ],
                 ],
             ])
+        case "createAction" where actionBatch == nil && failingCreates.contains(nextReference):
+            nextReference += 1
+            return try envelope(id: id, error: ["name": "WERR_INSUFFICIENT_FUNDS", "message": "insufficient funds"])
         case "createAction" where actionBatch == nil:
             return try envelope(id: id, result: try createAction(args))
+        case "abortAction" where actionBatch == nil:
+            abortedReferences.append(args["reference"] as? String ?? "")
+            return try envelope(id: id, result: ["aborted": true])
         case "processAction" where actionBatch == nil:
             return try envelope(id: id, result: try processAction(args))
         case "createAction", "processAction":

@@ -143,6 +143,25 @@ final class SigmaPublishTests: XCTestCase {
         XCTAssertEqual(methods, ["getCapabilities", "createAction", "processAction", "listOutputs", "createAction", "processAction"])
     }
 
+    /// Storage without the action batch holds the anchor as nosend. When the publish then
+    /// cannot be funded, the anchor is aborted by its txid so its change is not left locked.
+    func test_inscribeWithSigmaAbortsTheHeldAnchorWhenThePublishFailsWithoutABatch() async throws {
+        let transport = PublishTransport(failingCreates: [1])
+        let result = await Inscriptions.inscribe(
+            try context(transport),
+            Inscriptions.Request(content: Array("hi".utf8), contentType: "text/plain")
+        )
+        XCTAssertNotNil(result.error)
+        XCTAssertNil(result.txid)
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["getCapabilities", "createAction", "processAction", "listOutputs", "createAction", "abortAction"])
+        let processed = await transport.processed
+        XCTAssertEqual(processed.count, 1)
+        XCTAssertTrue(processed[0].isNoSend)
+        let aborted = await transport.abortedReferences
+        XCTAssertEqual(aborted, [processed[0].txid])
+    }
+
     // MARK: Action batch (a wallet with a single unspent output)
 
     /// Storage that speaks the action batch reserves the wallet's one unspent output for the
@@ -473,8 +492,9 @@ final class SigmaPublishTests: XCTestCase {
         let publish = processed[1]
         let anchorTxid = anchor.txid
         XCTAssertEqual(anchor.sendWith, [])
-        // TS signs both with acceptDelayedBroadcast false; the anchor stays noSend so storage
-        // holds it until the publish sends it.
+        // TS completeSignedAction processes the publish with isDelayed false. The anchor, which TS
+        // creates with acceptDelayedBroadcast true, goes through the same path here; noSend makes
+        // storage hold it as nosend either way, until the publish sends it.
         XCTAssertTrue(anchor.isNoSend)
         XCTAssertFalse(anchor.isDelayed)
         XCTAssertFalse(publish.isNoSend)

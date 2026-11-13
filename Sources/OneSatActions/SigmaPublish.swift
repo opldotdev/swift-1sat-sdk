@@ -115,8 +115,19 @@ enum SigmaPublish {
             await batch.abort(ctx.auth)
             return ActionResult(error: error)
         }
+        // Storage without an action batch took the anchor through processAction and holds it as
+        // nosend. If the publish never sends it, abort it so its change is not left locked.
+        // TS leaves the anchor held; storage accepts the txid as the reference of a nosend action.
+        let batched = await batch.isActive
+        func release() async {
+            if batched {
+                await batch.abort(ctx.auth)
+            } else if let txid = anchor.txid {
+                await abortHeldAnchor(ctx, txid: txid)
+            }
+        }
         guard let anchorTxid = anchor.txid, let anchorTx = anchor.tx else {
-            await batch.abort(ctx.auth)
+            await release()
             throw OneSatActionError.sigmaAnchorFailed
         }
 
@@ -135,12 +146,20 @@ enum SigmaPublish {
                 actionID: actionID, batch: batch
             )
         } catch {
-            await batch.abort(ctx.auth)
+            await release()
             throw error
         }
         // A committed batch is finished, so this only releases one the publish never committed.
-        if result.error != nil { await batch.abort(ctx.auth) }
+        // A rejected broadcast already handed the anchor to the network with the publish.
+        if let error = result.error, !error.hasPrefix("broadcast-") { await release() }
         return result
+    }
+
+    /// Aborts an anchor storage holds as nosend. Best effort: storage refuses one it has sent.
+    private static func abortHeldAnchor(_ ctx: OneSatContext, txid: String) async {
+        guard let reference = Data(base64Encoded: txid) else { return }
+        guard let data = try? WalletBase64Data(Array(reference)) else { return }
+        _ = try? await ctx.storage.abortAction(ctx.auth, WalletAbortActionRequest(reference: data))
     }
 
     /// The publish: spends the anchor at input 0, funded first from the anchor's change.
