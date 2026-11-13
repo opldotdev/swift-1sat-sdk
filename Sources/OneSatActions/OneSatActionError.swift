@@ -47,8 +47,6 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case noBapIdentity
     case signWithBapRequiresInscription
     case sigmaPlaceholderMissing
-    case moveBasketMissingBEEF(basket: String)
-    case moveBasketBasketsRequired
 
     /// Exact `error` strings from `@1sat/actions`.
     public var wireMessage: String {
@@ -145,10 +143,6 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "sign-with-bap-requires-inscription"
         case .sigmaPlaceholderMissing:
             return "sigma seal: no zeroed placeholder tape on the script"
-        case .moveBasketMissingBEEF(let basket):
-            return "moveBasket: listOutputs returned no BEEF for basket \(basket)"
-        case .moveBasketBasketsRequired:
-            return "moveBasket: from and to baskets required"
         }
     }
 }
