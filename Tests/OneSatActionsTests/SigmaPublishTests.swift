@@ -137,7 +137,8 @@ final class SigmaPublishTests: XCTestCase {
         XCTAssertEqual(result.error, "broadcast-failed")
         XCTAssertNil(result.txid)
         let methods = await transport.methods
-        XCTAssertEqual(methods, ["createAction", "processAction", "listOutputs", "createAction", "processAction"])
+        // The publish asks storage for its action-batch capabilities first, as the TS wallet does.
+        XCTAssertEqual(methods, ["getCapabilities", "createAction", "processAction", "listOutputs", "createAction", "processAction"])
     }
 
     // MARK: Collections (collections/index.ts mintWithSigma)
@@ -253,7 +254,8 @@ final class SigmaPublishTests: XCTestCase {
         result: ActionResult
     ) async throws -> Flow {
         let methods = await transport.methods
-        XCTAssertEqual(methods, ["createAction", "processAction", "listOutputs", "createAction", "processAction"])
+        // The publish asks storage for its action-batch capabilities first, as the TS wallet does.
+        XCTAssertEqual(methods, ["getCapabilities", "createAction", "processAction", "listOutputs", "createAction", "processAction"])
         let creates = try SigmaAssert.createActions(await transport.bodies)
         XCTAssertEqual(creates.map { $0["description"] as? String }, ["Sigma anchor output", description])
 
