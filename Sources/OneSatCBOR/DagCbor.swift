@@ -310,9 +310,11 @@ public enum DagCbor {
                 try write(entry.value, into: &out)
             }
         case .link(let link):
-            guard isValidCID(link.cid) else { throw DagCborError.invalidLink }
+            // Write the CID as multiformats reports it, so an explicit CIDv0 prefix is
+            // normalized and encode -> decode -> encode is stable.
+            guard let cid = canonicalCID(link.cid) else { throw DagCborError.invalidLink }
             writeHead(6, 42, into: &out)
-            try write(.bytes([0x00] + link.cid), into: &out)
+            try write(.bytes([0x00] + cid), into: &out)
         case .bool(let flag):
             out.append(flag ? 0xf5 : 0xf4)
         case .null:

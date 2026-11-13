@@ -169,6 +169,17 @@ final class DagCborTests: XCTestCase {
 
     // MARK: - Encoder
 
+    func test_encoderNormalizesExplicitCIDv0AndRoundTrips() throws {
+        let multihash = "1220" + String(repeating: "ab", count: 32)
+        let link = DagCborValue.link(DagCborLink(cid: bytes("0071" + multihash)))
+        let encoded = try DagCbor.encode(link)
+        XCTAssertEqual(hex(encoded), "d82a582300" + multihash)
+        let decoded = try DagCbor.decode(encoded)
+        XCTAssertEqual(decoded.linkValue?.cid, bytes(multihash))
+        XCTAssertEqual(try DagCbor.encode(decoded), encoded)
+    }
+
+
     func test_encoderKeyOrderIsLengthFirstByUTF8Bytes() throws {
         let map: DagCborMap = ["\u{e9}": .unsigned(1), "ab": .unsigned(2), "b": .unsigned(3), "aa": .unsigned(4)]
         XCTAssertEqual(hex(try DagCbor.encode(.map(map))), "a4616203626161046261620262c3a901")
