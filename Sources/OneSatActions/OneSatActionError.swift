@@ -47,6 +47,8 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case mneeClientRequired
     case quantityMustBePositive
     case anchorNoTxid
+    /// The SIGMA anchor came back without a txid or transaction (`applyInscribeSigma`).
+    case sigmaAnchorFailed
     case exactlyOneOfContentOrRef
     case contentTypeRequiredWithContent
     case invalidRef(ref: String)
@@ -148,6 +150,8 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "quantity-must-be-positive"
         case .anchorNoTxid:
             return "anchor-no-txid"
+        case .sigmaAnchorFailed:
+            return "ordinal.inscribe-sigma apply: anchor failed"
         case .exactlyOneOfContentOrRef:
             return "exactly-one-of-base64Content-or-ref-required"
         case .contentTypeRequiredWithContent:

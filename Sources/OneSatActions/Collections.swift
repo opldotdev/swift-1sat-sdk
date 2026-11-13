@@ -101,7 +101,7 @@ public enum Collections {
         }
     }
 
-    /// `mintCollection` (`collections/index.ts:417-517`).
+    /// `mintCollection` (`collections/index.ts:265-422`).
     public static func mint(_ ctx: OneSatContext, _ request: MintRequest) async -> MintResult {
         do {
             let decoded = try ActionBase64.decode(request.base64Content)
@@ -156,12 +156,13 @@ public enum Collections {
                 customInstructions: OrdinalRemittance.buildCustomInstructions(
                     protocolID: try OneSatConstants.p1satProtocolID,
                     keyID: keyID,
+                    counterparty: "self",
                     tags: tags,
                     name: displayName
                 )
             )
             guard let txid = result.txid else {
-                return MintResult(error: OneSatActionError.noTxidReturned.wireMessage)
+                return MintResult(error: SigmaPublish.publishError(result.error))
             }
             return MintResult(txid: txid, collectionId: "\(txid)_0", tx: result.tx)
         } catch let error as OneSatActionError {
@@ -171,7 +172,7 @@ public enum Collections {
         }
     }
 
-    /// `mintCollectionItem` (`collections/index.ts:585-711`).
+    /// `mintCollectionItem` (`collections/index.ts:427-586`).
     public static func mintItem(
         _ ctx: OneSatContext,
         _ request: MintItemRequest
@@ -254,12 +255,13 @@ public enum Collections {
                 customInstructions: OrdinalRemittance.buildCustomInstructions(
                     protocolID: try OneSatConstants.p1satProtocolID,
                     keyID: keyID,
+                    counterparty: "self",
                     tags: tags,
                     name: displayName
                 )
             )
             guard result.txid != nil else {
-                return ActionResult.failure(OneSatActionError.noTxidReturned)
+                return ActionResult.failure(SigmaPublish.publishError(result.error))
             }
             return result
         } catch let error as OneSatActionError {
@@ -269,7 +271,11 @@ public enum Collections {
         }
     }
 
-    /// `publishCollectionWithSigma` (`collections/index.ts:254-352`).
+    /// `mintWithSigma` (`collections/index.ts:199-256`) through the SIGMA apply step
+    /// (`apply/inscribeSigma.ts`): a 2-sat noSend anchor keyed `anchor-<actionId>`, the
+    /// inscription sealed against anchor input 0, then the publish spending the anchor and
+    /// sending it along. Its tags come out as the apply step writes them: the collection tags,
+    /// `id:`, then `creator:`.
     private static func publishWithSigma(
         _ ctx: OneSatContext,
         description: String,
@@ -278,95 +284,22 @@ public enum Collections {
         tags: [String],
         customInstructions: String
     ) async throws -> ActionResult {
-        let millis = Int64(Date().timeIntervalSince1970 * 1000)
-        let anchorKeyID = "anchor-\(millis)"
-        let anchorAddress = try P1SATKey.address(
-            identity: ctx.identity,
-            keyID: anchorKeyID,
-            counterparty: .self,
-            forSelf: true,
-            network: ctx.chain.network
-        )
-        let anchor = try await TrackedAction.execute(
-            ctx,
-            description: "Sigma anchor output",
-            outputs: [
-                try WalletCreateActionOutput(
-                    lockingScript: try ActionScript.payToPublicKeyHash(anchorAddress).bytes,
-                    satoshis: 2,
-                    outputDescription: "Sigma anchor",
-                    basket: OneSatConstants.sigmaBasket,
-                    customInstructions: try CustomInstructions(
-                        protocolID: try OneSatConstants.p1satProtocolID,
-                        keyID: anchorKeyID
-                    ).encoded()
-                ),
-            ],
-            options: TrackedAction.Options(
-                bypassP1Sat: true,
-                randomizeOutputs: false,
-                acceptDelayedBroadcast: true,
-                noSend: true
-            )
-        )
-        guard let anchorTxid = anchor.txid else { throw OneSatActionError.anchorNoTxid }
-
-        let sigmaScript = try await Sigma.apply(
-            ctx,
-            to: lockingScript,
-            inputTxid: anchorTxid,
-            inputVout: 0
-        )
-
-        // ActionResult.tx is Atomic BEEF. Phase 2 inputBEEF is the nested BEEF graph.
-        let inputBEEF: BEEF?
-        if let tx = anchor.tx {
-            inputBEEF = try AtomicBEEF(bytes: tx, limits: WalletBEEFLimits.standard).beef
-        } else {
-            inputBEEF = nil
-        }
-
-        return try await TrackedAction.execute(
+        try await SigmaPublish.publish(
             ctx,
             description: description,
-            inputBEEF: inputBEEF,
-            inputs: [
-                try WalletCreateActionInput(
-                    outpoint: try Outpoint("\(anchorTxid).0"),
-                    inputDescription: "Sigma anchor",
-                    unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
-                ),
-            ],
-            outputs: [
+            sealing: lockingScript
+        ) { sealed in
+            [
                 try WalletCreateActionOutput(
-                    lockingScript: sigmaScript.bytes,
+                    lockingScript: sealed.script.bytes,
                     satoshis: 1,
                     outputDescription: outputDescription,
                     basket: OneSatConstants.ordinalsBasket,
                     customInstructions: customInstructions,
-                    tags: tags
+                    tags: sealed.tags(tags, index: 0)
                 ),
-            ],
-            options: TrackedAction.Options(
-                randomizeOutputs: false,
-                acceptDelayedBroadcast: true,
-                noSend: true,
-                noSendChange: anchor.noSendChange ?? [],
-                knownTxids: [anchorTxid],
-                sendWith: [anchorTxid]
-            ),
-            sign: { tx in
-                [
-                    0: try SignP2PKH.unlockingScript(
-                        identity: ctx.identity,
-                        transaction: tx,
-                        inputIndex: 0,
-                        protocolID: try OneSatConstants.p1satProtocolID,
-                        keyID: anchorKeyID
-                    ),
-                ]
-            }
-        )
+            ]
+        }
     }
 
     private static func isValidRef(_ ref: String) -> Bool {

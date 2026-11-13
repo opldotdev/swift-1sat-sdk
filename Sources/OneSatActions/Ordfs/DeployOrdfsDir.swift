@@ -189,7 +189,7 @@ public enum DeployOrdfsDir {
             )
         }
         guard let txid = result.txid else {
-            return Response(error: publishError(result.error))
+            return Response(error: SigmaPublish.publishError(result.error))
         }
         return Response(
             txid: txid,
@@ -198,46 +198,9 @@ public enum DeployOrdfsDir {
         )
     }
 
-    /// The error for a publish that returned no txid.
-    ///
-    /// TS answers `no-txid-returned` whenever the tracked action comes back without a txid,
-    /// which is where a signed action whose broadcast was rejected lands. A wallet failure
-    /// there throws instead, and the action returns the thrown message; `TrackedAction` reports
-    /// those as its error string, so they pass through.
-    static func publishError(_ error: String?) -> String {
-        guard let error, !error.hasPrefix("broadcast-") else {
-            return OneSatActionError.noTxidReturned.wireMessage
-        }
-        return error
-    }
-
-    /// `sigmaAnchorKeyId` (`apply/inscribeSigma.ts`): the anchor key is named after the action
-    /// id, so the anchor and the publish that spends it agree on it.
-    static func sigmaAnchorKeyID(_ actionID: String) -> String {
-        "anchor-\(actionID)"
-    }
-
-    /// The options `applyInscribeSigma` leaves on the publish once the anchor exists: the
-    /// anchor known and sent with the publish, and `trustSelf: 'known'`. The publish itself is
-    /// not `noSend`.
-    ///
-    /// TS also copies the anchor's `noSendChange` onto the publish. Storage reads
-    /// `noSendChange` only for a `noSend` action (wallet-toolbox `validateNoSendChange`), so on
-    /// this publish it funds nothing; the BRC-100 options here refuse `noSendChange` without
-    /// `noSend`, so it is left off rather than making the publish `noSend` to carry it.
-    static func sigmaPublishOptions(anchorTxid: String) -> TrackedAction.Options {
-        TrackedAction.Options(
-            randomizeOutputs: false,
-            acceptDelayedBroadcast: true,
-            knownTxids: [anchorTxid],
-            sendWith: [anchorTxid],
-            trustSelf: .known
-        )
-    }
-
-    /// The SIGMA flow of `applyInscribeSigma` (`apply/inscribeSigma.ts`): a 2-sat noSend anchor
-    /// keyed by the action id, the root manifest sealed against anchor input 0, then the publish
-    /// spending the anchor and sending it along.
+    /// The SIGMA flow of `applyInscribeSigma` (`apply/inscribeSigma.ts`), shared with inscribe
+    /// and the collection mints: a 2-sat noSend anchor keyed by the action id, the root manifest
+    /// sealed against anchor input 0, then the publish spending the anchor and sending it along.
     ///
     /// The root's tags come out in the order the TS apply step writes them: the manifest tags,
     /// the action's `id:` tag, then `creator:` derived from the sealed script.
@@ -247,84 +210,19 @@ public enum DeployOrdfsDir {
         writeMode: OrdfsDirWriteMode,
         manifestCustomInstructions: String?
     ) async throws -> ActionResult {
-        let actionID = TrackedAction.randomActionID()
-        let anchorKeyID = sigmaAnchorKeyID(actionID)
-        let anchorAddress = try P1SATKey.address(
-            identity: ctx.identity,
-            keyID: anchorKeyID,
-            counterparty: .self,
-            forSelf: true,
-            network: ctx.chain.network
-        )
-        let anchor = try await TrackedAction.execute(
-            ctx,
-            description: "Sigma anchor output",
-            outputs: [
-                try WalletCreateActionOutput(
-                    lockingScript: try ActionScript.payToPublicKeyHash(anchorAddress).bytes,
-                    satoshis: 2,
-                    outputDescription: "Sigma anchor",
-                    basket: OneSatConstants.sigmaBasket,
-                    customInstructions: try CustomInstructions(
-                        protocolID: try OneSatConstants.p1satProtocolID,
-                        keyID: anchorKeyID
-                    ).encoded()
-                ),
-            ],
-            options: TrackedAction.Options(
-                bypassP1Sat: true,
-                randomizeOutputs: false,
-                acceptDelayedBroadcast: true,
-                noSend: true
-            )
-        )
-        if let error = anchor.error { return ActionResult(error: error) }
-        guard let anchorTxid = anchor.txid, let anchorTx = anchor.tx else {
-            throw DeployOrdfsDirError("ordinal.inscribe-sigma apply: anchor failed")
-        }
-
-        let sealed = try await Sigma.applyWithCreator(
-            ctx,
-            to: built.manifestScript,
-            inputTxid: anchorTxid,
-            inputVout: 0
-        )
-
-        return try await TrackedAction.execute(
+        try await SigmaPublish.publish(
             ctx,
             description: description,
-            inputBEEF: try AtomicBEEF(bytes: anchorTx, limits: WalletBEEFLimits.standard).beef,
-            inputs: [
-                try WalletCreateActionInput(
-                    outpoint: try Outpoint("\(anchorTxid).0"),
-                    inputDescription: "Sigma anchor",
-                    unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
-                ),
-            ],
-            outputs: try actionOutputs(
+            sealing: built.manifestScript
+        ) { sealed in
+            try actionOutputs(
                 built,
                 writeMode: writeMode,
                 manifestCustomInstructions: manifestCustomInstructions,
                 manifestScript: sealed.script,
-                extraManifestTags: [
-                    TrackedAction.idTag(actionID, index: built.manifestVout),
-                    "creator:\(sealed.creator)",
-                ]
-            ),
-            actionID: actionID,
-            options: sigmaPublishOptions(anchorTxid: anchorTxid),
-            sign: { tx in
-                [
-                    0: try SignP2PKH.unlockingScript(
-                        identity: ctx.identity,
-                        transaction: tx,
-                        inputIndex: 0,
-                        protocolID: try OneSatConstants.p1satProtocolID,
-                        keyID: anchorKeyID
-                    ),
-                ]
-            }
-        )
+                extraManifestTags: sealed.tags([], index: built.manifestVout)
+            )
+        }
     }
 }
 
