@@ -19,6 +19,8 @@ public enum OneSatConstants {
     public static let lockBasket = "lock"
     /// `OPNS_BASKET`
     public static let opnsBasket = "opns"
+    /// `OPNS_PUBLISHED_TAG`: wallet tag on a published (identity-bound) OpNS name.
+    public static let opnsPublishedTag = "opns:published"
     /// `SIGMA_BASKET`
     public static let sigmaBasket = "sigma"
     /// `HOSTING_BASKET`

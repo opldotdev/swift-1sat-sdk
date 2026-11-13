@@ -767,7 +767,7 @@ public enum Ordinals {
         var spends: [UInt32: Script] = [:]
         for signer in signers {
             let index = try inputIndex(signer.outpoint, in: transaction)
-            spends[UInt32(index)] = try SignP2PKH.unlockingScript(
+            spends[UInt32(index)] = try SignOrdinalInput.unlockingScript(
                 identity: identity,
                 transaction: transaction,
                 inputIndex: index,
