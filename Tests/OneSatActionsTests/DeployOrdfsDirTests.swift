@@ -452,7 +452,7 @@ private actor DeployTransport: AuthenticatedTransport {
 /// `createAction` echoes the requested outputs at their own vouts and adds BRC-29 change. Caller
 /// inputs and `noSendChange` outpoints are resolved from the request's `inputBEEF` (the change
 /// as derivation-signed funding); an action with neither is funded from a fresh OP_TRUE source.
-/// `processAction` decodes the signed Atomic BEEF and reports every `sendWith` txid unproven.
+/// `processAction` decodes the signed raw transaction and reports every `sendWith` txid unproven.
 private actor PublishTransport: AuthenticatedTransport {
     struct Processed: Sendable {
         let txid: String
@@ -586,13 +586,11 @@ private actor PublishTransport: AuthenticatedTransport {
 
     private func processAction(_ args: [String: Any]) throws -> [String: Any] {
         let raw = (args["rawTx"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.uint8Value }
-        let atomic = try AtomicBEEF(bytes: raw, limits: WalletBEEFLimits.standard)
-        let subject = try XCTUnwrap(atomic.beef.transactions.compactMap(\.transaction).first {
-            (try? $0.transactionID(limits: WalletTransactionLimits.standard)) == atomic.subjectTransactionID
-        })
+        // The toolbox sends the signed transaction itself, as the TS storage client does.
+        let subject = try Transaction(bytes: raw, limits: WalletTransactionLimits.standard)
         let sendWith = args["sendWith"] as? [String] ?? []
         processed.append(Processed(
-            txid: atomic.subjectTransactionID.displayHex,
+            txid: try subject.transactionID(limits: WalletTransactionLimits.standard).displayHex,
             transaction: subject,
             sendWith: sendWith,
             isSendWith: args["isSendWith"] as? Bool ?? false
