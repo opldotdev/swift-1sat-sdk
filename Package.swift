@@ -43,7 +43,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "da1ed847a4b47c6de6145cd6ef783e5eafd8a245"
+            revision: "0ce3547d2a4d4ddcf28a72459a8a18e30fe3e468"
         ),
     ],
     targets: [
