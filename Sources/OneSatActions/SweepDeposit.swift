@@ -16,13 +16,20 @@ public enum SweepDeposit {
         }
     }
 
-    public static func execute(_ ctx: OneSatContext, limit: Int = 50) async throws -> Result {
+    /// Outputs under an unexpired `hold:<ms>` tag (OrdLock v2 front funding and
+    /// cushions) are left in the basket, as TS `sweepDeposit` does.
+    public static func execute(
+        _ ctx: OneSatContext,
+        limit: Int = 50,
+        nowMilliseconds: UInt64 = OneSatConstants.nowMilliseconds()
+    ) async throws -> Result {
         let listed = try await ctx.storage.listOutputs(
             ctx.auth,
             try WalletListOutputsRequest(
                 basket: OneSatConstants.depositBasket,
                 include: .entireTransactions,
                 includeCustomInstructions: true,
+                includeTags: true,
                 pagination: WalletPagination(limit: UInt32(limit))
             )
         )
@@ -32,7 +39,8 @@ public enum SweepDeposit {
 
         let inputs: [(outpoint: Outpoint, protocolID: WalletProtocolID, keyID: String)] =
             listed.outputs.compactMap { output in
-                guard let text = output.customInstructions,
+                guard !OneSatConstants.isDepositHeld(output.tags, nowMilliseconds: nowMilliseconds),
+                      let text = output.customInstructions,
                       let parsed = try? CustomInstructions.parse(text)
                 else { return nil }
                 return (output.outpoint, parsed.protocolID, parsed.keyID)

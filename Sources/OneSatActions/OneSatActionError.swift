@@ -31,7 +31,10 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case listingOutputNotFound
     case notAnOrdLockListing
     case listingNotFoundInOverlay
-    case malformedPurchaseTransaction
+    /// An OrdLock v2 purchase or cancel guard refused to sign; the message says why.
+    case ordLockV2Refused(String)
+    /// Front-funding preparation failed; carries the wallet error when there is one.
+    case ordLockV2FrontFundingFailed(String?)
     case missingSourceTxid
     case inputNotInTransaction(outpoint: String)
     case mneeClientRequired
@@ -114,8 +117,10 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "not-an-ordlock-listing"
         case .listingNotFoundInOverlay:
             return "listing-not-found-in-overlay"
-        case .malformedPurchaseTransaction:
-            return "Malformed transaction: requires at least 2 outputs"
+        case .ordLockV2Refused(let message):
+            return message
+        case .ordLockV2FrontFundingFailed(let reason):
+            return reason ?? "ordlock.purchase apply: front funding preparation failed"
         case .missingSourceTxid:
             return "sourceTXID is required"
         case .inputNotInTransaction(let outpoint):

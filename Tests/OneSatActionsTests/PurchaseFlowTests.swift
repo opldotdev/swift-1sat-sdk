@@ -12,7 +12,8 @@ import ToolboxStorageClient
 import XCTest
 @testable import OneSatActions
 
-/// Offline `Ordinals.purchase` path: recorded listing BEEF → parse → find → build → createAction.
+/// Offline `Ordinals.purchase` path: recorded listing BEEF → parse → find → build →
+/// held front funding (listOutputs, prep createAction) → OrdLock v2 layout.
 final class PurchaseFlowTests: XCTestCase {
     func test_purchaseRequiresListingServices() async throws {
         let ctx = try dummyContext(identity: try ActionVectors.identity(), listings: nil)
@@ -68,9 +69,12 @@ final class PurchaseFlowTests: XCTestCase {
         XCTAssertNil(result.txid)
     }
 
-    func test_purchaseSendsTheListingBEEFOnCreateAction() async throws {
+    /// With no held deposit funding, the purchase first lists `1sat-deposit`, then
+    /// prepares a held front funding output for exactly the payout (TS
+    /// `applyOrdLockV2Purchase`). The offline transport fails that prep action.
+    func test_purchasePreparesHeldFrontFundingWhenNoneIsHeld() async throws {
         let fixture = try listingFixture()
-        let transport = CapturingTransport()
+        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
         let identity = try ActionVectors.identity()
         let ctx = OneSatContext(
             identity: identity,
@@ -86,61 +90,98 @@ final class PurchaseFlowTests: XCTestCase {
             ctx,
             Ordinals.PurchaseRequest(outpoint: fixture.outpoint)
         )
-        XCTAssertNotNil(result.error)
+        // TS lets the prep createAction error through unchanged, not a generic message.
+        let error = try XCTUnwrap(result.error)
+        XCTAssertNotEqual(error, OneSatActionError.ordLockV2FrontFundingFailed(nil).wireMessage)
         XCTAssertNil(result.txid)
 
-        let parsed = try BEEF(bytes: fixture.beefBytes, limits: WalletBEEFLimits.standard)
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["listOutputs", "createAction"])
+        let bodies = await transport.bodies
+        let listArgs = try rpcArgs(bodies[0])
+        XCTAssertEqual(listArgs["basket"] as? String, OneSatConstants.depositBasket)
+        XCTAssertEqual(listArgs["includeTags"] as? Bool, true)
+
+        let prepArgs = try rpcArgs(bodies[1])
+        XCTAssertEqual((prepArgs["inputs"] as? [Any])?.count, 0)
+        let options = try XCTUnwrap(prepArgs["options"] as? [String: Any])
+        XCTAssertEqual(options["randomizeOutputs"] as? Bool, false)
+        XCTAssertEqual(options["acceptDelayedBroadcast"] as? Bool, false)
+        let outputs = try XCTUnwrap(prepArgs["outputs"] as? [[String: Any]])
+        XCTAssertEqual(outputs.count, 1)
+        XCTAssertEqual((outputs[0]["satoshis"] as? NSNumber)?.uint64Value, 50_000)
+        XCTAssertEqual(outputs[0]["basket"] as? String, OneSatConstants.depositBasket)
+        let tags = try XCTUnwrap(outputs[0]["tags"] as? [String])
+        XCTAssertTrue(tags.contains(OneSatConstants.ordlockFundingTag))
+        XCTAssertTrue(OneSatConstants.isDepositHeld(tags, nowMilliseconds: OneSatConstants.nowMilliseconds()))
+        XCTAssertFalse(tags.contains { $0.hasPrefix("id:") }, "TS prep is a plain createAction, no id: tag")
+        let instructions = try CustomInstructions.parse(
+            try XCTUnwrap(outputs[0]["customInstructions"] as? String)
+        )
+        XCTAssertTrue(instructions.keyID.hasPrefix("\(OneSatConstants.ordlockFundingKeyPrefix) "))
+    }
+
+    /// The purchase action itself: front funding then the listing; cushion, payout
+    /// at the listing's input index, the basketed receive, then fees.
+    func test_purchaseLayoutPutsThePayoutAtTheListingIndex() throws {
+        let fixture = try listingFixture()
+        let identity = try ActionVectors.identity()
+        let ctx = try dummyContext(identity: identity, listings: nil)
         let prepared = try Ordinals.buildPurchase(
             ctx,
             outpoint: fixture.outpoint,
             listingScript: fixture.listingScript,
-            listingSatoshis: 1
+            listingSatoshis: 1,
+            marketplaceAddress: ActionVectors.templateAddress,
+            marketplaceRate: 0.02
         )
-        let createRequest = try TrackedAction.request(
-            description: prepared.description,
-            inputBEEF: parsed,
-            inputs: prepared.inputs,
-            outputs: prepared.outputs,
-            labels: prepared.labels,
-            actionID: "deadbeef",
-            options: TrackedAction.Options(randomizeOutputs: false)
+        let instructions = try CustomInstructions(keyID: "ordlock-funding test")
+        let front = OrdLockV2Purchase.FundingCandidate(
+            outpoint: try Outpoint(String(repeating: "ab", count: 32) + ".0"),
+            satoshis: 60_000,
+            instructions: instructions
         )
+        let cushion = try WalletCreateActionOutput(
+            lockingScript: try ActionScript.payToPublicKeyHash(ActionVectors.templateAddress).bytes,
+            satoshis: 0,
+            outputDescription: "OrdLock funding cushion",
+            basket: OneSatConstants.depositBasket,
+            customInstructions: instructions.encoded(includeSelfCounterparty: true),
+            tags: [OneSatConstants.ordlockFundingTag]
+        )
+        let layout = try OrdLockV2Purchase.layout(
+            listingOutpoint: fixture.outpoint,
+            listingScript: fixture.listingScript,
+            listingInputDescription: "Listed ordinal",
+            receive: prepared.outputs[0],
+            extras: Array(prepared.outputs.dropFirst(2)),
+            front: [front],
+            cushion: cushion
+        )
+        XCTAssertEqual(layout.inputs.map(\.outpoint), [front.outpoint, fixture.outpoint])
+        XCTAssertEqual(layout.listingInputIndex, 1)
+        XCTAssertEqual(layout.inputs[0].unlocking, .scriptLength(OneSatConstants.p2pkhUnlockingScriptLength))
         XCTAssertEqual(
-            try createRequest.inputBEEF?.serialized(limits: WalletBEEFLimits.standard),
-            fixture.beefBytes
+            layout.inputs[1].unlocking,
+            .scriptLength(UInt32(try OrdLockV2.estimatePurchaseUnlockLength(fixture.listingScript)))
         )
+        XCTAssertEqual(layout.outputs.map(\.satoshis), [10_000, 50_000, 1, 1_000])
+        XCTAssertEqual(layout.outputs[0].basket, OneSatConstants.depositBasket)
+        let payout = try OrdLockV2.payoutOutput(fixture.listingScript)
+        XCTAssertEqual(layout.outputs[1].lockingScript, payout.script.bytes)
+        XCTAssertEqual(layout.outputs[1].outputDescription, "Payment to seller")
+        XCTAssertEqual(layout.outputs[2], prepared.outputs[0])
+        XCTAssertEqual(layout.outputs[3].outputDescription, "Marketplace fee")
+        XCTAssertEqual(layout.receiveVout, 2)
+    }
 
-        let bodies = await transport.bodies
-        XCTAssertEqual(bodies.count, 1)
+    private func rpcArgs(_ body: [UInt8]) throws -> [String: Any] {
         let envelope = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(bodies[0])) as? [String: Any]
+            JSONSerialization.jsonObject(with: Data(body)) as? [String: Any]
         )
-        XCTAssertEqual(envelope["method"] as? String, "createAction")
         let params = try XCTUnwrap(envelope["params"] as? [Any])
         XCTAssertGreaterThanOrEqual(params.count, 2)
-        let args = try XCTUnwrap(params[1] as? [String: Any])
-        let wireBeef = try XCTUnwrap(args["inputBEEF"] as? [NSNumber]).map { UInt8(truncating: $0) }
-        XCTAssertEqual(wireBeef, fixture.beefBytes)
-        let inputs = try XCTUnwrap(args["inputs"] as? [[String: Any]])
-        XCTAssertEqual(inputs.count, 1)
-        XCTAssertEqual(inputs[0]["outpoint"] as? String, fixture.outpoint.description)
-        XCTAssertEqual(
-            (inputs[0]["unlockingScriptLength"] as? NSNumber)?.uint32Value,
-            OneSatConstants.purchaseUnlockingScriptLength
-        )
-
-        let outputs = try XCTUnwrap(args["outputs"] as? [[String: Any]])
-        XCTAssertEqual(outputs.count, 2)
-        XCTAssertEqual((outputs[0]["satoshis"] as? NSNumber)?.uint64Value, 1)
-        XCTAssertEqual(outputs[0]["outputDescription"] as? String, "Purchased ordinal")
-        XCTAssertEqual(outputs[0]["basket"] as? String, OneSatConstants.ordinalsBasket)
-
-        let decoded = try XCTUnwrap(OrdLock.decode(fixture.listingScript))
-        let payout = try Ordinals.payoutOutput(decoded.payout)
-        XCTAssertEqual((outputs[1]["satoshis"] as? NSNumber)?.uint64Value, payout.satoshis)
-        XCTAssertEqual(outputs[1]["lockingScript"] as? String, payout.script.hex)
-        XCTAssertEqual(outputs[1]["outputDescription"] as? String, "Payment to seller")
-        XCTAssertNil(outputs[1]["basket"])
+        return try XCTUnwrap(params[1] as? [String: Any])
     }
 
     private struct ListingFixture {
@@ -156,7 +197,7 @@ final class PurchaseFlowTests: XCTestCase {
             identity: identity,
             outpoint: ActionVectors.outpoint
         )
-        let listing = try script ?? OrdLock.lock(
+        let listing = try script ?? OrdLockV2.lock(
             cancelAddress: cancel.description,
             payAddress: ActionVectors.payAddress,
             price: 50_000
@@ -221,8 +262,14 @@ private struct RejectTransport: AuthenticatedTransport {
     }
 }
 
-private actor CapturingTransport: AuthenticatedTransport {
+private actor ScriptedTransport: AuthenticatedTransport {
+    private(set) var methods: [String] = []
     private(set) var bodies: [[UInt8]] = []
+    private let listResult: [String: Any]
+
+    init(listResult: [String: Any]) {
+        self.listResult = listResult
+    }
 
     func send(
         method: String,
@@ -231,7 +278,19 @@ private actor CapturingTransport: AuthenticatedTransport {
         headers: [String: String],
         body: [UInt8]?
     ) async throws -> AuthenticatedResponse {
+        let object = try JSONSerialization.jsonObject(with: Data(body ?? [])) as? [String: Any]
+        let rpcMethod = object?["method"] as? String ?? ""
+        methods.append(rpcMethod)
         bodies.append(body ?? [])
+        if rpcMethod == "listOutputs" {
+            let envelope: [String: Any] = [
+                "jsonrpc": "2.0",
+                "id": object?["id"] as Any,
+                "result": listResult,
+            ]
+            let data = try JSONSerialization.data(withJSONObject: envelope)
+            return AuthenticatedResponse(statusCode: 200, headers: [:], body: Array(data))
+        }
         throw AuthTransportError.notImplemented("offline")
     }
 }

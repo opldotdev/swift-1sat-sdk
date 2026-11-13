@@ -96,7 +96,7 @@ public enum OpNS {
                 options: TrackedAction.Options(randomizeOutputs: false)
             ) { transaction in
                 let index = try Ordinals.inputIndex(request.ordinal.outpoint, in: transaction)
-                return [UInt32(index): try UnlockScripts.ordLockCancel(
+                return [UInt32(index): try UnlockScripts.ordLockV2Cancel(
                     identity: ctx.identity,
                     transaction: transaction,
                     inputIndex: index,

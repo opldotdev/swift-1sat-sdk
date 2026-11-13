@@ -8,9 +8,6 @@ import ToolboxActions
 
 /// BSV-21 transfer from `packages/actions/src/tokens/index.ts` `sendBsv21`.
 public enum Tokens {
-    /// `tokens/index.ts:876` `unlockingScriptLength` for token purchase. Not the ordinal 1368.
-    public static let purchaseUnlockingScriptLength: UInt32 = 1_402
-
     public struct Recipient: Sendable {
         public let amount: UInt64
         public let destination: Destination
@@ -388,10 +385,8 @@ public enum Tokens {
                 return ActionResult.failure(.listingOutputNotFound)
             }
             let listingOutput = listingTx.outputs[vout]
-            guard let decoded = OrdLock.decode(
-                listingOutput.lockingScript,
-                network: ctx.chain.network
-            ) else {
+            // OrdLock v2 only; the vestigial TS v1 fallback is dropped on purpose (8fb809d5).
+            guard OrdLockV2.isOrdLockV2(listingOutput.lockingScript) else {
                 return ActionResult.failure(.notAnOrdLockListing)
             }
 
@@ -404,6 +399,7 @@ public enum Tokens {
                 network: ctx.chain.network
             )
             let protocolID = try OneSatConstants.p1satProtocolID
+            // Draft shape (TS): receive, payout, fees. The apply step lays it out.
             var outputs: [WalletCreateActionOutput] = [
                 try WalletCreateActionOutput(
                     lockingScript: try transferScript(
@@ -431,7 +427,7 @@ public enum Tokens {
                 ),
             ]
 
-            let payout = try Ordinals.payoutOutput(decoded.payout)
+            let payout = try OrdLockV2.payoutOutput(listingOutput.lockingScript)
             try outputs.append(
                 WalletCreateActionOutput(
                     lockingScript: payout.script.bytes,
@@ -469,28 +465,17 @@ public enum Tokens {
                 )
             }
 
-            let result = try await TrackedAction.execute(
+            let result = try await OrdLockV2Purchase.execute(
                 ctx,
                 description: "Purchase \(request.amount) tokens for \(payout.satoshis) sats",
-                inputBEEF: parsed,
-                inputs: [
-                    try WalletCreateActionInput(
-                        outpoint: request.outpoint,
-                        inputDescription: "Listed token",
-                        unlockingScriptLength: purchaseUnlockingScriptLength
-                    ),
-                ],
-                outputs: outputs,
-                labels: [OneSatConstants.tokenLabel(request.tokenId)],
-                options: TrackedAction.Options(randomizeOutputs: false)
-            ) { transaction in
-                let index = try Ordinals.inputIndex(request.outpoint, in: transaction)
-                return [
-                    UInt32(index): try UnlockScripts.ordLockPurchase(
-                        transaction: transaction, inputIndex: index
-                    ),
-                ]
-            }
+                listingOutpoint: request.outpoint,
+                listingScript: listingOutput.lockingScript,
+                listingInputDescription: "Listed token",
+                listingBEEF: parsed,
+                receive: outputs[0],
+                extras: Array(outputs.dropFirst(2)),
+                labels: [OneSatConstants.tokenLabel(request.tokenId)]
+            )
             if let tx = result.tx {
                 try? await bsv21.submitTransfer(tx: tx, tokenId: request.tokenId)
             }

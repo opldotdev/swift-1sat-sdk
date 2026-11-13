@@ -6,6 +6,10 @@ import BSVTransaction
 import BSVWallet
 import OneSatTemplates
 import ToolboxActions
+import Foundation
+import ToolboxAuth
+import ToolboxStorage
+import ToolboxStorageClient
 import XCTest
 @testable import OneSatActions
 
@@ -20,17 +24,24 @@ final class OrdLockDelistingTests: XCTestCase {
             inputBEEF: fixture.beef
         )
         XCTAssertEqual(Set(spends.keys), [0, 1], "funding inputs stay with the wallet signer")
-        // Live @1sat/templates OrdLock.cancelListing(key, "all", true) vector.
-        XCTAssertEqual(spends[1]?.hex,
-            "48304502210093198a9f94368e1368a70fe11c25a1c9727024a8f7b4812bc5c8f6d2a7e78888022028ead1b146807ee8e824bb62145b41724f358b99546fd6683fd2463af1bab79ec12102bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a551")
+        // TS `assignLegacyUnlock`: `OrdLockV2.cancelListing(key, "all", true)`,
+        // i.e. `<"ol2:cancel"> <sig> <pubkey> OP_1`.
+        let cancel = try XCTUnwrap(spends[1])
+        XCTAssertTrue(OrdLockV2.isCancel(cancel))
+        XCTAssertLessThanOrEqual(cancel.bytes.count, OrdLockV2.cancelUnlockLength)
         for index in 0..<2 {
             let unlock = try XCTUnwrap(spends[UInt32(index)])
             let operations = try unlock.operations(maximumPushDataByteCount: 10_000)
-            XCTAssertEqual(operations[0].pushedData?.last, 0xc1, "ALL | FORKID | ANYONECANPAY")
-            XCTAssertEqual(operations.count, index == 0 ? 2 : 3)
-            if index == 1 { XCTAssertEqual(operations.last?.opcode, .one) }
+            let signature = index == 0 ? operations[0] : operations[1]
+            XCTAssertEqual(signature.pushedData?.last, 0xc1, "ALL | FORKID | ANYONECANPAY")
+            XCTAssertEqual(operations.count, index == 0 ? 2 : 4)
+            if index == 1 {
+                XCTAssertEqual(operations[0].pushedData, OrdLockV2.cancelMarker)
+                XCTAssertEqual(operations[2].pushedData, fixture.key.publicKey.compressedBytes)
+                XCTAssertEqual(operations.last?.opcode, .one)
+            }
             let execution = try execute(unlock, inputIndex: index, fixture: fixture)
-            XCTAssertEqual(execution.stack, [[1]])
+            XCTAssertTrue(isTruthy(execution.stack.last), "input \(index) leaves a true top of stack")
         }
 
         // Ordinary P2PKH signing has no cancellation selector and cannot spend this source.
@@ -40,6 +51,58 @@ final class OrdLockDelistingTests: XCTestCase {
             privateKey: fixture.key, transaction: actual, inputIndex: 1
         )
         XCTAssertThrowsError(try execute(plain, inputIndex: 1, fixture: fixture))
+    }
+
+    /// A legacy sweep reserves the v2 cancel length for a listing input, and the
+    /// signed cancel fits it while overrunning the P2PKH reservation TS uses.
+    func test_legacySweepReservesTheV2CancelLengthForListingInputs() async throws {
+        let fixture = try fixture()
+        let transport = CapturingTransport()
+        let ctx = OneSatContext(
+            identity: fixture.key,
+            storage: StorageClient(endpoint: URL(string: "https://example.invalid")!, transport: transport),
+            auth: AuthID(identityKey: Hex.encode(fixture.key.publicKey.compressedBytes))
+        )
+        let inputs = try (0..<2).map { index in
+            AssetSweep.OrdinalInput(
+                outpoint: fixture.spend.inputs[index].previousOutput.description,
+                satoshis: 1,
+                lockingScript: fixture.source.outputs[index].lockingScript.bytes,
+                contentType: "text/plain",
+                origin: nil,
+                name: nil,
+                key: fixture.key
+            )
+        }
+        _ = await AssetSweep.ordinals(ctx, inputs: inputs, inputBEEF: fixture.beef)
+
+        let bodies = await transport.bodies
+        let create = try XCTUnwrap(bodies.compactMap { body -> [String: Any]? in
+            guard let object = try? JSONSerialization.jsonObject(with: Data(body)) as? [String: Any],
+                  object["method"] as? String == "createAction",
+                  let params = object["params"] as? [Any], params.count >= 2
+            else { return nil }
+            return params[1] as? [String: Any]
+        }.first)
+        let wireInputs = try XCTUnwrap(create["inputs"] as? [[String: Any]])
+        let reserved = wireInputs.map { ($0["unlockingScriptLength"] as? NSNumber)?.intValue }
+        XCTAssertEqual(reserved, [Int(OneSatConstants.p2pkhUnlockingScriptLength), OrdLockV2.cancelUnlockLength])
+
+        // The real unlocks fit their reservations; the cancel would not fit 108.
+        let spends = try AssetSweep.signLegacyInputs(
+            transaction: fixture.spend, keysByOutpoint: fixture.keys, inputBEEF: fixture.beef
+        )
+        let cancel = try XCTUnwrap(spends[1]).bytes.count
+        XCTAssertLessThanOrEqual(cancel, OrdLockV2.cancelUnlockLength)
+        XCTAssertGreaterThan(cancel, Int(OneSatConstants.p2pkhUnlockingScriptLength))
+        XCTAssertLessThanOrEqual(try XCTUnwrap(spends[0]).bytes.count, Int(OneSatConstants.p2pkhUnlockingScriptLength))
+        XCTAssertEqual(
+            AssetSweep.legacyUnlockingScriptLength(fixture.source.outputs[1]),
+            UInt32(OrdLockV2.cancelUnlockLength)
+        )
+        XCTAssertEqual(
+            AssetSweep.legacyUnlockingScriptLength(nil), OneSatConstants.p2pkhUnlockingScriptLength
+        )
     }
 
     func test_wrongOwnerAndMissingBEEFSourceCannotProduceACancellation() throws {
@@ -67,7 +130,7 @@ final class OrdLockDelistingTests: XCTestCase {
         let key = try ActionVectors.identity()
         let address = Address(publicKey: key.publicKey, network: .mainnet)
         let plain = try ActionScript.payToPublicKeyHash(address)
-        let listing = try OrdLock.lock(
+        let listing = try OrdLockV2.lock(
             cancelAddress: address.description, payAddress: ActionVectors.payAddress, price: 50_000
         )
         let source = Transaction(version: 1, inputs: [], outputs: [
@@ -100,6 +163,14 @@ final class OrdLockDelistingTests: XCTestCase {
             keys: keys)
     }
 
+    private func isTruthy(_ element: [UInt8]?) -> Bool {
+        guard let element else { return false }
+        for (index, byte) in element.enumerated() where byte != 0 {
+            return !(index == element.count - 1 && byte == 0x80)
+        }
+        return false
+    }
+
     private func execute(_ unlock: Script, inputIndex: Int, fixture: Fixture) throws -> ScriptExecutionResult {
         let source = fixture.source.outputs[inputIndex]
         var transaction = fixture.spend
@@ -117,5 +188,20 @@ final class OrdLockDelistingTests: XCTestCase {
                 transactionLimits: limits
             )
         )
+    }
+}
+
+private actor CapturingTransport: AuthenticatedTransport {
+    private(set) var bodies: [[UInt8]] = []
+
+    func send(
+        method: String,
+        path: String,
+        query: String?,
+        headers: [String: String],
+        body: [UInt8]?
+    ) async throws -> AuthenticatedResponse {
+        bodies.append(body ?? [])
+        throw AuthTransportError.notImplemented("offline")
     }
 }

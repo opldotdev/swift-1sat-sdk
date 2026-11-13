@@ -63,7 +63,7 @@ let package = Package(
             ]
         ),
 
-        // 1Sat locking scripts: inscription envelope, OrdLock, BSV-20, BSV-21, Cosign, BAP,
+        // 1Sat locking scripts: inscription envelope, OrdLock v2, BSV-20, BSV-21, Cosign, BAP,
         // BitCom, public MAPTemplate, and CLTV time-lock. Byte-exact with `@1sat/templates`.
         // Unlock templates live with the action families.
         .target(
