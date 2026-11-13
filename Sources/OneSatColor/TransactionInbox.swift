@@ -232,7 +232,13 @@ public enum TransactionInbox {
             for (assetID, indexes) in received {
                 let resolved: (any ColorOverlayProvider)?
                 do {
-                    resolved = try await overlayFor?(assetID) ?? ctx.overlay
+                    // A supplied resolver decides, even when it answers nil; the context's
+                    // overlay is only the default when no resolver was given.
+                    if let overlayFor {
+                        resolved = try await overlayFor(assetID)
+                    } else {
+                        resolved = ctx.overlay
+                    }
                 } catch {
                     throw Skip(reason: error.localizedDescription)
                 }

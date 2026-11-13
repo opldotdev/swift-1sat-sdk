@@ -164,6 +164,12 @@ public enum OneColorActions {
             }
             _ = try delivery([UInt8](repeating: 0, count: 32), [])
 
+            // BRC-177 preflight: an invalid expiry or storage without noSend expiry fails here,
+            // before a split could spend fees and change token outputs.
+            let expiryLabel = "p nosend expiry seconds \(expirySeconds)"
+            _ = try NoSendExpiry.parse(labels: [expiryLabel])
+            guard try await ctx.storage.supportsNoSendExpiry() else { throw NoSendExpiryError.unsupported }
+
             // 3. The handoff: select, split to the exact amount when needed, and sign as BRC-177.
             let overlay = try ctx.requireOverlay()
             var selected = try await ColorModule.selectInputs(ctx, overlay: overlay, assetID: assetID, target: amount)
@@ -181,7 +187,7 @@ public enum OneColorActions {
                 )],
                 labels: try plan.labels() + [
                     "\(OneColorConstants.sendLabelPrefix)\(base64Hex(derivationPrefix)) \(base64Hex(derivationSuffix))",
-                    "p nosend expiry seconds \(expirySeconds)",
+                    expiryLabel,
                 ],
                 options: try ColorExecutor.options(noSend: true)
             )

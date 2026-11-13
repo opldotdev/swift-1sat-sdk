@@ -6,6 +6,7 @@ import BSVScript
 import BSVTransaction
 import BSVWallet
 import ToolboxActions
+import ToolboxStorage
 import OneSatMetanet
 @testable import OneSatColor
 
@@ -346,5 +347,60 @@ final class OneColorFlowTests: XCTestCase {
         } catch {}
         let submissions = await world.overlay.submissions
         XCTAssertEqual(submissions.count, 1, "a malformed receipt is refused before any submit")
+    }
+
+    // MARK: - Review fixes
+
+    func test_unsupportedNoSendExpiryFailsBeforeTheSplit() async throws {
+        let world = try ColorWorld()
+        let assetID = try await deploy(world.alice)
+        await world.alice.wallet.setNoSendSupported(false)
+        let sent = await OneColorActions.send(world.alice.ctx, assetID: assetID.description, amount: 300, to: "bob@example.com")
+        XCTAssertEqual(sent.error, NoSendExpiryError.unsupported.localizedDescription)
+        XCTAssertNil(sent.txid)
+        let requests = await world.alice.wallet.createRequests
+        XCTAssertEqual(requests.count, 1, "only the deploy was created")
+        let processed = await world.alice.wallet.processed
+        XCTAssertEqual(processed.count, 1, "only the deploy was processed")
+        let balance = try await OneColorActions.balance(world.alice.ctx, assetID: assetID)
+        XCTAssertEqual(balance, 1_000)
+    }
+
+    func test_anInvalidExpiryFailsBeforeTheSplit() async throws {
+        let world = try ColorWorld()
+        let assetID = try await deploy(world.alice)
+        for expiry in [0, -5] {
+            let sent = await OneColorActions.send(
+                world.alice.ctx, assetID: assetID.description, amount: 300, to: "bob@example.com", expirySeconds: expiry
+            )
+            XCTAssertNotNil(sent.error, "\(expiry)")
+            XCTAssertNil(sent.txid)
+        }
+        let requests = await world.alice.wallet.createRequests
+        XCTAssertEqual(requests.count, 1)
+        let processed = await world.alice.wallet.processed
+        XCTAssertEqual(processed.count, 1)
+        let checks = await world.alice.wallet.capabilityChecks
+        XCTAssertEqual(checks, 0, "the expiry is validated before storage is asked")
+    }
+
+    func test_aResolverThatAnswersNilLeavesTheDeliveryInTheBox() async throws {
+        let world = try ColorWorld()
+        let assetID = try await deploy(world.alice)
+        let sent = await OneColorActions.send(world.alice.ctx, assetID: assetID.description, amount: 1_000, to: "bob@example.com")
+        XCTAssertNil(sent.error)
+        let before = await world.overlay.submissions
+
+        let synced = await TransactionInbox.sync(world.bob.ctx, overlayFor: { _ in nil })
+        XCTAssertEqual(synced.received, [])
+        XCTAssertEqual(synced.skipped.map(\.reason), ["overlay-required"])
+        let after = await world.overlay.submissions
+        XCTAssertEqual(after, before, "nothing was submitted")
+        let internalized = await world.bob.wallet.internalized
+        XCTAssertTrue(internalized.isEmpty)
+        let acknowledged = await world.server.acknowledged
+        XCTAssertTrue(acknowledged.isEmpty)
+        let remaining = await world.server.messages
+        XCTAssertEqual(remaining.count, 1)
     }
 }

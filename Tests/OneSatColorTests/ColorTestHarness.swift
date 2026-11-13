@@ -273,7 +273,14 @@ actor MockWallet: ColorWalletStorage {
 
     // MARK: - NoSendExpiryStorage
 
-    func supportsNoSendExpiry() async throws -> Bool { true }
+    private(set) var capabilityChecks = 0
+    var noSendSupported = true
+    func setNoSendSupported(_ value: Bool) { noSendSupported = value }
+
+    func supportsNoSendExpiry() async throws -> Bool {
+        capabilityChecks += 1
+        return noSendSupported
+    }
 
     func prepareNoSendExpiry(_ auth: AuthID, _ target: WalletCreateActionRequest) async throws -> NoSendExpiryPrepared {
         let funding = try takeFunding()
