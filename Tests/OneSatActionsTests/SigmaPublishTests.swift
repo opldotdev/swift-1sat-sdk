@@ -282,6 +282,12 @@ final class SigmaPublishTests: XCTestCase {
         let publish = processed[1]
         let anchorTxid = anchor.txid
         XCTAssertEqual(anchor.sendWith, [])
+        // TS signs both with acceptDelayedBroadcast false; the anchor stays noSend so storage
+        // holds it until the publish sends it.
+        XCTAssertTrue(anchor.isNoSend)
+        XCTAssertFalse(anchor.isDelayed)
+        XCTAssertFalse(publish.isNoSend)
+        XCTAssertFalse(publish.isDelayed)
 
         let main = creates[1]
         let inputs = try XCTUnwrap(main["inputs"] as? [[String: Any]])

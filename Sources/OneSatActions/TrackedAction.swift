@@ -199,9 +199,11 @@ public enum TrackedAction {
             )
 
             let signed = try SignedAction(funded: funded, transaction: transaction)
+            // TS completeSignedAction: signAction runs with acceptDelayedBroadcast false and
+            // noSend carried over from createAction, so a noSend action is held for its batch.
             let processed = try await ctx.storage.processAction(
                 ctx.auth,
-                try signed.processRequest(sendWith: options.sendWith)
+                try signed.processRequest(sendWith: options.sendWith, isNoSend: options.noSend, isDelayed: false)
             )
             if let failed = processed.sendWithResults.first(where: { $0.status != .unproven }) {
                 return ActionResult.failure("broadcast-\(failed.status.rawValue)", actionId: actionID)

@@ -215,6 +215,9 @@ final class DeployOrdfsDirTests: XCTestCase {
         XCTAssertFalse(anchor.isSendWith)
         XCTAssertEqual(publish.sendWith, [anchorTxid])
         XCTAssertTrue(publish.isSendWith)
+        XCTAssertTrue(anchor.isNoSend)
+        XCTAssertFalse(publish.isNoSend)
+        XCTAssertFalse(anchor.isDelayed || publish.isDelayed)
         XCTAssertEqual(anchor.transaction.outputs[0].satoshis, 2)
 
         let creates = try createActions(await transport.bodies)

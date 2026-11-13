@@ -29,6 +29,8 @@ actor PublishTransport: AuthenticatedTransport {
         let transaction: Transaction
         let sendWith: [String]
         let isSendWith: Bool
+        let isNoSend: Bool
+        let isDelayed: Bool
     }
 
     static let derivationPrefix = "cHJlZml4"
@@ -177,7 +179,9 @@ actor PublishTransport: AuthenticatedTransport {
             txid: try subject.transactionID(limits: WalletTransactionLimits.standard).displayHex,
             transaction: subject,
             sendWith: sendWith,
-            isSendWith: args["isSendWith"] as? Bool ?? false
+            isSendWith: args["isSendWith"] as? Bool ?? false,
+            isNoSend: args["isNoSend"] as? Bool ?? false,
+            isDelayed: args["isDelayed"] as? Bool ?? false
         ))
         return ["sendWithResults": sendWith.map { ["txid": $0, "status": sendWithStatus] }]
     }
