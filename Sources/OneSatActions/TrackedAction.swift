@@ -18,6 +18,11 @@ public enum TrackedAction {
         public var noSendChange: [String]
         public var knownTxids: [String]
         public var sendWith: [String]
+        /// `trustSelf: 'known'` lets storage accept inputs whose BEEF ancestry it already holds
+        /// (the OrdLock v2 purchase apply step sets it for its front funding). The remote
+        /// `StorageClient` in swift-wallet-toolbox 5d8f781 does not put it on the wire yet,
+        /// so the purchase also sends the full front-funding BEEF.
+        public var trustSelf: WalletTrustSelf?
 
         public init(
             bypassP1Sat: Bool = false,
@@ -26,7 +31,8 @@ public enum TrackedAction {
             noSend: Bool = false,
             noSendChange: [String] = [],
             knownTxids: [String] = [],
-            sendWith: [String] = []
+            sendWith: [String] = [],
+            trustSelf: WalletTrustSelf? = nil
         ) {
             self.bypassP1Sat = bypassP1Sat
             self.randomizeOutputs = randomizeOutputs
@@ -35,6 +41,7 @@ public enum TrackedAction {
             self.noSendChange = noSendChange
             self.knownTxids = knownTxids
             self.sendWith = sendWith
+            self.trustSelf = trustSelf
         }
     }
 
@@ -107,7 +114,7 @@ public enum TrackedAction {
             options: WalletCreateActionOptions(
                 signAndProcess: false,
                 acceptDelayedBroadcast: options.acceptDelayedBroadcast,
-                trustSelf: nil,
+                trustSelf: options.trustSelf,
                 knownTransactionIDs: try options.knownTxids.map { try TransactionID(displayHex: $0) },
                 noSend: options.noSend ? true : nil,
                 noSendChange: options.noSendChange.isEmpty
@@ -132,10 +139,11 @@ public enum TrackedAction {
         outputs: [WalletCreateActionOutput],
         labels: [String] = [],
         lockTime: UInt32? = nil,
+        actionID: String? = nil,
         options: Options = Options(),
         sign: @Sendable (Transaction) throws -> [UInt32: Script] = { _ in [:] }
     ) async throws -> ActionResult {
-        let actionID = randomActionID()
+        let actionID = actionID ?? randomActionID()
         let createRequest = try request(
             description: description,
             inputBEEF: inputBEEF,
