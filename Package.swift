@@ -135,7 +135,9 @@ let package = Package(
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
                 .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxWallet", package: "swift-wallet-toolbox"),
             ]
         ),
@@ -207,7 +209,12 @@ let package = Package(
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
                 .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxWallet", package: "swift-wallet-toolbox"),
             ],
             resources: [.copy("Fixtures")]
         ),
