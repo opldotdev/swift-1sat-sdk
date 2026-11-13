@@ -215,7 +215,9 @@ final class OpNSFlowTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(params.count, 2)
         let args = try XCTUnwrap(params[1] as? [String: Any])
         XCTAssertEqual(args["basket"] as? String, "opns")
-        XCTAssertEqual(args["include"] as? String, "entire transactions")
+        // Storage takes the validated flags, not the BRC-100 `include` selector.
+        XCTAssertEqual(args["includeTransactions"] as? Bool, true)
+        XCTAssertEqual(args["includeLockingScripts"] as? Bool, false)
         XCTAssertEqual(args["includeCustomInstructions"] as? Bool, true)
         XCTAssertEqual(args["includeTags"] as? Bool, true)
         XCTAssertEqual((args["limit"] as? NSNumber)?.uint32Value, 100)
