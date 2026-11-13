@@ -42,7 +42,8 @@ Sweep stays **partial by design**. Further `@1sat` surface lands as the wallet n
 |---|---|
 | `OneSatClient` | Read-only ordinals and BSV-21 balances; MNEE and OpNS clients; 1sat-stack services |
 | `OneSatSweep` | Categorise an address, sweep its fundable BSV, report the rest |
-| `OneSatTemplates` | Locking scripts: inscription, OrdLock v2, BSV-20/21, Cosign, TimeLock, BAP, BitCom, public `MAPTemplate` |
+| `OneSatTemplates` | Locking scripts: inscription, OrdLock v2, BSV-20/21, 1Color (BRC-162), Cosign, TimeLock, BAP, BitCom, public `MAPTemplate` |
+| `OneSatCBOR` | Strict DAG-CBOR encode/decode, matching `@ipld/dag-cbor` as the TS stack uses it |
 | `OneSatAddresses` | P1SAT deposit addresses (`[0, "onesat"]`, keyID `"1sat <index>"`) |
 | `OneSatActions` | Major `@1sat/actions` families, spend-side unlock templates, WPM collection metadata/name handling |
 | `OneSat` | Umbrella, re-exporting the above |

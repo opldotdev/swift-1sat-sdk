@@ -19,12 +19,18 @@ public enum SignOrdinalInput {
     /// PushDrop prefix is cut out first and decoded strictly. A lock-after PushDrop must be the
     /// whole script.
     public static func pushDrop(in script: Script) -> PushDropDecoded? {
-        if let length = lockBeforePrefixLength(script.bytes),
-           let prefix = try? Script(bytes: Array(script.bytes[0..<length]), maximumByteCount: length),
-           let decoded = try? PushDrop.decode(prefix, lockPosition: .beforeCompatibility) {
-            return decoded
+        lockBeforePushDrop(in: script) ?? (try? PushDrop.decode(script, lockPosition: .after))
+    }
+
+    /// The lock-before PushDrop at the head of `script` (`@bsv/sdk` `PushDrop.decode` with its
+    /// default `'before'` position), ignoring anything after the drops.
+    static func lockBeforePushDrop(in script: Script) -> PushDropDecoded? {
+        guard let length = lockBeforePrefixLength(script.bytes),
+              let prefix = try? Script(bytes: Array(script.bytes[0..<length]), maximumByteCount: length)
+        else {
+            return nil
         }
-        return try? PushDrop.decode(script, lockPosition: .after)
+        return try? PushDrop.decode(prefix, lockPosition: .beforeCompatibility)
     }
 
     /// Unlocking script for `transaction.inputs[inputIndex]`.
