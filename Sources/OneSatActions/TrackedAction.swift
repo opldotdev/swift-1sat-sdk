@@ -181,6 +181,9 @@ public enum TrackedAction {
                 funded = try await ctx.storage.createAction(ctx.auth, createRequest)
             }
         } catch {
+            // A batch refuses a member it cannot plan but stays open; release what it reserved
+            // rather than leave it until the lease lapses.
+            if let batch, await batch.isActive { await batch.abort(ctx.auth) }
             return ActionResult.failure(error.localizedDescription, actionId: actionID)
         }
 

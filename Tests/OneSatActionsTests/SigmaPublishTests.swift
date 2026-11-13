@@ -283,6 +283,53 @@ final class SigmaPublishTests: XCTestCase {
         XCTAssertEqual(aborted, [try XCTUnwrap(batchId)])
     }
 
+    /// A batch refuses a member it cannot plan (here a description under the 5 bytes storage
+    /// requires at commit) but stays open; TrackedAction releases it rather than leave the
+    /// staged anchor's reservation locked until the lease lapses.
+    func test_trackedActionReleasesTheBatchWhenAMemberCannotBePlanned() async throws {
+        let identity = try ActionVectors.identity()
+        let transport = PublishTransport(actionBatch: .init(identity: identity))
+        let ctx = try context(transport)
+        let batch = ActionBatchController(storage: ctx.storage)
+        let script = try ActionScript.payToPublicKeyHash(
+            try P1SATKey.address(identity: identity, keyID: "anchor-test", counterparty: .self, forSelf: true, network: ctx.chain.network)
+        ).bytes
+        let anchor = try await TrackedAction.execute(
+            ctx,
+            description: "Sigma anchor output",
+            outputs: [try WalletCreateActionOutput(lockingScript: script, satoshis: 2, outputDescription: "Sigma anchor")],
+            options: TrackedAction.Options(bypassP1Sat: true, randomizeOutputs: false, noSend: true),
+            batch: batch
+        )
+        XCTAssertNil(anchor.error)
+        let anchorTxid = try XCTUnwrap(anchor.txid)
+        let staged = await batch.isActive
+        XCTAssertTrue(staged)
+
+        let refused = try await TrackedAction.execute(
+            ctx,
+            description: "pub",
+            inputBEEF: try AtomicBEEF(bytes: try XCTUnwrap(anchor.tx), limits: WalletBEEFLimits.standard).beef,
+            inputs: [try WalletCreateActionInput(
+                outpoint: try Outpoint("\(anchorTxid).0"),
+                inputDescription: "Sigma anchor",
+                unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
+            )],
+            outputs: [try WalletCreateActionOutput(lockingScript: script, satoshis: 1, outputDescription: "inscription")],
+            options: TrackedAction.Options(bypassP1Sat: true, sendWith: [anchorTxid]),
+            batch: batch,
+            fundFrom: anchor.noSendChange ?? []
+        )
+        XCTAssertNotNil(refused.error)
+        let active = await batch.isActive
+        XCTAssertFalse(active)
+        let aborted = await transport.abortedBatches
+        let batchId = await transport.batchId
+        XCTAssertEqual(aborted, [try XCTUnwrap(batchId)])
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["getCapabilities", "beginActionBatch", "abortActionBatch"])
+    }
+
     // MARK: Collections (collections/index.ts mintWithSigma)
 
     func test_mintCollectionMatchesTheApplyStep() async throws {
