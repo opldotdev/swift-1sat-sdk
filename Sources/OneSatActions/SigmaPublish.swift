@@ -78,6 +78,9 @@ enum SigmaPublish {
     ) async throws -> ActionResult {
         let actionID = TrackedAction.randomActionID()
         let anchorKeyID = anchorKeyID(actionID)
+        // TS runs the anchor and the publish through the wallet's action batch, so the publish can
+        // be funded from the anchor's change before either reaches storage.
+        let batch = ActionBatchController(storage: ctx.storage)
         let anchorAddress = try P1SATKey.address(
             identity: ctx.identity,
             keyID: anchorKeyID,
@@ -105,21 +108,73 @@ enum SigmaPublish {
                 randomizeOutputs: false,
                 acceptDelayedBroadcast: true,
                 noSend: true
-            )
+            ),
+            batch: batch
         )
-        if let error = anchor.error { return ActionResult(error: error) }
+        if let error = anchor.error {
+            await batch.abort(ctx.auth)
+            return ActionResult(error: error)
+        }
+        // Storage without an action batch took the anchor through processAction and holds it as
+        // nosend. If the publish never sends it, abort it so its change is not left locked.
+        // TS leaves the anchor held; storage accepts the txid as the reference of a nosend action.
+        let batched = await batch.isActive
+        func release() async {
+            if batched {
+                await batch.abort(ctx.auth)
+            } else if let txid = anchor.txid {
+                await abortHeldAnchor(ctx, txid: txid)
+            }
+        }
         guard let anchorTxid = anchor.txid, let anchorTx = anchor.tx else {
+            await release()
             throw OneSatActionError.sigmaAnchorFailed
         }
 
-        let sealed = try await Sigma.applyWithCreator(
-            ctx,
-            to: script,
-            inputTxid: anchorTxid,
-            inputVout: 0
-        )
+        let result: ActionResult
+        do {
+            let sealed = try await Sigma.applyWithCreator(
+                ctx,
+                to: script,
+                inputTxid: anchorTxid,
+                inputVout: 0
+            )
+            result = try await publishSpending(
+                ctx, anchorTxid: anchorTxid, anchorTx: anchorTx, anchorKeyID: anchorKeyID,
+                anchorChange: anchor.noSendChange ?? [], description: description,
+                outputs: try outputs(Sealed(script: sealed.script, creator: sealed.creator, actionID: actionID)),
+                actionID: actionID, batch: batch
+            )
+        } catch {
+            await release()
+            throw error
+        }
+        // A committed batch is finished, so this only releases one the publish never committed.
+        // A rejected broadcast already handed the anchor to the network with the publish.
+        if let error = result.error, !error.hasPrefix("broadcast-") { await release() }
+        return result
+    }
 
-        return try await TrackedAction.execute(
+    /// Aborts an anchor storage holds as nosend. Best effort: storage refuses one it has sent.
+    private static func abortHeldAnchor(_ ctx: OneSatContext, txid: String) async {
+        guard let reference = Data(base64Encoded: txid) else { return }
+        guard let data = try? WalletBase64Data(Array(reference)) else { return }
+        _ = try? await ctx.storage.abortAction(ctx.auth, WalletAbortActionRequest(reference: data))
+    }
+
+    /// The publish: spends the anchor at input 0, funded first from the anchor's change.
+    private static func publishSpending(
+        _ ctx: OneSatContext,
+        anchorTxid: String,
+        anchorTx: [UInt8],
+        anchorKeyID: String,
+        anchorChange: [String],
+        description: String,
+        outputs: [WalletCreateActionOutput],
+        actionID: String,
+        batch: ActionBatchController
+    ) async throws -> ActionResult {
+        try await TrackedAction.execute(
             ctx,
             description: description,
             inputBEEF: try AtomicBEEF(bytes: anchorTx, limits: WalletBEEFLimits.standard).beef,
@@ -130,11 +185,11 @@ enum SigmaPublish {
                     unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
                 ),
             ],
-            outputs: try outputs(
-                Sealed(script: sealed.script, creator: sealed.creator, actionID: actionID)
-            ),
+            outputs: outputs,
             actionID: actionID,
             options: publishOptions(anchorTxid: anchorTxid),
+            batch: batch,
+            fundFrom: anchorChange,
             sign: { tx in
                 [
                     0: try SignP2PKH.unlockingScript(

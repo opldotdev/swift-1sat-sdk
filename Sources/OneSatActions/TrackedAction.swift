@@ -153,6 +153,8 @@ public enum TrackedAction {
         lockTime: UInt32? = nil,
         actionID: String? = nil,
         options: Options = Options(),
+        batch: ActionBatchController? = nil,
+        fundFrom: [String] = [],
         sign: @Sendable (Transaction) throws -> [UInt32: Script] = { _ in [:] }
     ) async throws -> ActionResult {
         let actionID = actionID ?? randomActionID()
@@ -166,9 +168,29 @@ public enum TrackedAction {
             actionID: actionID,
             options: options
         )
+        // TS createAction asks the wallet's action batch to plan first and falls back to storage.
         let funded: StorageCreateActionResult
+        var batchPlanned = false
         do {
-            funded = try await ctx.storage.createAction(ctx.auth, createRequest)
+            var planned: StorageCreateActionResult?
+            if let batch {
+                do {
+                    planned = try await batch.plan(
+                        ctx.auth, createRequest, fundFrom: try fundFrom.map { try Outpoint($0) }
+                    )
+                } catch {
+                    // A batch refuses a member it cannot plan but stays open; release what it
+                    // reserved rather than leave it until the lease lapses.
+                    if await batch.isActive { await batch.abort(ctx.auth) }
+                    throw error
+                }
+            }
+            if let planned {
+                funded = planned
+                batchPlanned = true
+            } else {
+                funded = try await ctx.storage.createAction(ctx.auth, createRequest)
+            }
         } catch {
             return ActionResult.failure(error.localizedDescription, actionId: actionID)
         }
@@ -199,10 +221,19 @@ public enum TrackedAction {
             )
 
             let signed = try SignedAction(funded: funded, transaction: transaction)
-            let processed = try await ctx.storage.processAction(
-                ctx.auth,
-                try signed.processRequest(sendWith: options.sendWith)
-            )
+            // TS completeSignedAction: signAction runs with acceptDelayedBroadcast false and
+            // noSend carried over from createAction, so a noSend action is held for its batch.
+            let processed: StorageProcessActionResult
+            if let batch, let staged = try await batch.process(
+                ctx.auth, signed, sendWith: options.sendWith, isNoSend: options.noSend, isDelayed: false
+            ) {
+                processed = staged
+            } else {
+                processed = try await ctx.storage.processAction(
+                    ctx.auth,
+                    try signed.processRequest(sendWith: options.sendWith, isNoSend: options.noSend, isDelayed: false)
+                )
+            }
             if let failed = processed.sendWithResults.first(where: { $0.status != .unproven }) {
                 return ActionResult.failure("broadcast-\(failed.status.rawValue)", actionId: actionID)
             }
@@ -221,7 +252,11 @@ public enum TrackedAction {
             )
         } catch {
             let reference = funded.reference
-            if let bytes = Data(base64Encoded: reference) {
+            if let batch, batchPlanned {
+                // Storage never saw a batch member on its own; releasing the batch frees its inputs.
+                // The batch may already have retired itself on a state error, which makes this a no-op.
+                await batch.abort(ctx.auth)
+            } else if let bytes = Data(base64Encoded: reference) {
                 let abort = WalletAbortActionRequest(reference: try WalletBase64Data(Array(bytes)))
                 _ = try? await ctx.storage.abortAction(ctx.auth, abort)
             }

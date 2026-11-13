@@ -2,6 +2,7 @@ import Foundation
 import BSVCompat
 import BSVCore
 import BSVCrypto
+import BSVInterpreter
 import BSVKeys
 import BSVScript
 import BSVTransaction
@@ -9,6 +10,7 @@ import BSVWallet
 import OneSatTemplates
 import ToolboxActions
 import ToolboxAuth
+import ToolboxCore
 import ToolboxStorage
 import ToolboxStorageClient
 import XCTest
@@ -137,7 +139,214 @@ final class SigmaPublishTests: XCTestCase {
         XCTAssertEqual(result.error, "broadcast-failed")
         XCTAssertNil(result.txid)
         let methods = await transport.methods
-        XCTAssertEqual(methods, ["createAction", "processAction", "listOutputs", "createAction", "processAction"])
+        // The publish asks storage for its action-batch capabilities first, as the TS wallet does.
+        XCTAssertEqual(methods, ["getCapabilities", "createAction", "processAction", "listOutputs", "createAction", "processAction"])
+    }
+
+    /// Storage without the action batch holds the anchor as nosend. When the publish then
+    /// cannot be funded, the anchor is aborted by its txid so its change is not left locked.
+    func test_inscribeWithSigmaAbortsTheHeldAnchorWhenThePublishFailsWithoutABatch() async throws {
+        let transport = PublishTransport(failingCreates: [1])
+        let result = await Inscriptions.inscribe(
+            try context(transport),
+            Inscriptions.Request(content: Array("hi".utf8), contentType: "text/plain")
+        )
+        XCTAssertNotNil(result.error)
+        XCTAssertNil(result.txid)
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["getCapabilities", "createAction", "processAction", "listOutputs", "createAction", "abortAction"])
+        let processed = await transport.processed
+        XCTAssertEqual(processed.count, 1)
+        XCTAssertTrue(processed[0].isNoSend)
+        let aborted = await transport.abortedReferences
+        XCTAssertEqual(aborted, [processed[0].txid])
+    }
+
+    // MARK: Action batch (a wallet with a single unspent output)
+
+    /// Storage that speaks the action batch reserves the wallet's one unspent output for the
+    /// anchor; the publish spends the anchor and is funded by the anchor's change, which storage
+    /// has not seen yet; one commit carries both. Ordinary createAction could not fund the publish.
+    func test_inscribeWithSigmaFromASingleUTXOCommitsAnchorAndPublishInOneBatch() async throws {
+        let identity = try ActionVectors.identity()
+        let transport = PublishTransport(actionBatch: .init(identity: identity))
+        let request = Inscriptions.Request(
+            content: Array("hello".utf8),
+            contentType: "text/plain; charset=utf-8",
+            map: [("name", "Hello")]
+        )
+        let result = await Inscriptions.inscribe(try context(transport), request, keyID: "inscribe-1")
+        XCTAssertNil(result.error, result.error ?? "")
+
+        // Neither action reaches createAction or processAction (the fake fails the test if they
+        // do), the BAP identity is read between them, and nothing is aborted.
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["getCapabilities", "beginActionBatch", "listOutputs", "commitActionBatch"])
+        let aborted = await transport.abortedBatches
+        XCTAssertEqual(aborted, [])
+        let processed = await transport.processed
+        XCTAssertTrue(processed.isEmpty)
+        let bodies = await transport.bodies
+
+        // The anchor began the batch.
+        let begin = try XCTUnwrap(try Self.params(bodies[1]).last?["firstAction"])
+        XCTAssertEqual(begin["description"]?.stringValue, "Sigma anchor output")
+        XCTAssertEqual(begin["isNoSend"], .bool(true))
+        XCTAssertEqual(begin["outputs"]?.arrayValue?.map { $0["satoshis"]?.int64Value }, [2])
+
+        // One commit, with a digest storage recomputes to the same value.
+        let manifest = try XCTUnwrap(try Self.params(bodies[3]).last)
+        XCTAssertTrue(try ActionBatchDigest.verify(manifest), "storage recomputes the same digest")
+        let batchId = await transport.batchId
+        XCTAssertEqual(manifest["batchId"]?.stringValue, try XCTUnwrap(batchId))
+        let actions = try XCTUnwrap(manifest["actions"]?.arrayValue)
+        XCTAssertEqual(actions.count, 2)
+        XCTAssertEqual(
+            actions.map { $0["metadata"]?["description"]?.stringValue },
+            ["Sigma anchor output", "Create inscription"],
+            "the anchor, then the publish that spends it"
+        )
+        XCTAssertEqual(actions.map { $0["metadata"]?["isNoSend"] }, [.bool(true), .bool(false)])
+        let blobs = try XCTUnwrap(manifest["inlineBlobs"]?.members)
+        let transactions = try actions.map { action -> Transaction in
+            let bytes = try XCTUnwrap(blobs.first { $0.key == action["rawTxDigest"]?.stringValue }?.value.arrayValue)
+                .compactMap { $0.int64Value.flatMap(UInt8.init(exactly:)) }
+            return try Transaction(bytes: bytes, limits: WalletTransactionLimits.standard)
+        }
+        let anchorTx = transactions[0]
+        let publishTx = transactions[1]
+        let anchorTxid = try anchorTx.transactionID(limits: WalletTransactionLimits.standard).displayHex
+        let publishTxid = try publishTx.transactionID(limits: WalletTransactionLimits.standard).displayHex
+        XCTAssertEqual(actions.map { $0["txid"]?.stringValue }, [anchorTxid, publishTxid])
+        XCTAssertEqual(manifest["sendWith"], .strings([anchorTxid, publishTxid]))
+
+        // The single reserved output funds the anchor; the anchor's output and its change fund
+        // the publish.
+        let reserved = await transport.fundingTransaction
+        let funding = try XCTUnwrap(reserved)
+        let fundingTxid = try funding.transactionID(limits: WalletTransactionLimits.standard).displayHex
+        let changeVout = try XCTUnwrap(
+            actions[0]["plan"]?["noSendChangeOutputVouts"]?.arrayValue?.compactMap(\.int64Value).first
+        )
+        XCTAssertEqual(anchorTx.inputs.map(\.previousOutput.description), ["\(fundingTxid).0"])
+        XCTAssertEqual(anchorTx.outputs.count, 2, "the anchor and its change")
+        XCTAssertEqual(anchorTx.outputs[0].satoshis, 2)
+        XCTAssertEqual(
+            publishTx.inputs.map(\.previousOutput.description),
+            ["\(anchorTxid).0", "\(anchorTxid).\(changeVout)"]
+        )
+        XCTAssertEqual(result.txid, publishTxid)
+
+        // Every input is signed for what it spends, and each action pays storage's fee rate.
+        let sources = [fundingTxid: funding, anchorTxid: anchorTx]
+        for transaction in [anchorTx, publishTx] {
+            var spent: UInt64 = 0
+            for (index, input) in transaction.inputs.enumerated() {
+                let source = try XCTUnwrap(sources[input.previousOutput.transactionID.displayHex])
+                    .outputs[Int(input.previousOutput.outputIndex)]
+                spent += source.satoshis
+                let execution = try ScriptInterpreter.execute(
+                    unlockingScript: input.unlockingScript,
+                    lockingScript: source.lockingScript,
+                    configuration: ScriptExecutionConfiguration(
+                        era: .afterGenesis, flags: [.enableForkID, .derSignatures, .lowS, .nullFail],
+                        resourceLimits: .standard
+                    ),
+                    context: ScriptExecutionContext(
+                        transaction: transaction, inputIndex: index, spentOutput: source,
+                        transactionLimits: WalletTransactionLimits.standard
+                    )
+                )
+                XCTAssertEqual(execution.stack.last, [1])
+            }
+            let paid = transaction.outputs.reduce(UInt64(0)) { $0 + $1.satoshis }
+            let size = try transaction.serialized(limits: WalletTransactionLimits.standard).count
+            XCTAssertGreaterThanOrEqual(spent - paid, UInt64((Double(size) * 100 / 1000).rounded(.up)))
+        }
+
+        // The publish seals its inscription against anchor input 0, as without a batch.
+        let inscription = publishTx.outputs[0]
+        XCTAssertEqual(inscription.satoshis, 1)
+        XCTAssertEqual(try XCTUnwrap(Inscription.decode(inscription.lockingScript)).content, Array("hello".utf8))
+        _ = try SigmaAssert.sealed(inscription.lockingScript, anchorTxid: anchorTxid, identity: identity)
+        let anchorKeyID = try CustomInstructions.parse(try XCTUnwrap(
+            begin["outputs"]?.arrayValue?.first?["customInstructions"]?.stringValue
+        )).keyID
+        let anchorKey = try P1SATKey.privateKey(identity: identity, keyID: anchorKeyID)
+        XCTAssertEqual(
+            try ActionScript.payToPublicKeyHash(Address(publicKey: anchorKey.publicKey, network: .mainnet)).bytes,
+            anchorTx.outputs[0].lockingScript.bytes
+        )
+    }
+
+    func test_inscribeWithSigmaAbortsTheBatchOnceWhenTheCommitFails() async throws {
+        let identity = try ActionVectors.identity()
+        let transport = PublishTransport(actionBatch: .init(
+            identity: identity,
+            commitError: ["name": "WERR_INVALID_OPERATION", "message": "commit refused"]
+        ))
+        let result = await Inscriptions.inscribe(
+            try context(transport),
+            Inscriptions.Request(content: Array("hi".utf8), contentType: "text/plain")
+        )
+        XCTAssertEqual(result.error, "commit refused")
+        XCTAssertNil(result.txid)
+
+        let methods = await transport.methods
+        XCTAssertEqual(
+            methods,
+            ["getCapabilities", "beginActionBatch", "listOutputs", "commitActionBatch", "abortActionBatch"]
+        )
+        let aborted = await transport.abortedBatches
+        let batchId = await transport.batchId
+        XCTAssertEqual(aborted, [try XCTUnwrap(batchId)])
+    }
+
+    /// A batch refuses a member it cannot plan (here a description under the 5 bytes storage
+    /// requires at commit) but stays open; TrackedAction releases it rather than leave the
+    /// staged anchor's reservation locked until the lease lapses.
+    func test_trackedActionReleasesTheBatchWhenAMemberCannotBePlanned() async throws {
+        let identity = try ActionVectors.identity()
+        let transport = PublishTransport(actionBatch: .init(identity: identity))
+        let ctx = try context(transport)
+        let batch = ActionBatchController(storage: ctx.storage)
+        let script = try ActionScript.payToPublicKeyHash(
+            try P1SATKey.address(identity: identity, keyID: "anchor-test", counterparty: .self, forSelf: true, network: ctx.chain.network)
+        ).bytes
+        let anchor = try await TrackedAction.execute(
+            ctx,
+            description: "Sigma anchor output",
+            outputs: [try WalletCreateActionOutput(lockingScript: script, satoshis: 2, outputDescription: "Sigma anchor")],
+            options: TrackedAction.Options(bypassP1Sat: true, randomizeOutputs: false, noSend: true),
+            batch: batch
+        )
+        XCTAssertNil(anchor.error)
+        let anchorTxid = try XCTUnwrap(anchor.txid)
+        let staged = await batch.isActive
+        XCTAssertTrue(staged)
+
+        let refused = try await TrackedAction.execute(
+            ctx,
+            description: "pub",
+            inputBEEF: try AtomicBEEF(bytes: try XCTUnwrap(anchor.tx), limits: WalletBEEFLimits.standard).beef,
+            inputs: [try WalletCreateActionInput(
+                outpoint: try Outpoint("\(anchorTxid).0"),
+                inputDescription: "Sigma anchor",
+                unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
+            )],
+            outputs: [try WalletCreateActionOutput(lockingScript: script, satoshis: 1, outputDescription: "inscription")],
+            options: TrackedAction.Options(bypassP1Sat: true, sendWith: [anchorTxid]),
+            batch: batch,
+            fundFrom: anchor.noSendChange ?? []
+        )
+        XCTAssertNotNil(refused.error)
+        let active = await batch.isActive
+        XCTAssertFalse(active)
+        let aborted = await transport.abortedBatches
+        let batchId = await transport.batchId
+        XCTAssertEqual(aborted, [try XCTUnwrap(batchId)])
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["getCapabilities", "beginActionBatch", "abortActionBatch"])
     }
 
     // MARK: Collections (collections/index.ts mintWithSigma)
@@ -253,7 +462,8 @@ final class SigmaPublishTests: XCTestCase {
         result: ActionResult
     ) async throws -> Flow {
         let methods = await transport.methods
-        XCTAssertEqual(methods, ["createAction", "processAction", "listOutputs", "createAction", "processAction"])
+        // The publish asks storage for its action-batch capabilities first, as the TS wallet does.
+        XCTAssertEqual(methods, ["getCapabilities", "createAction", "processAction", "listOutputs", "createAction", "processAction"])
         let creates = try SigmaAssert.createActions(await transport.bodies)
         XCTAssertEqual(creates.map { $0["description"] as? String }, ["Sigma anchor output", description])
 
@@ -282,6 +492,13 @@ final class SigmaPublishTests: XCTestCase {
         let publish = processed[1]
         let anchorTxid = anchor.txid
         XCTAssertEqual(anchor.sendWith, [])
+        // TS completeSignedAction processes the publish with isDelayed false. The anchor, which TS
+        // creates with acceptDelayedBroadcast true, goes through the same path here; noSend makes
+        // storage hold it as nosend either way, until the publish sends it.
+        XCTAssertTrue(anchor.isNoSend)
+        XCTAssertFalse(anchor.isDelayed)
+        XCTAssertFalse(publish.isNoSend)
+        XCTAssertFalse(publish.isDelayed)
 
         let main = creates[1]
         let inputs = try XCTUnwrap(main["inputs"] as? [[String: Any]])
@@ -348,6 +565,11 @@ final class SigmaPublishTests: XCTestCase {
         XCTAssertEqual(parsed.counterparty, .self)
         // Key order as TS writes it: derivation, then counterparty, then remittance.
         XCTAssertNotNil(ci.range(of: #""keyID":"\#(keyID)","counterparty":"self""#), ci)
+    }
+
+    /// The JSON-RPC params of a captured request, in the order they were sent.
+    private static func params(_ body: [UInt8]) throws -> [OrderedJSON] {
+        try XCTUnwrap(try OrderedJSON.parse(body)["params"]?.arrayValue)
     }
 
     private func context(_ transport: PublishTransport) throws -> OneSatContext {

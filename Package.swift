@@ -43,7 +43,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "e0aa531b7836e6730da37a9a920b27f301f1bcc9"
+            revision: "0ce3547d2a4d4ddcf28a72459a8a18e30fe3e468"
         ),
     ],
     targets: [
@@ -293,6 +293,8 @@ let package = Package(
                 .product(name: "BSVWallet", package: "swift-sdk"),
                 .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxCore", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),

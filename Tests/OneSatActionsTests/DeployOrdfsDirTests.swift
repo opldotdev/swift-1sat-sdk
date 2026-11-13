@@ -153,7 +153,7 @@ final class DeployOrdfsDirTests: XCTestCase {
         )
         let methods = await transport.methods
         XCTAssertEqual(methods, ["listOutputs", "createAction"])
-        let args = try await createActionArgs(transport, index: 1)
+        let args = try await createActionArgs(transport, index: 0)
         let outputs = try XCTUnwrap(args["outputs"] as? [[String: Any]])
         XCTAssertEqual(outputs.map { ($0["satoshis"] as? NSNumber)?.intValue }, [0, 0])
         let root = try XCTUnwrap(outputs.last)
@@ -173,7 +173,7 @@ final class DeployOrdfsDirTests: XCTestCase {
         let response = await DeployOrdfsDir.execute(try context(transport), DeployOrdfsDir.Request(files: files))
         XCTAssertNotNil(response.error)
         let methods = await transport.methods
-        XCTAssertEqual(methods, ["createAction"])
+        XCTAssertEqual(methods, ["getCapabilities", "createAction"])
         let args = try await createActionArgs(transport, index: 0)
         XCTAssertEqual(args["description"] as? String, "Sigma anchor output")
         let outputs = try XCTUnwrap(args["outputs"] as? [[String: Any]])
@@ -200,7 +200,7 @@ final class DeployOrdfsDirTests: XCTestCase {
         )
         XCTAssertNil(response.error, response.error ?? "")
         let methods = await transport.methods
-        XCTAssertEqual(methods, ["createAction", "processAction", "listOutputs", "createAction", "processAction"])
+        XCTAssertEqual(methods, ["getCapabilities", "createAction", "processAction", "listOutputs", "createAction", "processAction"])
 
         let processed = await transport.processed
         XCTAssertEqual(processed.count, 2)
@@ -215,6 +215,9 @@ final class DeployOrdfsDirTests: XCTestCase {
         XCTAssertFalse(anchor.isSendWith)
         XCTAssertEqual(publish.sendWith, [anchorTxid])
         XCTAssertTrue(publish.isSendWith)
+        XCTAssertTrue(anchor.isNoSend)
+        XCTAssertFalse(publish.isNoSend)
+        XCTAssertFalse(anchor.isDelayed || publish.isDelayed)
         XCTAssertEqual(anchor.transaction.outputs[0].satoshis, 2)
 
         let creates = try createActions(await transport.bodies)
@@ -307,7 +310,7 @@ final class DeployOrdfsDirTests: XCTestCase {
         XCTAssertNil(response.txid)
         XCTAssertNil(response.origins)
         let methods = await transport.methods
-        XCTAssertEqual(methods, ["createAction", "processAction", "listOutputs", "createAction", "processAction"])
+        XCTAssertEqual(methods, ["getCapabilities", "createAction", "processAction", "listOutputs", "createAction", "processAction"])
     }
 
     func test_signedMixedPublishWithoutMapSealsTheRootBehindOpReturn() async throws {
@@ -433,10 +436,15 @@ final class DeployOrdfsDirTests: XCTestCase {
     }
 
     private func createActionArgs(_ transport: DeployTransport, index: Int) async throws -> [String: Any] {
-        let bodies = await transport.bodies
-        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(bodies[index])) as? [String: Any])
-        XCTAssertEqual(envelope["method"] as? String, "createAction")
-        let params = try XCTUnwrap(envelope["params"] as? [Any])
+        // The SIGMA publish asks storage for its action-batch capabilities first, so count only
+        // the createAction calls.
+        let envelopes = try await transport.bodies.map {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: Data($0)) as? [String: Any])
+        }
+        let creates = envelopes.filter { $0["method"] as? String == "createAction" }
+        XCTAssertGreaterThan(creates.count, index)
+        guard creates.indices.contains(index) else { return [:] }
+        let params = try XCTUnwrap(creates[index]["params"] as? [Any])
         return try XCTUnwrap(params[1] as? [String: Any])
     }
 
