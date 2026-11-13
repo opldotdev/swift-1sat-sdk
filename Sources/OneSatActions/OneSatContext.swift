@@ -17,14 +17,20 @@ public enum OneSatChain: String, Equatable, Sendable {
     }
 }
 
-/// Overlay and token-status reads used by `sendBsv21`.
+/// Overlay and token-status reads used by the BSV-21 actions.
 ///
 /// Field names match `@1sat/actions` `tokens/index.ts` `ctx.services.bsv21`.
 public protocol Bsv21ActionServices: Sendable {
+    /// GET /{tokenId}. Actions gate on the status, so implementations must not serve it
+    /// from a cache (`getTokenDetails(tokenId, { fresh: true })`).
     func tokenDetails(tokenId: String) async throws -> Bsv21TokenDetails
-    func validateUnspentOutputs(tokenId: String, outpoints: [String]) async throws -> Set<String>
-    /// GET /{tokenId}/outputs/{outpoint}. Throws when the overlay does not know the outpoint (404).
-    func validateOutput(tokenId: String, outpoint: String) async throws
+    /// POST /{tokenId}/outputs/status: one state per outpoint, in request order, with each
+    /// outpoint echoed exactly as sent.
+    func outputStatus(tokenId: String, outpoints: [String]) async throws -> [Tokens.OutputStatus]
+    /// GET /{tokenId}/fund. Empty outputs mean the overlay needs no funding.
+    func fundingTemplate(tokenId: String) async throws -> Tokens.FundingTemplate
+    /// POST /{tokenId}/fund with the funding transaction's BEEF.
+    func submitFunding(tokenId: String, beef: [UInt8]) async throws -> Tokens.OverlayStatus
     func submitTransfer(tx: [UInt8], tokenId: String) async throws
 }
 

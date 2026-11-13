@@ -1,5 +1,5 @@
 {
-  "originHash" : "ed3acf013ecf776bd440886e2cab907a7ba34a466fc9c887b06974d589391e69",
+  "originHash" : "fa111da513a71bfc19bef82ec832427251e2147d1ed890044bbfd4678b37fc66",
   "pins" : [
     {
       "identity" : "bigint",
@@ -50,7 +50,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/opldotdev/swift-wallet-toolbox.git",
       "state" : {
-        "revision" : "5d8f7812539fa55539242d30fd720ecaea2c5908"
+        "revision" : "e0aa531b7836e6730da37a9a920b27f301f1bcc9"
       }
     }
   ],

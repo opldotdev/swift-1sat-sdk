@@ -344,7 +344,17 @@ final class OneSatPermissionModuleAdapterTests: XCTestCase {
                     status: .init(isActive: true)
                 )
             },
-            validateOutputs: { _, _ in validInputs.map { .init(outpoint: $0) } }
+            outputStatus: { _, outpoints in
+                let valid = Set(validInputs.map { $0.replacingOccurrences(of: ".", with: "_") })
+                return outpoints.map {
+                    .init(
+                        outpoint: $0,
+                        state: valid.contains($0.replacingOccurrences(of: ".", with: "_"))
+                            ? .valid
+                            : .unknown
+                    )
+                }
+            }
         ))
     }
 
