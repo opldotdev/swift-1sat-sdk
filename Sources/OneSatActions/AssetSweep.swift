@@ -367,8 +367,10 @@ public enum AssetSweep {
                 throw OneSatActionError.missingSourceTransaction(inputIndex: index)
             }
             transaction.inputs[index].sourceOutput = source
-            if OrdLock.isOrdLock(source.lockingScript) {
-                spends[UInt32(index)] = try UnlockScripts.ordLockCancel(
+            // TS `assignLegacyUnlock`: a listed output's only seller spend is the
+            // v2 cancel branch, so importing one cancels the listing.
+            if OrdLockV2.isOrdLockV2(source.lockingScript) {
+                spends[UInt32(index)] = try UnlockScripts.ordLockV2Cancel(
                     privateKey: key, transaction: transaction, inputIndex: index
                 )
             } else {

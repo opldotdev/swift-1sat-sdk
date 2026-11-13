@@ -34,7 +34,7 @@ migration and WalletPermissionsManager collection metadata/name handling.
 
 Sweep stays **partial by design**. Further `@1sat` surface lands as the wallet needs it.
 
-**OrdLock listing create is off** (`Ordinals.list` / `buildList`, OPL-4694). Buy and cancel of existing listings stay on. `OrdLock.lock` remains the script encoder for decode and spend-side tests.
+**OrdLock listing create is off** (`Ordinals.list` / `buildList`, OPL-4694). Buy and cancel of existing listings stay on, for OrdLock v2 (`OrdLockV2`, the Rúnar `OrdLockV2Batch` contract) only; v1 is dropped entirely, following b-open-io/1sat-sdk 8fb809d5 (which removed v1 detection and the v1 sweep cancel; TS buy/cancel still carry a vestigial v1 fallback that Swift does not). A purchase goes through `OrdLockV2Purchase`, which front-funds from the `1sat-deposit` basket under a short `hold:` tag. `OrdLockV2.lock` remains the script encoder for decode and spend-side tests.
 
 ## Modules
 
@@ -42,7 +42,7 @@ Sweep stays **partial by design**. Further `@1sat` surface lands as the wallet n
 |---|---|
 | `OneSatClient` | Read-only ordinals and BSV-21 balances; MNEE and OpNS clients; 1sat-stack services |
 | `OneSatSweep` | Categorise an address, sweep its fundable BSV, report the rest |
-| `OneSatTemplates` | Locking scripts: inscription, OrdLock, BSV-20/21, Cosign, TimeLock, BAP, BitCom, public `MAPTemplate` |
+| `OneSatTemplates` | Locking scripts: inscription, OrdLock v2, BSV-20/21, Cosign, TimeLock, BAP, BitCom, public `MAPTemplate` |
 | `OneSatAddresses` | P1SAT deposit addresses (`[0, "onesat"]`, keyID `"1sat <index>"`) |
 | `OneSatActions` | Major `@1sat/actions` families, spend-side unlock templates, cancellable legacy-basket migration, WPM collection metadata/name handling |
 | `OneSat` | Umbrella, re-exporting the above |

@@ -72,13 +72,13 @@ final class UnlockVectorTests: XCTestCase {
         )
     }
 
-    func test_ordLockCancelMatchesTheTypeScriptScript() throws {
+    func test_ordLockV2CancelSignsWithTheListingKey() throws {
         let identity = try ActionVectors.identity()
         let cancel = try Ordinals.cancelAddress(
             identity: identity,
             outpoint: ActionVectors.outpoint
         )
-        let locking = try OrdLock.lock(
+        let locking = try OrdLockV2.lock(
             cancelAddress: cancel.description,
             payAddress: ActionVectors.payAddress,
             price: 50_000
@@ -95,54 +95,88 @@ final class UnlockVectorTests: XCTestCase {
                 ),
             ]
         )
-        let unlock = try UnlockScripts.ordLockCancel(
+        let unlock = try UnlockScripts.ordLockV2Cancel(
                 identity: identity,
                 transaction: transaction,
                 inputIndex: 0,
                 protocolID: OneSatConstants.p1satProtocolID,
                 keyID: ActionVectors.outpoint
             )
-        try assertPublicKey(
-            "032a9a59e5f238bbff3202d80e1d573dad6202e24db76e609bdb27c35f0205f156",
-            in: unlock
-        )
+        // `<"ol2:cancel"> <sig> <pubkey> OP_1`
+        let operations = try unlock.operations(maximumPushDataByteCount: Int(limits.maximumScriptByteCount))
+        XCTAssertEqual(operations.count, 4)
+        XCTAssertEqual(operations[0].pushedData, OrdLockV2.cancelMarker)
+        XCTAssertEqual(operations[1].pushedData?.last, OrdLockV2.cancelSighashByte)
         XCTAssertEqual(
-            try unlock.operations(maximumPushDataByteCount: Int(limits.maximumScriptByteCount)).last?.opcode,
-            .one
+            operations[2].pushedData,
+            try Hex.decode(
+                "032a9a59e5f238bbff3202d80e1d573dad6202e24db76e609bdb27c35f0205f156",
+                maximumDecodedByteCount: 33
+            )
         )
+        XCTAssertEqual(operations[3].opcode, .one)
+        XCTAssertTrue(OrdLockV2.isCancel(unlock))
+        XCTAssertLessThanOrEqual(unlock.bytes.count, OrdLockV2.cancelUnlockLength)
     }
 
-    func test_ordLockPurchaseMatchesTheTypeScriptScript() throws {
+    func test_ordLockV2PurchaseIsAPreimageAndTheZeroSelector() throws {
         let identity = try ActionVectors.identity()
         let cancel = try Ordinals.cancelAddress(
             identity: identity,
             outpoint: ActionVectors.outpoint
         )
-        let locking = try OrdLock.lock(
+        let locking = try OrdLockV2.lock(
             cancelAddress: cancel.description,
             payAddress: ActionVectors.payAddress,
             price: 50_000
         )
         let buyer = Address(publicKey: identity.publicKey, network: .mainnet)
-        let transaction = try spendTransaction(
-            sourceTXID: String(repeating: "11", count: 32),
-            sourceSatoshis: 1,
-            lockingScript: locking,
-            sequence: 0xffff_ffff,
+        let empty = try Script(bytes: [], maximumByteCount: 10)
+        let fundingScript = try ActionScript.payToPublicKeyHash(buyer)
+        // Canonical layout: front funding 0, listing 1; filler 0, payout 1, receive 2.
+        let transaction = Transaction(
+            version: 1,
+            inputs: [
+                TransactionInput(
+                    previousOutput: Outpoint(
+                        transactionID: try TransactionID(displayHex: String(repeating: "22", count: 32)),
+                        outputIndex: 0
+                    ),
+                    unlockingScript: empty,
+                    sequence: 0xffff_ffff,
+                    sourceOutput: TransactionOutput(satoshis: 50_000, lockingScript: fundingScript)
+                ),
+                TransactionInput(
+                    previousOutput: Outpoint(
+                        transactionID: try TransactionID(displayHex: String(repeating: "11", count: 32)),
+                        outputIndex: 0
+                    ),
+                    unlockingScript: empty,
+                    sequence: 0xffff_ffff,
+                    sourceOutput: TransactionOutput(satoshis: 1, lockingScript: locking)
+                ),
+            ],
             outputs: [
                 TransactionOutput(
-                    satoshis: 1,
-                    lockingScript: try ActionScript.payToPublicKeyHash(buyer)
+                    satoshis: 0,
+                    lockingScript: try Script(bytes: OrdLockV2Spend.fillerScriptBytes, maximumByteCount: 2)
                 ),
                 TransactionOutput(
                     satoshis: 50_000,
                     lockingScript: try ActionScript.payToPublicKeyHash(ActionVectors.payAddress)
                 ),
-            ]
+                TransactionOutput(satoshis: 1, lockingScript: try ActionScript.payToPublicKeyHash(buyer)),
+            ],
+            lockTime: 0
         )
-        let unlock = try UnlockScripts.ordLockPurchase(transaction: transaction, inputIndex: 0)
-        XCTAssertGreaterThan(unlock.bytes.count, locking.bytes.count)
-        XCTAssertTrue(unlock.hex.hasSuffix("c100000000"))
+        let unlock = try UnlockScripts.ordLockV2Purchase(transaction: transaction, inputIndex: 1)
+        let operations = try unlock.operations(maximumPushDataByteCount: Int(limits.maximumScriptByteCount))
+        XCTAssertEqual(operations.count, 2)
+        XCTAssertEqual(operations[1].opcode, .zero)
+        let preimage = try XCTUnwrap(operations[0].pushedData)
+        XCTAssertEqual(Array(preimage.suffix(4)), [OrdLockV2.purchaseSighashByte, 0, 0, 0])
+        XCTAssertEqual(unlock.bytes.count, try OrdLockV2.estimatePurchaseUnlockLength(locking))
+        XCTAssertTrue(OrdLockV2.isPurchase(unlock))
     }
 
     /// Public keys independently reproduced with the live TypeScript

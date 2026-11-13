@@ -20,17 +20,24 @@ final class OrdLockDelistingTests: XCTestCase {
             inputBEEF: fixture.beef
         )
         XCTAssertEqual(Set(spends.keys), [0, 1], "funding inputs stay with the wallet signer")
-        // Live @1sat/templates OrdLock.cancelListing(key, "all", true) vector.
-        XCTAssertEqual(spends[1]?.hex,
-            "48304502210093198a9f94368e1368a70fe11c25a1c9727024a8f7b4812bc5c8f6d2a7e78888022028ead1b146807ee8e824bb62145b41724f358b99546fd6683fd2463af1bab79ec12102bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a551")
+        // TS `assignLegacyUnlock`: `OrdLockV2.cancelListing(key, "all", true)`,
+        // i.e. `<"ol2:cancel"> <sig> <pubkey> OP_1`.
+        let cancel = try XCTUnwrap(spends[1])
+        XCTAssertTrue(OrdLockV2.isCancel(cancel))
+        XCTAssertLessThanOrEqual(cancel.bytes.count, OrdLockV2.cancelUnlockLength)
         for index in 0..<2 {
             let unlock = try XCTUnwrap(spends[UInt32(index)])
             let operations = try unlock.operations(maximumPushDataByteCount: 10_000)
-            XCTAssertEqual(operations[0].pushedData?.last, 0xc1, "ALL | FORKID | ANYONECANPAY")
-            XCTAssertEqual(operations.count, index == 0 ? 2 : 3)
-            if index == 1 { XCTAssertEqual(operations.last?.opcode, .one) }
+            let signature = index == 0 ? operations[0] : operations[1]
+            XCTAssertEqual(signature.pushedData?.last, 0xc1, "ALL | FORKID | ANYONECANPAY")
+            XCTAssertEqual(operations.count, index == 0 ? 2 : 4)
+            if index == 1 {
+                XCTAssertEqual(operations[0].pushedData, OrdLockV2.cancelMarker)
+                XCTAssertEqual(operations[2].pushedData, fixture.key.publicKey.compressedBytes)
+                XCTAssertEqual(operations.last?.opcode, .one)
+            }
             let execution = try execute(unlock, inputIndex: index, fixture: fixture)
-            XCTAssertEqual(execution.stack, [[1]])
+            XCTAssertTrue(isTruthy(execution.stack.last), "input \(index) leaves a true top of stack")
         }
 
         // Ordinary P2PKH signing has no cancellation selector and cannot spend this source.
@@ -67,7 +74,7 @@ final class OrdLockDelistingTests: XCTestCase {
         let key = try ActionVectors.identity()
         let address = Address(publicKey: key.publicKey, network: .mainnet)
         let plain = try ActionScript.payToPublicKeyHash(address)
-        let listing = try OrdLock.lock(
+        let listing = try OrdLockV2.lock(
             cancelAddress: address.description, payAddress: ActionVectors.payAddress, price: 50_000
         )
         let source = Transaction(version: 1, inputs: [], outputs: [
@@ -98,6 +105,14 @@ final class OrdLockDelistingTests: XCTestCase {
         return Fixture(key: key, source: source, spend: spend,
             beef: try BEEF(merklePaths: [], transactions: [.raw(source)], limits: WalletBEEFLimits.standard),
             keys: keys)
+    }
+
+    private func isTruthy(_ element: [UInt8]?) -> Bool {
+        guard let element else { return false }
+        for (index, byte) in element.enumerated() where byte != 0 {
+            return !(index == element.count - 1 && byte == 0x80)
+        }
+        return false
     }
 
     private func execute(_ unlock: Script, inputIndex: Int, fixture: Fixture) throws -> ScriptExecutionResult {
