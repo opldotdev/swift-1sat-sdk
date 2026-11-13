@@ -170,11 +170,13 @@ public enum TrackedAction {
         )
         // TS createAction asks the wallet's action batch to plan first and falls back to storage.
         let funded: StorageCreateActionResult
+        var batchPlanned = false
         do {
             if let batch, let planned = try await batch.plan(
                 ctx.auth, createRequest, fundFrom: try fundFrom.map { try Outpoint($0) }
             ) {
                 funded = planned
+                batchPlanned = true
             } else {
                 funded = try await ctx.storage.createAction(ctx.auth, createRequest)
             }
@@ -239,8 +241,9 @@ public enum TrackedAction {
             )
         } catch {
             let reference = funded.reference
-            if let batch, await batch.owns(reference: reference) {
+            if let batch, batchPlanned {
                 // Storage never saw a batch member on its own; releasing the batch frees its inputs.
+                // The batch may already have retired itself on a state error, which makes this a no-op.
                 await batch.abort(ctx.auth)
             } else if let bytes = Data(base64Encoded: reference) {
                 let abort = WalletAbortActionRequest(reference: try WalletBase64Data(Array(bytes)))
