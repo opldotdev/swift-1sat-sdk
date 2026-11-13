@@ -130,6 +130,7 @@ final class OneColorFlowTests: XCTestCase {
         XCTAssertNil(synced.error)
         XCTAssertEqual(synced.skipped, [])
         XCTAssertEqual(synced.received.map(\.assetIDs), [[assetID.description]])
+        XCTAssertEqual(synced.received.map(\.deliveredOutputs), [[assetID.description: [0]]])
         XCTAssertEqual(synced.received.first?.sender, world.alice.key)
         XCTAssertEqual(synced.received.first?.txid, sent.txid)
         let received = try await OneColorActions.balance(world.bob.ctx, assetID: assetID)
@@ -187,6 +188,14 @@ final class OneColorFlowTests: XCTestCase {
 
         let synced = await TransactionInbox.sync(world.bob.ctx)
         XCTAssertEqual(synced.received.count, 1)
+        // The receipt names the handoff output the delivery filed: the 300, nothing else.
+        let delivered = try XCTUnwrap(synced.received.first?.deliveredOutputs[assetID.description])
+        XCTAssertEqual(delivered.count, 1)
+        let sentTxid = try XCTUnwrap(sent.txid)
+        let filed = try XCTUnwrap(try ColorTokenOutput.read(
+            transaction.outputs[Int(delivered[0])].lockingScript, txid: sentTxid, vout: delivered[0]
+        ))
+        XCTAssertEqual(filed.amount, 300)
         let received = try await OneColorActions.balance(world.bob.ctx, assetID: assetID)
         XCTAssertEqual(received, 300)
     }
@@ -208,6 +217,7 @@ final class OneColorFlowTests: XCTestCase {
         let synced = await TransactionInbox.sync(world.alice.ctx)
         XCTAssertEqual(synced.skipped, [])
         XCTAssertEqual(synced.received.map(\.assetIDs), [[assetID.description]])
+        XCTAssertEqual(synced.received.map { $0.deliveredOutputs.keys.sorted() }, [[assetID.description]])
         let aliceHas = try await OneColorActions.balance(world.alice.ctx, assetID: assetID)
         XCTAssertEqual(aliceHas, 400)
     }

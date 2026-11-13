@@ -20,6 +20,10 @@ public struct TransactionInboxReceipt: Equatable, Sendable {
     public let memo: String?
     /// 1Color assets received, BRC-232 deliveries only.
     public let assetIDs: [String]
+    /// BRC-232 deliveries only: per asset received, the indexes of the delivered outputs of
+    /// `txid` that were filed for it, in delivery order. Other outputs of the same transaction,
+    /// such as the sender's change, are not listed. Keys are the entries of `assetIDs`.
+    public let deliveredOutputs: [String: [UInt32]]
 }
 
 /// A message left in the box, and why.
@@ -117,19 +121,23 @@ public enum TransactionInbox {
             let txid = try await internalizeEnvelopePayment(ctx, payment: envelope.payment, sender: senderKey, memo: memo)
             return TransactionInboxReceipt(
                 messageID: message.messageID, txid: txid, sender: sender,
-                satoshis: envelope.payment.mapValue?["satoshis"]?.unsignedValue, memo: memo, assetIDs: []
+                satoshis: envelope.payment.mapValue?["satoshis"]?.unsignedValue, memo: memo, assetIDs: [],
+                deliveredOutputs: [:]
             )
         }
         if type == TransactionDelivery.contentType {
             guard envelope.contentHash != nil else {
                 throw Skip(reason: "a BRC-232 delivery requires the envelope contentHash")
             }
-            let delivered = try await internalizeTransactionDelivery(
+            let delivered = try await internalizeDelivery(
                 ctx, body: try TransactionDelivery.body(ofEntity: plaintext), overlayFor: overlayFor
             )
+            var outputs: [String: [UInt32]] = [:]
+            for (assetID, indexes) in delivered.received { outputs[assetID.description] = indexes }
             return TransactionInboxReceipt(
                 messageID: message.messageID, txid: delivered.txid, sender: sender,
-                satoshis: nil, memo: nil, assetIDs: delivered.assetIDs.map(\.description)
+                satoshis: nil, memo: nil, assetIDs: delivered.received.map(\.0.description),
+                deliveredOutputs: outputs
             )
         }
         throw Skip(reason: "nothing to internalize: no payment, content type \(entity.contentType)")
@@ -179,6 +187,14 @@ public enum TransactionInbox {
     public static func internalizeTransactionDelivery(
         _ ctx: OneColorContext, body: [UInt8], overlayFor: OverlayFor? = nil
     ) async throws -> (txid: String, assetIDs: [ColorAssetID]) {
+        let delivered = try await internalizeDelivery(ctx, body: body, overlayFor: overlayFor)
+        return (delivered.txid, delivered.received.map(\.0))
+    }
+
+    /// `internalizeTransactionDelivery`, with the output indexes received for each asset.
+    static func internalizeDelivery(
+        _ ctx: OneColorContext, body: [UInt8], overlayFor: OverlayFor? = nil
+    ) async throws -> (txid: String, received: [(ColorAssetID, [UInt32])]) {
         let delivery = try TransactionDelivery.decode(body)
         let txidHex = Hex.encode(delivery.txid)
         let beef = try BEEF(bytes: delivery.beef, limits: beefLimits)
@@ -288,6 +304,6 @@ public enum TransactionInbox {
                 return WalletInternalizeOutput(outputIndex: index, remittance: .basketInsertion(remittances[index]!))
             }
         ))
-        return (txidHex, received.map(\.0))
+        return (txidHex, received)
     }
 }
