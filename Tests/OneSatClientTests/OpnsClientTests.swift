@@ -34,7 +34,6 @@ final class OpnsClientTests: XCTestCase {
 
     private let baseURL = URL(string: "https://api.1sat.app")!
     private let outpoint = String(repeating: "a", count: 64) + "_0"
-    private let idKey = "02" + String(repeating: "ab", count: 32)
 
     func test_originURLPinsTheUnencodedName() {
         XCTAssertEqual(
@@ -129,56 +128,38 @@ final class OpnsClientTests: XCTestCase {
         XCTAssertEqual(posted, ["a_0", "b_1"])
     }
 
-    func test_identityKeyReturnsTheMapIdKey() async throws {
-        let transport = ScriptedHTTP(responses: [
-            (200, Array(#"{"name":"alice","outpoint":"\#(outpoint)"}"#.utf8)),
-            (200, Array(metadataBody(idKeyJSON: "\"\(idKey)\"").utf8)),
-        ])
+    func test_metadataRequestsTheSequenceAndDecodesTheOutpoint() async throws {
+        let latest = String(repeating: "b", count: 64) + "_1"
+        let body = #"{"outpoint":"\#(latest)","origin":"\#(outpoint)","sequence":3,"contentType":"application/op-ns","contentLength":4,"map":{"name":"x"}}"#
+        let transport = ScriptedHTTP(responses: [(200, Array(body.utf8))])
         let client = OpnsClient(transport: transport)
 
-        let key = try await client.identityKey(forName: "alice")
+        let metadata = try await client.metadata(outpoint: outpoint, seq: -1)
         let recorded = await transport.recorded()
 
-        XCTAssertEqual(key, idKey)
-        XCTAssertEqual(recorded.count, 2)
+        XCTAssertEqual(metadata, OrdfsMetadata(
+            outpoint: latest,
+            origin: outpoint,
+            sequence: 3,
+            contentType: "application/op-ns",
+            contentLength: 4
+        ))
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertEqual(recorded[0].method, "GET")
         XCTAssertEqual(
-            recorded[1].url,
+            recorded[0].url,
             OpnsClient.metadataURL(outpoint: outpoint, seq: -1, baseURL: baseURL)
         )
     }
 
-    func test_identityKeyReturnsNilWhenMapIsMissing() async throws {
-        let metadata = #"{"outpoint":"\#(outpoint)","sequence":3,"contentType":"application/op-ns","contentLength":4}"#
+    func test_metadataNeedsAnOutpoint() async {
         let client = OpnsClient(transport: ScriptedHTTP(responses: [
-            (200, Array(#"{"name":"alice","outpoint":"\#(outpoint)"}"#.utf8)),
-            (200, Array(metadata.utf8)),
-        ]))
-
-        let key = try await client.identityKey(forName: "alice")
-
-        XCTAssertNil(key)
-    }
-
-    func test_identityKeyReturnsEmptyStringForAClearedBinding() async throws {
-        let client = OpnsClient(transport: ScriptedHTTP(responses: [
-            (200, Array(#"{"name":"alice","outpoint":"\#(outpoint)"}"#.utf8)),
-            (200, Array(metadataBody(idKeyJSON: "\"\"").utf8)),
-        ]))
-
-        let key = try await client.identityKey(forName: "alice")
-
-        XCTAssertEqual(key, "")
-    }
-
-    func test_identityKeyRefusesANonStringIdKey() async {
-        let client = OpnsClient(transport: ScriptedHTTP(responses: [
-            (200, Array(#"{"name":"alice","outpoint":"\#(outpoint)"}"#.utf8)),
-            (200, Array(metadataBody(idKeyJSON: "5").utf8)),
+            (200, Array(#"{"sequence":3}"#.utf8)),
         ]))
 
         do {
-            _ = try await client.identityKey(forName: "alice")
-            XCTFail("expected a non-string opns.idKey to be refused")
+            _ = try await client.metadata(outpoint: outpoint, seq: -1)
+            XCTFail("expected a body without an outpoint to be refused")
         } catch let error as OneSatClientError {
             XCTAssertEqual(error, .unreadableResponse)
         } catch {
@@ -212,9 +193,5 @@ final class OpnsClientTests: XCTestCase {
         } catch {
             XCTFail("expected OneSatClientError.unreadableResponse, got \(error)")
         }
-    }
-
-    private func metadataBody(idKeyJSON: String) -> String {
-        #"{"outpoint":"\#(outpoint)","sequence":3,"contentType":"application/op-ns","contentLength":4,"map":{"opns.idKey":\#(idKeyJSON)}}"#
     }
 }
