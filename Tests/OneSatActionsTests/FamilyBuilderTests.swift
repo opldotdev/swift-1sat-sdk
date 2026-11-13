@@ -402,7 +402,7 @@ final class FamilyBuilderTests: XCTestCase {
             outputs: [first, second],
             tokenId: ActionVectors.tokenID,
             amount: 100,
-            validOutpoints: nil
+            states: nil
         )
         XCTAssertEqual(selected.selected.count, 2)
         XCTAssertEqual(selected.totalIn, 120)
@@ -451,7 +451,7 @@ final class FamilyBuilderTests: XCTestCase {
             outputs: [output],
             tokenId: ActionVectors.tokenID,
             amount: 80,
-            validOutpoints: nil
+            states: nil
         )
         XCTAssertEqual(selected.totalIn, 80)
         XCTAssertEqual(selected.selected[0].amount, 80)

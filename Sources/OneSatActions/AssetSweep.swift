@@ -1,4 +1,5 @@
 import Foundation
+import BSVCore
 import BSVKeys
 import BSVScript
 import BSVTransaction
@@ -230,7 +231,36 @@ public enum AssetSweep {
         }
     }
 
+    /// `sweepBsv21` response: the action result plus the outpoints it spent.
+    public struct SweepBsv21Result: Equatable, Sendable {
+        public let result: ActionResult
+        /// The inputs the transaction spent, as the caller gave them: those the overlay
+        /// reported valid. `nil` when nothing was spent.
+        public let spentOutpoints: [String]?
+
+        public init(result: ActionResult, spentOutpoints: [String]? = nil) {
+            self.result = result
+            self.spentOutpoints = spentOutpoints
+        }
+
+        public var txid: String? { result.txid }
+        public var tx: [UInt8]? { result.tx }
+        public var actionId: String? { result.actionId }
+        public var error: String? { result.error }
+
+        static func failure(_ error: OneSatActionError) -> Self {
+            Self(result: ActionResult.failure(error))
+        }
+
+        static func failure(_ message: String) -> Self {
+            Self(result: ActionResult.failure(message))
+        }
+    }
+
     /// Consolidates one BSV-21 token onto a P1SAT-derived output plus the overlay fee.
+    ///
+    /// Spends only the inputs the overlay reports `valid`: one invalid input in the transfer
+    /// would burn the valid ones alongside it.
     public static func bsv21(
         _ ctx: OneSatContext,
         inputs: [TokenInput],
@@ -239,31 +269,37 @@ public enum AssetSweep {
         feePerOutput: UInt64,
         symbol: String?,
         decimals: Int
-    ) async -> ActionResult {
+    ) async -> SweepBsv21Result {
+        guard let overlay = ctx.bsv21 else { return .failure(.servicesRequired) }
         do {
-            guard !inputs.isEmpty else { return ActionResult.failure("no-inputs") }
+            guard !inputs.isEmpty else { return .failure("no-inputs") }
             let tokenID = inputs[0].tokenID
             guard inputs.allSatisfy({ $0.tokenID == tokenID }) else {
-                return ActionResult.failure("mixed-token-ids")
+                return .failure("mixed-token-ids")
             }
-            let total = inputs.reduce(UInt64(0)) { $0 + $1.amount }
-            guard total > 0 else { return ActionResult.failure("no-token-amount") }
 
-            if let overlay = ctx.bsv21 {
-                let candidates = try inputs.map { try parseOutpoint($0.outpoint).description }
-                let valid = try await overlay.validateUnspentOutputs(
+            // Outpoints go out as the caller gave them; the overlay echoes them back as sent.
+            let statuses: [Tokens.OutputStatus]
+            do {
+                statuses = try await overlay.outputStatus(
                     tokenId: tokenID,
-                    outpoints: candidates
+                    outpoints: inputs.map(\.outpoint)
                 )
-                let invalid = candidates.filter { !valid.contains($0) }
-                if !invalid.isEmpty {
-                    return ActionResult.failure(
-                        "unvalidated-inputs: \(invalid.joined(separator: ", "))"
-                    )
-                }
+            } catch {
+                return .failure(.overlayValidationFailed)
             }
+            let valid = Set(statuses.filter { $0.state == .valid }.map(\.outpoint))
+            let spending = inputs.filter { valid.contains($0.outpoint) }
+            guard !spending.isEmpty else { return .failure(.unvalidatedInputs) }
 
-            let prepared = try prepareTokenInputs(inputs, inputBEEF: inputBEEF)
+            let total = spending.reduce(UInt64(0)) { $0 + $1.amount }
+            guard total > 0 else { return .failure("no-token-amount") }
+
+            // TS fetches BEEF for the spent txids only; trim the caller's graph to match.
+            let inputBEEF = spending.count == inputs.count
+                ? inputBEEF
+                : try ancestry(of: try spending.map { try parseOutpoint($0.outpoint).transactionID }, in: inputBEEF)
+            let prepared = try prepareTokenInputs(spending, inputBEEF: inputBEEF)
 
             let keyID = "\(tokenID)-\(Int64(Date().timeIntervalSince1970 * 1000))"
             let address = try P1SATKey.address(
@@ -309,7 +345,7 @@ public enum AssetSweep {
 
             let result = try await TrackedAction.execute(
                 ctx,
-                description: "Sweep \(inputs.count) token UTXO\(inputs.count == 1 ? "" : "s")",
+                description: "Sweep \(spending.count) token UTXO\(spending.count == 1 ? "" : "s")",
                 inputBEEF: inputBEEF,
                 inputs: prepared.createInputs,
                 outputs: outputs,
@@ -320,13 +356,14 @@ public enum AssetSweep {
                 }
             )
             if let tx = result.tx {
-                try? await ctx.bsv21?.submitTransfer(tx: tx, tokenId: tokenID)
+                try? await overlay.submitTransfer(tx: tx, tokenId: tokenID)
             }
-            return result
+            guard result.error == nil else { return SweepBsv21Result(result: result) }
+            return SweepBsv21Result(result: result, spentOutpoints: spending.map(\.outpoint))
         } catch let error as OneSatActionError {
-            return ActionResult.failure(error)
+            return .failure(error)
         } catch {
-            return ActionResult.failure(error.localizedDescription)
+            return .failure(error.localizedDescription)
         }
     }
 
@@ -396,6 +433,56 @@ public enum AssetSweep {
             }
         }
         return spends
+    }
+
+    /// The records of `beef` that `transactionIDs` and their ancestors need, in their original
+    /// order. Proofs referenced only by dropped records are dropped and indexes remapped, so the
+    /// funded graph stays an exact ancestry of the spend.
+    static func ancestry(of transactionIDs: [TransactionID], in beef: BEEF) throws -> BEEF {
+        let limits = WalletBEEFLimits.standard
+        var entries: [TransactionID: BEEFTransaction] = [:]
+        for entry in beef.transactions {
+            entries[try entry.transactionID(limits: limits.transactionLimits)] = entry
+        }
+        var needed = Set<TransactionID>()
+        var pending = transactionIDs
+        while let transactionID = pending.popLast() {
+            guard needed.insert(transactionID).inserted,
+                  let transaction = entries[transactionID]?.transaction
+            else { continue }
+            pending.append(contentsOf: transaction.inputs.map(\.previousOutput.transactionID))
+        }
+
+        var retained: [BEEFTransaction] = []
+        var retainedPaths = Set<Int>()
+        var droppedPaths = Set<Int>()
+        for entry in beef.transactions {
+            let keep = needed.contains(try entry.transactionID(limits: limits.transactionLimits))
+            if keep { retained.append(entry) }
+            if let index = entry.merklePathIndex {
+                if keep { retainedPaths.insert(index) } else { droppedPaths.insert(index) }
+            }
+        }
+        var pathMap: [Int: Int] = [:]
+        var paths: [MerklePath] = []
+        for (index, path) in beef.merklePaths.enumerated()
+            where retainedPaths.contains(index) || !droppedPaths.contains(index)
+        {
+            pathMap[index] = paths.count
+            paths.append(path)
+        }
+        let remapped = retained.map { entry -> BEEFTransaction in
+            guard case .rawWithMerklePath(let transaction, let index) = entry,
+                  let mapped = pathMap[index]
+            else { return entry }
+            return .rawWithMerklePath(transaction: transaction, merklePathIndex: mapped)
+        }
+        return try BEEF(
+            version: beef.version,
+            merklePaths: paths,
+            transactions: remapped,
+            limits: limits
+        )
     }
 
     private static func sourceOutputs(_ beef: BEEF) throws -> [String: TransactionOutput] {

@@ -107,6 +107,40 @@ final class TokenPurchaseFlowTests: XCTestCase {
         XCTAssertEqual(bodies.count, 0)
     }
 
+    func test_purchaseFailsWhenOverlayDoesNotReportTheListingValid() async throws {
+        let fixture = try listingFixture()
+        for state in [Tokens.OutputState.queued, .spent, .unknown] {
+            let bsv21 = StubBsv21(details: Self.activeDetails, state: state)
+            let listings = RecordingListingSource(bytes: fixture.beefBytes)
+            let transport = CapturingTransport()
+            let ctx = try dummyContext(
+                identity: try ActionVectors.identity(),
+                transport: transport,
+                bsv21: bsv21,
+                listings: listings
+            )
+            let result = await Tokens.purchase(
+                ctx,
+                Tokens.PurchaseRequest(
+                    tokenId: ActionVectors.tokenID,
+                    outpoint: fixture.outpoint,
+                    amount: 500
+                )
+            )
+            XCTAssertEqual(
+                result.error,
+                OneSatActionError.listingNotFoundInOverlay.wireMessage,
+                state.rawValue
+            )
+            let validateCalls = await bsv21.validateCalls
+            let tokenDetailsCalls = await bsv21.tokenDetailsCalls
+            let listingCalls = await listings.calls
+            XCTAssertEqual(validateCalls.map(\.outpoint), [fixture.outpoint.ordinalDescription])
+            XCTAssertEqual(tokenDetailsCalls, 0)
+            XCTAssertEqual(listingCalls, [])
+        }
+    }
+
     func test_purchaseFailsWhenListingTransactionIsMissing() async throws {
         let fixture = try listingFixture()
         let bsv21 = StubBsv21(details: Self.activeDetails)
@@ -554,13 +588,19 @@ private actor StubBsv21: Bsv21ActionServices {
 
     let details: Bsv21TokenDetails
     let validateError: Error?
+    let state: Tokens.OutputState
     private(set) var tokenDetailsCalls = 0
     private(set) var submitCalls = 0
     private(set) var validateCalls: [Call] = []
 
-    init(details: Bsv21TokenDetails, validateError: Error? = nil) {
+    init(
+        details: Bsv21TokenDetails,
+        validateError: Error? = nil,
+        state: Tokens.OutputState = .valid
+    ) {
         self.details = details
         self.validateError = validateError
+        self.state = state
     }
 
     func tokenDetails(tokenId _: String) async throws -> Bsv21TokenDetails {
@@ -568,13 +608,18 @@ private actor StubBsv21: Bsv21ActionServices {
         return details
     }
 
-    func validateUnspentOutputs(tokenId _: String, outpoints _: [String]) async throws -> Set<String> {
+    func outputStatus(tokenId: String, outpoints: [String]) async throws -> [Tokens.OutputStatus] {
+        validateCalls += outpoints.map { Call(tokenId: tokenId, outpoint: $0) }
+        if let validateError { throw validateError }
+        return outpoints.map { Tokens.OutputStatus(outpoint: $0, state: state) }
+    }
+
+    func fundingTemplate(tokenId _: String) async throws -> Tokens.FundingTemplate {
         throw StubError.unimplemented
     }
 
-    func validateOutput(tokenId: String, outpoint: String) async throws {
-        validateCalls.append(Call(tokenId: tokenId, outpoint: outpoint))
-        if let validateError { throw validateError }
+    func submitFunding(tokenId _: String, beef _: [UInt8]) async throws -> Tokens.OverlayStatus {
+        throw StubError.unimplemented
     }
 
     func submitTransfer(tx _: [UInt8], tokenId _: String) async throws {

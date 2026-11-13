@@ -9,11 +9,11 @@ Swift keeps the same boundary as the current TypeScript stack:
 - Native UI renders `OneSatAssetPermissionReview`; it does not reclassify scripts or trust tags.
 
 For BSV21, a review starts `unverified`. `Bsv21PermissionVerifier` checks the current token detail
-and, when available, every spent token outpoint against the overlay with `unspent=true`. Both the
+and, when available, the overlay state of every spent token outpoint (`outputs/status`). Both the
 response `tokenId` and nested `token.id` must identify the token that was requested.
-An inactive token, conflicting symbol, or missing input is `mismatch`. Missing services, HTTP
-errors, malformed responses, and timeouts stay `unverified` and never crash or suppress the
-approval prompt. A `verified` result describes that lookup only and must not be persisted as an
+An inactive token, conflicting symbol, or a `spent` or `unknown` input is `mismatch`. A `queued`
+input, missing services, HTTP errors, malformed or incomplete responses, and timeouts stay
+`unverified` and never crash or suppress the approval prompt. A `verified` result describes that lookup only and must not be persisted as an
 asset property.
 
 This matches `@1sat/permission-module` / `@1sat/permission-module-ui` and Yours Wallet v5.0.3.

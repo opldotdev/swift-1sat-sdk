@@ -14,6 +14,13 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case tokenNotActive
     case overlayValidationFailed
     case insufficientTokens
+    case insufficientValidTokens
+    /// Queued overlay outputs would cover the amount once indexed.
+    case tokensQueued
+    case tokenNotFound
+    case unvalidatedInputs
+    case fundingNotNeeded
+    case fundingSubmitFailed
     case noBeefAvailable
     case noLockRequests
     case invalidSatoshis
@@ -81,6 +88,18 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "overlay-validation-failed"
         case .insufficientTokens:
             return "insufficient-tokens"
+        case .insufficientValidTokens:
+            return "insufficient-valid-tokens"
+        case .tokensQueued:
+            return "tokens-queued"
+        case .tokenNotFound:
+            return "token-not-found"
+        case .unvalidatedInputs:
+            return "unvalidated-inputs"
+        case .fundingNotNeeded:
+            return "funding-not-needed"
+        case .fundingSubmitFailed:
+            return "funding-submit-failed"
         case .noBeefAvailable:
             return "no-beef-available"
         case .noLockRequests:
