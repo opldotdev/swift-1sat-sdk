@@ -475,6 +475,31 @@ final class FamilyBuilderTests: XCTestCase {
         XCTAssertEqual(tracked.labels, [])
     }
 
+    func test_trackedActionKeepsAnIdTagAlreadyStampedForThisAction() throws {
+        let stamped = try WalletCreateActionOutput(
+            lockingScript: [0x51],
+            satoshis: 1,
+            outputDescription: "Inscription",
+            basket: OneSatConstants.ordinalsBasket,
+            tags: ["type:text/plain", TrackedAction.idTag("aabbccdd", index: 0), "creator:1abc"]
+        )
+        let wrongIndex = try WalletCreateActionOutput(
+            lockingScript: [0x51],
+            satoshis: 1,
+            outputDescription: "Inscription",
+            basket: OneSatConstants.ordinalsBasket,
+            tags: ["id:aabbccdd_0", "creator:1abc"]
+        )
+        let tracked = try TrackedAction.applyTracking(
+            outputs: [stamped, wrongIndex],
+            labels: [],
+            actionID: "aabbccdd",
+            bypassP1Sat: false
+        )
+        XCTAssertEqual(tracked.outputs[0].tags, ["type:text/plain", "id:aabbccdd_0", "creator:1abc"])
+        XCTAssertEqual(tracked.outputs[1].tags, ["creator:1abc", "id:aabbccdd_1"])
+    }
+
     func test_trackedActionRequestCarriesInputBEEF() throws {
         let source = Transaction(
             version: 1,

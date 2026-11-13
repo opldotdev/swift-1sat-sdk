@@ -57,6 +57,31 @@ final class DeployOrdfsDirTests: XCTestCase {
         XCTAssertTrue(response.error?.contains("path collision") == true, "\(String(describing: response.error))")
     }
 
+    func test_signedBLayoutErrorsComeBeforeTheBapLookup() async throws {
+        let transport = DeployTransport(listResult: ["totalOutputs": 0, "outputs": []])
+        let response = await DeployOrdfsDir.execute(
+            try context(transport),
+            DeployOrdfsDir.Request(files: files + files, writeMode: .b)
+        )
+        XCTAssertTrue(response.error?.contains("path collision") == true, "\(String(describing: response.error))")
+        let methods = await transport.methods
+        XCTAssertEqual(methods, [])
+    }
+
+    func test_signedBWithoutABapIdentityStopsBeforeCreateAction() async throws {
+        let transport = DeployTransport(listResult: ["totalOutputs": 0, "outputs": []])
+        let response = await DeployOrdfsDir.execute(
+            try context(transport),
+            DeployOrdfsDir.Request(files: files, writeMode: .b)
+        )
+        XCTAssertEqual(
+            response.error,
+            "No BAP identity published — cannot resolve current signing key. Publish an identity before signing."
+        )
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["listOutputs"])
+    }
+
     // MARK: createAction requests
 
     func test_unsignedMixedPublishBasketsOnlyTheOrdinalRoot() async throws {
@@ -196,6 +221,17 @@ final class DeployOrdfsDirTests: XCTestCase {
         XCTAssertEqual(creates.map { $0["description"] as? String }, ["Sigma anchor output", "Publish ord-fs directory"])
         let anchorOptions = try XCTUnwrap(creates[0]["options"] as? [String: Any])
         XCTAssertEqual(anchorOptions["noSend"] as? Bool, true)
+        XCTAssertEqual(anchorOptions["randomizeOutputs"] as? Bool, false)
+        XCTAssertEqual(anchorOptions["acceptDelayedBroadcast"] as? Bool, true)
+        XCTAssertEqual(creates[0]["labels"] as? [String], [])
+        let anchorOutputs = try XCTUnwrap(creates[0]["outputs"] as? [[String: Any]])
+        XCTAssertEqual(anchorOutputs[0]["outputDescription"] as? String, "Sigma anchor")
+        XCTAssertEqual(anchorOutputs[0]["tags"] as? [String], [])
+        let anchorKeyID = try CustomInstructions.parse(
+            try XCTUnwrap(anchorOutputs[0]["customInstructions"] as? String)
+        ).keyID
+        XCTAssertTrue(anchorKeyID.hasPrefix("anchor-"))
+        let actionID = String(anchorKeyID.dropFirst("anchor-".count))
 
         let main = creates[1]
         let inputs = try XCTUnwrap(main["inputs"] as? [[String: Any]])
@@ -205,19 +241,34 @@ final class DeployOrdfsDirTests: XCTestCase {
             (inputs[0]["unlockingScriptLength"] as? NSNumber)?.intValue,
             Int(OneSatConstants.p2pkhUnlockingScriptLength)
         )
+        XCTAssertEqual(inputs[0]["inputDescription"] as? String, "Sigma anchor")
+        // The publish is not noSend: it goes out with the anchor in its sendWith batch.
         let options = try XCTUnwrap(main["options"] as? [String: Any])
-        XCTAssertEqual(options["noSend"] as? Bool, true)
+        XCTAssertEqual(options["noSend"] as? Bool, false)
+        XCTAssertEqual(main["isNoSend"] as? Bool, false)
+        XCTAssertEqual(main["isSendWith"] as? Bool, true)
         XCTAssertEqual(options["randomizeOutputs"] as? Bool, false)
+        XCTAssertEqual(options["acceptDelayedBroadcast"] as? Bool, true)
         XCTAssertEqual(options["knownTxids"] as? [String], [anchorTxid])
         XCTAssertEqual(options["sendWith"] as? [String], [anchorTxid])
-        XCTAssertEqual(options["noSendChange"] as? [String], ["\(anchorTxid).1"])
+        // Storage reads noSendChange only on a noSend action, so the publish carries none.
+        XCTAssertEqual(options["noSendChange"] as? [String], [])
 
-        // The signed publish spends the anchor at input 0 (the SIGMA reference input) and the
-        // anchor's noSend change as funding.
+        // The signed publish spends the anchor at input 0 (the SIGMA reference input), signed
+        // with the anchor key, and storage's own funding after it.
         let tx = publish.transaction
-        XCTAssertEqual(tx.inputs.map(\.previousOutput.description), ["\(anchorTxid).0", "\(anchorTxid).1"])
-        XCTAssertFalse(tx.inputs[0].unlockingScript.bytes.isEmpty)
-        XCTAssertFalse(tx.inputs[1].unlockingScript.bytes.isEmpty)
+        XCTAssertEqual(tx.inputs.count, 2)
+        XCTAssertEqual(tx.inputs[0].previousOutput.description, "\(anchorTxid).0")
+        XCTAssertNotEqual(tx.inputs[1].previousOutput.transactionID.displayHex, anchorTxid)
+        let anchorKey = try P1SATKey.privateKey(identity: identity, keyID: anchorKeyID)
+        let anchorUnlock = try tx.inputs[0].unlockingScript.operations(
+            maximumPushDataByteCount: ActionScript.maximumByteCount
+        )
+        XCTAssertEqual(anchorUnlock.last?.pushedData, anchorKey.publicKey.compressedBytes)
+        XCTAssertEqual(
+            try ActionScript.payToPublicKeyHash(Address(publicKey: anchorKey.publicKey, network: .mainnet)).bytes,
+            anchor.transaction.outputs[0].lockingScript.bytes
+        )
 
         // Origins name the requested outputs in the signed transaction; change follows them.
         let requested = try XCTUnwrap(main["outputs"] as? [[String: Any]])
@@ -233,11 +284,64 @@ final class DeployOrdfsDirTests: XCTestCase {
         let root = tx.outputs[3].lockingScript
         XCTAssertEqual(try XCTUnwrap(Inscription.decode(root)).content, Array(#"{"a.md":"_0","refs":"_2"}"#.utf8))
         let creator = try assertSigmaSigned(root, anchorTxid: anchorTxid, identity: identity)
-        let rootTags = try XCTUnwrap(requested[3]["tags"] as? [String])
-        XCTAssertTrue(rootTags.contains("creator:\(creator)"))
-        XCTAssertTrue(rootTags.contains("type:ord-fs/json"))
-        XCTAssertTrue(rootTags.contains("origin"))
+        // Manifest tags, then the action id the anchor key was named after, then `creator:`.
+        XCTAssertEqual(
+            requested[3]["tags"] as? [String],
+            ["type:ord-fs/json", "origin", "id:\(actionID)_3", "creator:\(creator)"]
+        )
         XCTAssertEqual(requested[3]["basket"] as? String, OneSatConstants.ordinalsBasket)
+        XCTAssertEqual(requested[3]["outputDescription"] as? String, "manifest (ord-fs/json)")
+        for output in requested.dropLast() {
+            XCTAssertNil(output["basket"])
+            XCTAssertEqual(output["tags"] as? [String], [])
+        }
+    }
+
+    func test_sigmaPublishRequestMatchesTheApplyStepOptions() throws {
+        let anchorTxid = String(repeating: "ab", count: 32)
+        let options = DeployOrdfsDir.sigmaPublishOptions(anchorTxid: anchorTxid)
+        XCTAssertEqual(options, TrackedAction.Options(
+            randomizeOutputs: false,
+            acceptDelayedBroadcast: true,
+            knownTxids: [anchorTxid],
+            sendWith: [anchorTxid],
+            trustSelf: .known
+        ))
+        XCTAssertFalse(options.noSend)
+
+        let request = try TrackedAction.request(
+            description: DeployOrdfsDir.description,
+            outputs: [],
+            actionID: "aabbccdd",
+            options: options
+        )
+        let wire = try XCTUnwrap(request.options)
+        XCTAssertEqual(wire.trustSelf, .known)
+        XCTAssertNotEqual(wire.noSend, true)
+        XCTAssertEqual(wire.signAndProcess, false)
+        XCTAssertEqual(wire.sendWith?.map(\.displayHex), [anchorTxid])
+        XCTAssertEqual(wire.knownTransactionIDs?.map(\.displayHex), [anchorTxid])
+        XCTAssertNil(wire.noSendChange)
+        XCTAssertEqual(DeployOrdfsDir.sigmaAnchorKeyID("aabbccdd"), "anchor-aabbccdd")
+    }
+
+    func test_rejectedBroadcastReportsNoTxidReturned() async throws {
+        let transport = PublishTransport(sendWithStatus: "failed")
+        let response = await DeployOrdfsDir.execute(
+            try publishContext(transport),
+            DeployOrdfsDir.Request(files: files)
+        )
+        XCTAssertEqual(response.error, "no-txid-returned")
+        XCTAssertNil(response.txid)
+        XCTAssertNil(response.origins)
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["createAction", "processAction", "listOutputs", "createAction", "processAction"])
+    }
+
+    func test_publishErrorPassesWalletFailuresThrough() {
+        XCTAssertEqual(DeployOrdfsDir.publishError(nil), "no-txid-returned")
+        XCTAssertEqual(DeployOrdfsDir.publishError("broadcast-sending"), "no-txid-returned")
+        XCTAssertEqual(DeployOrdfsDir.publishError("insufficient funds"), "insufficient funds")
     }
 
     func test_signedMixedPublishWithoutMapSealsTheRootBehindOpReturn() async throws {
@@ -451,8 +555,10 @@ private actor DeployTransport: AuthenticatedTransport {
 ///
 /// `createAction` echoes the requested outputs at their own vouts and adds BRC-29 change. Caller
 /// inputs and `noSendChange` outpoints are resolved from the request's `inputBEEF` (the change
-/// as derivation-signed funding); an action with neither is funded from a fresh OP_TRUE source.
-/// `processAction` decodes the signed Atomic BEEF and reports every `sendWith` txid unproven.
+/// as derivation-signed funding); an action without `noSendChange` is funded from a fresh
+/// OP_TRUE source added to that graph.
+/// `processAction` decodes the signed Atomic BEEF and reports every `sendWith` txid with
+/// `sendWithStatus` (unproven unless a test asks otherwise).
 private actor PublishTransport: AuthenticatedTransport {
     struct Processed: Sendable {
         let txid: String
@@ -469,6 +575,11 @@ private actor PublishTransport: AuthenticatedTransport {
     private(set) var bodies: [[UInt8]] = []
     private(set) var processed: [Processed] = []
     private var nextReference = 0
+    private let sendWithStatus: String
+
+    init(sendWithStatus: String = "unproven") {
+        self.sendWithStatus = sendWithStatus
+    }
 
     func send(
         method: String,
@@ -514,26 +625,8 @@ private actor PublishTransport: AuthenticatedTransport {
 
         var inputs: [[String: Any]] = []
         var paidIn: UInt64 = 0
-        let inputBeef: [UInt8]
-        if requestedInputs.isEmpty, change.isEmpty {
-            let sourceLock = try Script(bytes: [0x51], maximumByteCount: 10_000)
-            let source = Transaction(
-                version: 1,
-                inputs: [],
-                outputs: [TransactionOutput(satoshis: 10_000, lockingScript: sourceLock)],
-                lockTime: 0
-            )
-            inputBeef = try BEEF(merklePaths: [], transactions: [.raw(source)], limits: WalletBEEFLimits.standard)
-                .serialized(limits: WalletBEEFLimits.standard)
-            inputs.append([
-                "sourceTxid": try source.transactionID(limits: WalletTransactionLimits.standard).displayHex,
-                "sourceVout": 0,
-                "sourceSatoshis": 10_000,
-                "sourceLockingScript": sourceLock.hex,
-                "unlockingScriptLength": 108,
-            ])
-            paidIn = 10_000
-        } else {
+        var inputBeef: [UInt8] = []
+        if !requestedInputs.isEmpty || !change.isEmpty {
             inputBeef = (args["inputBEEF"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.uint8Value }
             let graph = try BEEF(bytes: inputBeef, limits: WalletBEEFLimits.standard)
             for input in requestedInputs {
@@ -550,6 +643,33 @@ private actor PublishTransport: AuthenticatedTransport {
                 ]) { $1 })
                 paidIn += source.output.satoshis
             }
+        }
+        if change.isEmpty {
+            // Fund from a fresh OP_TRUE source, added to whatever graph the caller sent. The lock
+            // time makes each source distinct from one already in that graph.
+            let sourceLock = try Script(bytes: [0x51], maximumByteCount: 10_000)
+            let source = Transaction(
+                version: 1,
+                inputs: [],
+                outputs: [TransactionOutput(satoshis: 10_000, lockingScript: sourceLock)],
+                lockTime: UInt32(nextReference)
+            )
+            let graph = inputBeef.isEmpty
+                ? try BEEF(merklePaths: [], transactions: [], limits: WalletBEEFLimits.standard)
+                : try BEEF(bytes: inputBeef, limits: WalletBEEFLimits.standard)
+            inputBeef = try BEEF(
+                merklePaths: graph.merklePaths,
+                transactions: graph.transactions + [.raw(source)],
+                limits: WalletBEEFLimits.standard
+            ).serialized(limits: WalletBEEFLimits.standard)
+            inputs.append([
+                "sourceTxid": try source.transactionID(limits: WalletTransactionLimits.standard).displayHex,
+                "sourceVout": 0,
+                "sourceSatoshis": 10_000,
+                "sourceLockingScript": sourceLock.hex,
+                "unlockingScriptLength": 108,
+            ])
+            paidIn += 10_000
         }
 
         var outputRows: [[String: Any]] = requested.enumerated().map { index, output in
@@ -597,7 +717,7 @@ private actor PublishTransport: AuthenticatedTransport {
             sendWith: sendWith,
             isSendWith: args["isSendWith"] as? Bool ?? false
         ))
-        return ["sendWithResults": sendWith.map { ["txid": $0, "status": "unproven"] }]
+        return ["sendWithResults": sendWith.map { ["txid": $0, "status": sendWithStatus] }]
     }
 
     /// The source output an outpoint names, as a `createAction` input row.
