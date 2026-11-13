@@ -35,14 +35,23 @@ public struct ColorAdmittance: Equatable, Sendable {
 }
 
 /// The overlay a BRC-207 wallet asks whether a token output is admitted and unspent, and submits
-/// token transactions to. The module's `ColorOverlayProvider`.
+/// token transactions to. The `ColorOverlayProvider` of `@bopen-io/color-permission-module`.
 ///
-/// - `spendability`: the queried outpoints the asset's overlay reports admitted and unspent.
-/// - `admission`: the queried outpoints the overlay ever admitted (used for the deploy).
-/// - `submit`: BRC-22 submit of BEEF to topics; returns the STEAK.
+/// - `spendability`: BRC-207 `color-spendability`, the queried outpoints admitted and unspent in
+///   `tm_color_<assetId>`.
+/// - `admission`: BRC-207 `color-admission`, the queried outpoints ever admitted, spent or unspent
+///   (used to read the deploy).
+/// - `submit`: BRC-22 submit of BEEF to each topic (`tm_color_<assetId>`, or `tm_color` for a
+///   deploy); returns the STEAK.
 ///
-/// The lookup service behind the first two is the host's: no TypeScript source fixes its name or
-/// query shape, so it is injected rather than assumed.
+/// The wallet supplies the provider and decides which overlays it trusts. The TypeScript wallet's
+/// provider is wallet code, not `@1sat`: Yours' `src/services/colorOverlay.ts`
+/// (`createColorOverlayProvider`) resolves each asset to one overlay origin and asks BRC-24 service
+/// `ls_color_<assetId>` with the query
+/// `{type, version: 1, assetId, topic: "tm_color_<assetId>", outpoints}` (`type` is
+/// `color-spendability` or `color-admission`), accepting only an `output-list` answer. That
+/// routing belongs to the app, so `HTTPColorOverlay` here supplies the BRC-22 submit and takes the
+/// lookup as a closure.
 public protocol ColorOverlayProvider: Sendable {
     func spendability(assetID: ColorAssetID, outpoints: [String]) async throws -> ColorOutputList
     func admission(assetID: ColorAssetID, outpoints: [String]) async throws -> ColorOutputList
