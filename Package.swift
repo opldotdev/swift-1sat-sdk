@@ -17,6 +17,8 @@ let publicModules = [
     "OneSatAddresses",
     "OneSatActions",
     "OneSatCBOR",
+    "OneSatColor",
+    "OneSatMetanet",
 ]
 
 let package = Package(
@@ -41,7 +43,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "5d8f7812539fa55539242d30fd720ecaea2c5908"
+            revision: "e0aa531b7836e6730da37a9a920b27f301f1bcc9"
         ),
     ],
     targets: [
@@ -120,6 +122,48 @@ let package = Package(
             ]
         ),
 
+        // BRC-207 color custody for 1Color (BRC-162): identifiers, action plans, receipts, overlay
+        // admission and spendability. Wire-compatible with `@bopen-io/color-permission-module`
+        // 0.2.2, so a Swift wallet and a TS wallet can share one storage account.
+        // Metanet delivery: BRC-169 handles and signed envelopes, BRC-78 framing, BRC-232
+        // transaction delivery, and the BRC-231 DAG-CBOR message relay. Ported from
+        // `@1sat/actions` `metanet/` and `@1sat/client` handles.
+        .target(
+            name: "OneSatMetanet",
+            dependencies: [
+                "OneSatCBOR",
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVCrypto", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxWallet", package: "swift-wallet-toolbox"),
+            ]
+        ),
+
+        // The 1Color actions (deploy, send, balances, inbox receive) live here too, above
+        // `OneSatActions` and `OneSatMetanet`, so neither of those depends on the other.
+        .target(
+            name: "OneSatColor",
+            dependencies: [
+                "OneSatTemplates",
+                "OneSatCBOR",
+                "OneSatActions",
+                "OneSatMetanet",
+                .product(name: "BSVInterpreter", package: "swift-sdk"),
+                .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVCrypto", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
+                .product(name: "BSVOverlay", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+            ]
+        ),
+
         // Action families from `@1sat/actions`: tracked create/sign, ordinals, inscribe,
         // BSV-21 transfer, locks, and marketplace. Spend-side unlock templates live here.
         .target(
@@ -152,6 +196,40 @@ let package = Package(
                 .product(name: "BSVKeys", package: "swift-sdk"),
                 .product(name: "BSVTransaction", package: "swift-sdk"),
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
+            ]
+        ),
+        .testTarget(
+            name: "OneSatMetanetTests",
+            dependencies: [
+                "OneSatMetanet",
+                "OneSatCBOR",
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVCrypto", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+            ],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "OneSatColorTests",
+            dependencies: [
+                "OneSatColor",
+                "OneSatTemplates",
+                "OneSatActions",
+                "OneSatMetanet",
+                "OneSatCBOR",
+                .product(name: "BSVInterpreter", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxCore", package: "swift-wallet-toolbox"),
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
             ]
         ),
         .testTarget(
