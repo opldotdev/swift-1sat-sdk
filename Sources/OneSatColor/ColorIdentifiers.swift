@@ -213,6 +213,7 @@ public enum ColorError: Error, Equatable, Sendable, LocalizedError {
     case receiptTooLarge
     case overlay(String)
     case custody(String)
+    case unsupportedProfiles
 
     public var errorDescription: String? {
         switch self {
@@ -222,6 +223,7 @@ public enum ColorError: Error, Equatable, Sendable, LocalizedError {
         case .receiptTooLarge: "BRC-207: receipt exceeds 1000 bytes"
         case .overlay(let reason): "BRC-207: \(reason)"
         case .custody(let reason): "BRC-207: \(reason)"
+        case .unsupportedProfiles: "BRC-207: the asset requires processing profiles this wallet does not support"
         }
     }
 }
