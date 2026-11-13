@@ -67,8 +67,8 @@ public enum OrdLockV2Spend {
             let payout = try OrdLockV2.payoutOutput(listing)
             return TransactionOutput(satoshis: payout.satoshis, lockingScript: payout.script)
         }
-        let totalPayout = payouts.reduce(UInt64(0)) { $0 + $1.satoshis }
-        let front = frontSatoshis.reduce(UInt64(0), +)
+        let totalPayout = try checkedSum(payouts.map(\.satoshis), "payout")
+        let front = try checkedSum(frontSatoshis, "front funding")
         guard front >= totalPayout else {
             throw refused(
                 "OrdLockV2.planPurchase: front funding \(front) does not cover payouts \(totalPayout)"
@@ -123,11 +123,11 @@ public enum OrdLockV2Spend {
                     "OrdLockV2: input \(index) has no source satoshis; cannot map the ordinal from input \(inputIndex)"
                 )
             }
-            offset += source.satoshis
+            offset = try checkedAdd(offset, source.satoshis, "input")
         }
         var accumulated: UInt64 = 0
         for (vout, output) in transaction.outputs.enumerated() {
-            let next = accumulated + output.satoshis
+            let next = try checkedAdd(accumulated, output.satoshis, "output")
             if offset < next { return vout }
             accumulated = next
         }
@@ -175,6 +175,20 @@ public enum OrdLockV2Spend {
             )
         }
         return vout
+    }
+
+    /// Satoshi totals come from listing scripts and caller amounts; an overflow
+    /// is refused, never trapped.
+    static func checkedSum(_ values: [UInt64], _ what: String) throws -> UInt64 {
+        try values.reduce(UInt64(0)) { try checkedAdd($0, $1, what) }
+    }
+
+    static func checkedAdd(_ lhs: UInt64, _ rhs: UInt64, _ what: String) throws -> UInt64 {
+        let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+        guard !overflow else {
+            throw refused("OrdLockV2: \(what) satoshi total overflows")
+        }
+        return sum
     }
 
     private static func refused(_ message: String) -> OneSatActionError {

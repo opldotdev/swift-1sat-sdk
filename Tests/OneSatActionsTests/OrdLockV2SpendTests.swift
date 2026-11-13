@@ -101,6 +101,68 @@ final class OrdLockV2SpendTests: XCTestCase {
         ) { self.assertRefused($0, containing: "exactly 1 satoshi") }
     }
 
+    /// Totals derived from listing scripts and front funding refuse overflow
+    /// instead of trapping.
+    func test_planRefusesOverflowingPayoutAndFrontFundingTotals() throws {
+        let huge = try listing(price: UInt64.max)
+        XCTAssertThrowsError(
+            try OrdLockV2Spend.planPurchase(
+                frontSatoshis: [UInt64.max], listings: [huge, huge],
+                receives: [try receive(), try receive()],
+                cushionScript: try buyerScript()
+            )
+        ) { self.assertRefused($0, containing: "payout satoshi total overflows") }
+        let lock = try listing(price: 1_000)
+        XCTAssertThrowsError(
+            try OrdLockV2Spend.planPurchase(
+                frontSatoshis: [UInt64.max, 1], listings: [lock], receives: [try receive()],
+                cushionScript: try buyerScript()
+            )
+        ) { self.assertRefused($0, containing: "front funding satoshi total overflows") }
+    }
+
+    func test_ordinalOutputRefusesOverflowingInputAndOutputTotals() throws {
+        let script = try buyerScript()
+        let empty = try Script(bytes: [], maximumByteCount: 10)
+        func input(_ satoshis: UInt64, _ vout: UInt32) throws -> TransactionInput {
+            TransactionInput(
+                previousOutput: Outpoint(
+                    transactionID: try TransactionID(displayHex: String(repeating: "cd", count: 32)),
+                    outputIndex: vout
+                ),
+                unlockingScript: empty,
+                sourceOutput: TransactionOutput(satoshis: satoshis, lockingScript: script)
+            )
+        }
+        let inputs = try [input(UInt64.max, 0), input(1, 1), input(1, 2)]
+        let wide = Transaction(version: 1, inputs: inputs, outputs: [
+            TransactionOutput(satoshis: 1, lockingScript: script),
+        ], lockTime: 0)
+        XCTAssertThrowsError(try OrdLockV2Spend.ordinalOutput(transaction: wide, inputIndex: 2)) {
+            self.assertRefused($0, containing: "input satoshi total overflows")
+        }
+        let outputs = Transaction(version: 1, inputs: try [input(UInt64.max, 0), input(1, 1)], outputs: [
+            TransactionOutput(satoshis: UInt64.max, lockingScript: script),
+            TransactionOutput(satoshis: UInt64.max, lockingScript: script),
+        ], lockTime: 0)
+        XCTAssertThrowsError(try OrdLockV2Spend.ordinalOutput(transaction: outputs, inputIndex: 1)) {
+            self.assertRefused($0, containing: "output satoshi total overflows")
+        }
+    }
+
+    func test_selectFrontFundingDoesNotTrapOnHugeCandidates() throws {
+        let candidates = try [UInt64.max - 1, UInt64.max - 1].enumerated().map { index, satoshis in
+            OrdLockV2Purchase.FundingCandidate(
+                outpoint: try Outpoint(String(repeating: "ef", count: 32) + ".\(index)"),
+                satoshis: satoshis,
+                instructions: try CustomInstructions(keyID: "ordlock-funding \(index)")
+            )
+        }
+        XCTAssertEqual(
+            OrdLockV2Purchase.selectFrontFunding(candidates, needed: UInt64.max)?.count, 2
+        )
+    }
+
     // MARK: - purchase unlock
 
     func test_purchaseUnlockIsAPreimageAndOpZeroThatTheContractAccepts() throws {

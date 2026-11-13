@@ -97,7 +97,7 @@ public enum AssetSweep {
                     try WalletCreateActionInput(
                         outpoint: parsed,
                         inputDescription: "Ordinal \(keyID)",
-                        unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
+                        unlockingScriptLength: legacyUnlockingScriptLength(source)
                     )
                 )
                 outputs.append(try ordinalOutput(ctx, input: input, keyID: keyID))
@@ -180,7 +180,7 @@ public enum AssetSweep {
             let total = inputs.reduce(UInt64(0)) { $0 + $1.amount }
             guard total > 0 else { return ActionResult.failure("no-token-amount") }
 
-            let prepared = try prepareTokenInputs(inputs)
+            let prepared = try prepareTokenInputs(inputs, inputBEEF: inputBEEF)
             let keyID = "bsv20:\(tick)-\(Int64(Date().timeIntervalSince1970 * 1000))"
             let address = try P1SATKey.address(
                 identity: ctx.identity,
@@ -263,7 +263,7 @@ public enum AssetSweep {
                 }
             }
 
-            let prepared = try prepareTokenInputs(inputs)
+            let prepared = try prepareTokenInputs(inputs, inputBEEF: inputBEEF)
 
             let keyID = "\(tokenID)-\(Int64(Date().timeIntervalSince1970 * 1000))"
             let address = try P1SATKey.address(
@@ -331,8 +331,10 @@ public enum AssetSweep {
     }
 
     private static func prepareTokenInputs(
-        _ inputs: [TokenInput]
+        _ inputs: [TokenInput],
+        inputBEEF: BEEF
     ) throws -> (createInputs: [WalletCreateActionInput], keysByOutpoint: [String: PrivateKey]) {
+        let sources = try sourceOutputs(inputBEEF)
         var createInputs: [WalletCreateActionInput] = []
         var keysByOutpoint: [String: PrivateKey] = [:]
         for input in inputs {
@@ -343,11 +345,22 @@ public enum AssetSweep {
                 try WalletCreateActionInput(
                     outpoint: parsed,
                     inputDescription: "Token input \(parsed.ordinalDescription)",
-                    unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
+                    unlockingScriptLength: legacyUnlockingScriptLength(sources[parsed.description])
                 )
             )
         }
         return (createInputs, keysByOutpoint)
+    }
+
+    /// Unlock reservation for a legacy input: an OrdLock v2 listing is spent by
+    /// its cancel branch (up to ``OrdLockV2/cancelUnlockLength`` bytes), anything
+    /// else by P2PKH. TS reserves the P2PKH length for both, which under-sizes
+    /// the fee for a swept listing.
+    static func legacyUnlockingScriptLength(_ source: TransactionOutput?) -> UInt32 {
+        guard let source, OrdLockV2.isOrdLockV2(source.lockingScript) else {
+            return OneSatConstants.p2pkhUnlockingScriptLength
+        }
+        return UInt32(OrdLockV2.cancelUnlockLength)
     }
 
     static func signLegacyInputs(

@@ -67,8 +67,10 @@ public enum OrdLockV2Purchase {
         var sum: UInt64 = 0
         for candidate in ascending.reversed() {
             picked.append(candidate)
-            sum += candidate.satoshis
-            if sum >= needed { return picked }
+            let (next, overflow) = sum.addingReportingOverflow(candidate.satoshis)
+            // A sum past UInt64.max covers any payout; planPurchase refuses the overflow.
+            if overflow || next >= needed { return picked }
+            sum = next
             if picked.count >= maximumFrontInputs { break }
         }
         return nil

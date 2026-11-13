@@ -6,6 +6,10 @@ import BSVTransaction
 import BSVWallet
 import OneSatTemplates
 import ToolboxActions
+import Foundation
+import ToolboxAuth
+import ToolboxStorage
+import ToolboxStorageClient
 import XCTest
 @testable import OneSatActions
 
@@ -47,6 +51,58 @@ final class OrdLockDelistingTests: XCTestCase {
             privateKey: fixture.key, transaction: actual, inputIndex: 1
         )
         XCTAssertThrowsError(try execute(plain, inputIndex: 1, fixture: fixture))
+    }
+
+    /// A legacy sweep reserves the v2 cancel length for a listing input, and the
+    /// signed cancel fits it while overrunning the P2PKH reservation TS uses.
+    func test_legacySweepReservesTheV2CancelLengthForListingInputs() async throws {
+        let fixture = try fixture()
+        let transport = CapturingTransport()
+        let ctx = OneSatContext(
+            identity: fixture.key,
+            storage: StorageClient(endpoint: URL(string: "https://example.invalid")!, transport: transport),
+            auth: AuthID(identityKey: Hex.encode(fixture.key.publicKey.compressedBytes))
+        )
+        let inputs = try (0..<2).map { index in
+            AssetSweep.OrdinalInput(
+                outpoint: fixture.spend.inputs[index].previousOutput.description,
+                satoshis: 1,
+                lockingScript: fixture.source.outputs[index].lockingScript.bytes,
+                contentType: "text/plain",
+                origin: nil,
+                name: nil,
+                key: fixture.key
+            )
+        }
+        _ = await AssetSweep.ordinals(ctx, inputs: inputs, inputBEEF: fixture.beef)
+
+        let bodies = await transport.bodies
+        let create = try XCTUnwrap(bodies.compactMap { body -> [String: Any]? in
+            guard let object = try? JSONSerialization.jsonObject(with: Data(body)) as? [String: Any],
+                  object["method"] as? String == "createAction",
+                  let params = object["params"] as? [Any], params.count >= 2
+            else { return nil }
+            return params[1] as? [String: Any]
+        }.first)
+        let wireInputs = try XCTUnwrap(create["inputs"] as? [[String: Any]])
+        let reserved = wireInputs.map { ($0["unlockingScriptLength"] as? NSNumber)?.intValue }
+        XCTAssertEqual(reserved, [Int(OneSatConstants.p2pkhUnlockingScriptLength), OrdLockV2.cancelUnlockLength])
+
+        // The real unlocks fit their reservations; the cancel would not fit 108.
+        let spends = try AssetSweep.signLegacyInputs(
+            transaction: fixture.spend, keysByOutpoint: fixture.keys, inputBEEF: fixture.beef
+        )
+        let cancel = try XCTUnwrap(spends[1]).bytes.count
+        XCTAssertLessThanOrEqual(cancel, OrdLockV2.cancelUnlockLength)
+        XCTAssertGreaterThan(cancel, Int(OneSatConstants.p2pkhUnlockingScriptLength))
+        XCTAssertLessThanOrEqual(try XCTUnwrap(spends[0]).bytes.count, Int(OneSatConstants.p2pkhUnlockingScriptLength))
+        XCTAssertEqual(
+            AssetSweep.legacyUnlockingScriptLength(fixture.source.outputs[1]),
+            UInt32(OrdLockV2.cancelUnlockLength)
+        )
+        XCTAssertEqual(
+            AssetSweep.legacyUnlockingScriptLength(nil), OneSatConstants.p2pkhUnlockingScriptLength
+        )
     }
 
     func test_wrongOwnerAndMissingBEEFSourceCannotProduceACancellation() throws {
@@ -132,5 +188,20 @@ final class OrdLockDelistingTests: XCTestCase {
                 transactionLimits: limits
             )
         )
+    }
+}
+
+private actor CapturingTransport: AuthenticatedTransport {
+    private(set) var bodies: [[UInt8]] = []
+
+    func send(
+        method: String,
+        path: String,
+        query: String?,
+        headers: [String: String],
+        body: [UInt8]?
+    ) async throws -> AuthenticatedResponse {
+        bodies.append(body ?? [])
+        throw AuthTransportError.notImplemented("offline")
     }
 }
