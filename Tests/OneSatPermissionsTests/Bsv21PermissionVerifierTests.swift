@@ -7,7 +7,7 @@ final class Bsv21PermissionVerifierTests: XCTestCase {
     private let input = String(repeating: "b", count: 64) + ".2"
 
     func test_activeTokenAndValidInputsAreVerified() async {
-        let verifier = makeVerifier(outputs: [.init(outpoint: canonical(input))])
+        let verifier = makeVerifier(states: [.valid])
 
         let result = await verifier.verify(.init(
             tokenID: tokenID,
@@ -46,7 +46,7 @@ final class Bsv21PermissionVerifierTests: XCTestCase {
 
     func test_symbolOrInputContradictionsAreMismatch() async {
         let symbol = await makeVerifier().verify(.init(tokenID: tokenID, claimedSymbol: "SILVER"))
-        let input = await makeVerifier(outputs: []).verify(.init(
+        let input = await makeVerifier(states: [.spent]).verify(.init(
             tokenID: tokenID,
             inputOutpoints: [self.input]
         ))
@@ -55,6 +55,42 @@ final class Bsv21PermissionVerifierTests: XCTestCase {
         XCTAssertEqual(symbol.note, "Token symbol is GOLD, not SILVER")
         XCTAssertEqual(input.state, .mismatch)
         XCTAssertEqual(input.note, "A spent token output is not valid on the overlay")
+    }
+
+    func test_spentAndUnknownInputsAreCountedAsMismatch() async {
+        let inputs = (1...3).map { String(repeating: "b", count: 64) + ".\($0)" }
+
+        let result = await makeVerifier(states: [.spent, .valid, .unknown]).verify(.init(
+            tokenID: tokenID,
+            inputOutpoints: inputs
+        ))
+
+        XCTAssertEqual(result, .init(
+            state: .mismatch,
+            note: "2 spent token outputs are not valid on the overlay"
+        ))
+    }
+
+    func test_queuedInputsStayUnverified() async {
+        let inputs = [input, String(repeating: "c", count: 64) + "_0"]
+
+        let result = await makeVerifier(states: [.valid, .queued]).verify(.init(
+            tokenID: tokenID,
+            inputOutpoints: inputs
+        ))
+
+        XCTAssertEqual(result, .init(state: .unverified))
+    }
+
+    func test_statusResponseMissingAnInputStaysUnverified() async {
+        let inputs = [input, String(repeating: "c", count: 64) + "_0"]
+
+        let result = await makeVerifier(states: [.valid]).verify(.init(
+            tokenID: tokenID,
+            inputOutpoints: inputs
+        ))
+
+        XCTAssertEqual(result, .init(state: .unverified))
     }
 
     func test_serviceFailureAndTimeoutStayUnverified() async {
@@ -77,7 +113,7 @@ final class Bsv21PermissionVerifierTests: XCTestCase {
                     status: .init(isActive: true)
                 )
             },
-            validateOutputs: { _, _ in throw Expected.failed }
+            outputStatus: { _, _ in throw Expected.failed }
         ))
 
         let failedResult = await failed.verify(.init(tokenID: tokenID))
@@ -164,9 +200,10 @@ final class Bsv21PermissionVerifierTests: XCTestCase {
         XCTAssertEqual(verified.panels, review.panels)
     }
 
+    /// Answers each requested outpoint, as sent, with the state at its index.
     private func makeVerifier(
         active: Bool? = true,
-        outputs: [Bsv21ValidatedOutput] = []
+        states: [Bsv21OutputState] = []
     ) -> Bsv21PermissionVerifier {
         Bsv21PermissionVerifier(services: .init(
             tokenDetails: { [tokenID] _ in
@@ -176,7 +213,9 @@ final class Bsv21PermissionVerifierTests: XCTestCase {
                     status: .init(isActive: active)
                 )
             },
-            validateOutputs: { _, _ in outputs }
+            outputStatus: { _, outpoints in
+                zip(outpoints, states).map { .init(outpoint: $0, state: $1) }
+            }
         ))
     }
 
@@ -191,9 +230,5 @@ final class Bsv21PermissionVerifierTests: XCTestCase {
                 status: .init(isActive: true)
             )
         }))
-    }
-
-    private func canonical(_ value: String) -> String {
-        value.replacingOccurrences(of: ".", with: "_")
     }
 }

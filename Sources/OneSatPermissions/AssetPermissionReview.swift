@@ -116,22 +116,23 @@ public struct Bsv21PermissionVerificationContext: Codable, Equatable, Sendable {
     }
 }
 
-/// Injectable live services; hosts may leave output validation unavailable and still render.
+/// Injectable live services; hosts may leave output status unavailable and still render.
 public struct Bsv21PermissionVerificationServices: Sendable {
     public typealias Details = @Sendable (String) async throws -> Bsv21TokenDetails
-    public typealias Validate = @Sendable (String, [String]) async throws -> [Bsv21ValidatedOutput]
+    /// Overlay state of each outpoint, in request order with outpoints as sent.
+    public typealias OutputStatus = @Sendable (String, [String]) async throws -> [Bsv21OutputStatus]
 
     public let tokenDetails: Details
-    public let validateOutputs: Validate?
+    public let outputStatus: OutputStatus?
 
-    public init(tokenDetails: @escaping Details, validateOutputs: Validate? = nil) {
+    public init(tokenDetails: @escaping Details, outputStatus: OutputStatus? = nil) {
         self.tokenDetails = tokenDetails
-        self.validateOutputs = validateOutputs
+        self.outputStatus = outputStatus
     }
 
     public init(client: Bsv21Client) {
         tokenDetails = { try await client.tokenDetails(tokenID: $0) }
-        validateOutputs = { try await client.validateOutputs(tokenID: $0, outpoints: $1, unspent: true) }
+        outputStatus = { try await client.outputStatus(tokenID: $0, outpoints: $1) }
     }
 }
 
@@ -177,27 +178,35 @@ public struct Bsv21PermissionVerifier: Sendable {
         }
 
         if !context.inputOutpoints.isEmpty {
-            guard let validate = services.validateOutputs else {
+            guard let outputStatus = services.outputStatus else {
                 return .init(
                     state: .unverified,
                     note: "Token input validation is unavailable"
                 )
             }
-            guard let outputs = await resolve({
-                try await validate(context.tokenID, context.inputOutpoints)
+            guard let statuses = await resolve({
+                try await outputStatus(context.tokenID, context.inputOutpoints)
             }) else {
                 return .init(state: .unverified)
             }
-            let valid = Set(outputs.map { Self.canonicalOutpoint($0.outpoint) })
-            let requested = Set(context.inputOutpoints.map(Self.canonicalOutpoint))
-            if valid != requested || outputs.count != requested.count {
-                let missing = requested.subtracting(valid)
+            let invalid = statuses.filter { $0.state == .spent || $0.state == .unknown }
+            if !invalid.isEmpty {
                 return .init(
                     state: .mismatch,
-                    note: missing.count <= 1
+                    note: invalid.count == 1
                         ? "A spent token output is not valid on the overlay"
-                        : "\(missing.count) spent token outputs are not valid on the overlay"
+                        : "\(invalid.count) spent token outputs are not valid on the overlay"
                 )
+            }
+            // A response that does not account for every input cannot confirm them.
+            let reported = Set(statuses.map { Self.canonicalOutpoint($0.outpoint).lowercased() })
+            let requested = Set(context.inputOutpoints.map { Self.canonicalOutpoint($0).lowercased() })
+            guard statuses.count == context.inputOutpoints.count, reported == requested else {
+                return .init(state: .unverified)
+            }
+            // Queued outputs are not invalid, just not indexed yet.
+            if statuses.contains(where: { $0.state == .queued }) {
+                return .init(state: .unverified)
             }
         }
 

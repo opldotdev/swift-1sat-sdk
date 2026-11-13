@@ -19,6 +19,8 @@ public enum OneSatConstants {
     public static let lockBasket = "lock"
     /// `OPNS_BASKET`
     public static let opnsBasket = "opns"
+    /// `OPNS_PUBLISHED_TAG`: wallet tag on a published (identity-bound) OpNS name.
+    public static let opnsPublishedTag = "opns:published"
     /// `SIGMA_BASKET`
     public static let sigmaBasket = "sigma"
     /// `HOSTING_BASKET`
@@ -87,21 +89,6 @@ public enum OneSatConstants {
     public static func nowMilliseconds() -> UInt64 {
         UInt64((Date().timeIntervalSince1970 * 1_000).rounded(.down))
     }
-
-    /// `LEGACY_P1SAT_BASKET_MIGRATIONS` plus leftover filings JS never listed:
-    /// Swift's own `p 1sat bsv20`, and theme-token's hardcoded `ordinals`
-    /// basket (`b-open-io/theme-token` `package-builder.ts` Mar–Jun 2026).
-    public static let legacyP1SatBasketMigrations: [(from: String, to: String)] = [
-        ("p 1sat ordinals", onesatBasket),
-        ("ordinals", onesatBasket),
-        ("p 1sat bsv21", bsv21Basket),
-        ("p 1sat opns", opnsBasket),
-        ("p 1sat hosting", hostingBasket),
-        ("p 1sat lock", lockBasket),
-        ("p 1sat sigma", sigmaBasket),
-        ("p 1sat bsocial", bsocialBasket),
-        ("p 1sat bsv20", bsv20Basket),
-    ]
 
     public static var p1satProtocolID: WalletProtocolID {
         get throws {

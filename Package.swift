@@ -127,6 +127,7 @@ let package = Package(
             dependencies: [
                 "OneSatTemplates",
                 "OneSatAddresses",
+                "OneSatCBOR",
                 .product(name: "BSVCompat", package: "swift-sdk"),
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
@@ -216,6 +217,7 @@ let package = Package(
                 .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
                 "OneSatAddresses",
+                "OneSatCBOR",
             ]
         ),
     ],
