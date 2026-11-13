@@ -124,6 +124,7 @@ let package = Package(
         .target(
             name: "OneSatActions",
             dependencies: [
+                "OneSatClient",
                 "OneSatTemplates",
                 "OneSatAddresses",
                 "OneSatCBOR",
@@ -214,6 +215,7 @@ let package = Package(
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
                 "OneSatAddresses",
                 "OneSatCBOR",
+                "OneSatClient",
             ]
         ),
     ],

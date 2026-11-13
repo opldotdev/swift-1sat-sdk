@@ -1,5 +1,4 @@
 import Foundation
-import ToolboxCore
 
 #if canImport(FoundationNetworking)
     import FoundationNetworking
@@ -48,6 +47,33 @@ public struct OpnsOrigin: Equatable, Sendable, Decodable {
 public struct OpnsMine: Equatable, Sendable, Decodable {
     public let outpoint: String
     public let domain: String
+}
+
+/// `OrdfsMetadata` from `@1sat/types`, without the MAP payload. Only `outpoint` is required;
+/// the other members decode when the server sends them.
+public struct OrdfsMetadata: Equatable, Sendable, Decodable {
+    public let outpoint: String
+    public let origin: String?
+    public let sequence: Int?
+    public let contentType: String?
+    public let contentLength: Int?
+    public let parent: String?
+
+    public init(
+        outpoint: String,
+        origin: String? = nil,
+        sequence: Int? = nil,
+        contentType: String? = nil,
+        contentLength: Int? = nil,
+        parent: String? = nil
+    ) {
+        self.outpoint = outpoint
+        self.origin = origin
+        self.sequence = sequence
+        self.contentType = contentType
+        self.contentLength = contentLength
+        self.parent = parent
+    }
 }
 
 public struct OpnsClient: Sendable {
@@ -100,26 +126,12 @@ public struct OpnsClient: Sendable {
         )
     }
 
-    /// Origin, then ORDFS latest metadata (seq -1), then MAP "opns.idKey".
-    /// nil when the field is absent; the empty string (a cleared binding) is returned as-is.
-    public func identityKey(forName name: String) async throws -> String? {
-        let origin = try await origin(forName: name)
-        let metadata = try await latestMetadata(outpoint: origin.outpoint)
-        guard let value = metadata.map?["opns.idKey"] else { return nil }
-        guard let key = value.stringValue else {
-            throw OneSatClientError.unreadableResponse
-        }
-        return key
-    }
-
-    private struct OrdfsMetadataMap: Decodable {
-        let map: [String: JSONValue]?
-    }
-
-    private func latestMetadata(outpoint: String) async throws -> OrdfsMetadataMap {
+    /// `OrdfsClient.getMetadata(outpoint, seq)`: GET `/1sat/ordfs/metadata/<outpoint>:<seq>`.
+    /// `seq` -1 is the latest revision of the ordinal at `outpoint`.
+    public func metadata(outpoint: String, seq: Int) async throws -> OrdfsMetadata {
         try await get(
-            Self.metadataURL(outpoint: outpoint, seq: -1, baseURL: baseURL),
-            as: OrdfsMetadataMap.self
+            Self.metadataURL(outpoint: outpoint, seq: seq, baseURL: baseURL),
+            as: OrdfsMetadata.self
         )
     }
 
