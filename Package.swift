@@ -292,6 +292,8 @@ let package = Package(
                 .product(name: "BSVWallet", package: "swift-sdk"),
                 .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxCore", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),

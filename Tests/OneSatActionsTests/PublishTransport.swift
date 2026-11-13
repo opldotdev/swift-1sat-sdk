@@ -9,6 +9,7 @@ import BSVWallet
 import OneSatTemplates
 import ToolboxActions
 import ToolboxAuth
+import ToolboxBRC29
 import ToolboxStorage
 import ToolboxStorageClient
 import XCTest
@@ -23,6 +24,13 @@ import XCTest
 /// OP_TRUE source added to that graph.
 /// `processAction` decodes the signed raw transaction and reports every `sendWith` txid with
 /// `sendWithStatus` (unproven unless a test asks otherwise).
+///
+/// With an `ActionBatch`, it is instead storage that speaks the action-batch protocol for a wallet
+/// whose only unspent output is one BRC-29 change output: `getCapabilities` advertises version 1
+/// with format-2 manifests, `beginActionBatch` reserves that single output (its source
+/// transaction in `inputBeef`), and `commitActionBatch` records the manifest and reports every
+/// `sendWith` txid with `sendWithStatus`, or answers `commitError`. `createAction` and
+/// `processAction` fail the test there: nothing in a batch may reach them.
 actor PublishTransport: AuthenticatedTransport {
     struct Processed: Sendable {
         let txid: String
@@ -42,9 +50,27 @@ actor PublishTransport: AuthenticatedTransport {
     private(set) var processed: [Processed] = []
     private var nextReference = 0
     private let sendWithStatus: String
+    private let actionBatch: ActionBatch?
 
-    init(sendWithStatus: String = "unproven") {
+    /// The action-batch storage of a wallet with a single unspent output.
+    struct ActionBatch: Sendable {
+        /// The wallet the reserved output pays, by BRC-29 change derivation to itself.
+        let identity: PrivateKey
+        var fundingSatoshis: UInt64 = 10_000
+        /// The JSON-RPC `error` member `commitActionBatch` answers with, instead of committing.
+        var commitError: [String: String]?
+    }
+
+    /// The batch `beginActionBatch` opened, by the id the client chose.
+    private(set) var batchId: String?
+    /// The wallet's one unspent output, reserved by `beginActionBatch`.
+    private(set) var fundingTransaction: Transaction?
+    /// The batch ids `abortActionBatch` was called with.
+    private(set) var abortedBatches: [String] = []
+
+    init(sendWithStatus: String = "unproven", actionBatch: ActionBatch? = nil) {
         self.sendWithStatus = sendWithStatus
+        self.actionBatch = actionBatch
     }
 
     func send(
@@ -74,13 +100,122 @@ actor PublishTransport: AuthenticatedTransport {
                     ],
                 ],
             ])
-        case "createAction":
+        case "createAction" where actionBatch == nil:
             return try envelope(id: id, result: try createAction(args))
-        case "processAction":
+        case "processAction" where actionBatch == nil:
             return try envelope(id: id, result: try processAction(args))
+        case "createAction", "processAction":
+            XCTFail("\(rpcMethod) reached storage while it speaks the action batch")
+            throw AuthTransportError.notImplemented("action batch only")
         default:
+            break
+        }
+        guard let actionBatch else { throw AuthTransportError.notImplemented("offline") }
+        let params = object?["params"] as? [Any] ?? []
+        switch rpcMethod {
+        case "getCapabilities":
+            return try envelope(id: id, result: [
+                "actionBatch": [
+                    "version": 1,
+                    "maxInlineBytes": 4 * 1024 * 1024,
+                    "maxBlobBytes": 16 * 1024 * 1024,
+                    "maxConcurrentUploads": 4,
+                    "leaseMs": 60_000,
+                    "hardLifetimeMs": 600_000,
+                    "compactBegin": true,
+                    "manifestVersion": 2,
+                    "commitByDigest": false,
+                    "resume": false,
+                    "maxReservedOutputs": 8,
+                ],
+            ])
+        case "beginActionBatch":
+            return try envelope(id: id, result: try beginActionBatch(args, actionBatch))
+        case "renewActionBatch":
+            return try envelope(id: id, result: ["expiresAt": Self.leaseExpiry])
+        case "commitActionBatch":
+            if let error = actionBatch.commitError {
+                return try envelope(id: id, error: error)
+            }
+            return try envelope(id: id, result: try commitActionBatch(args))
+        case "abortActionBatch":
+            abortedBatches.append(params.dropFirst().first as? String ?? "")
+            return try envelope(id: id, result: ["aborted": true])
+        default:
+            XCTFail("unexpected \(rpcMethod) in the action batch")
             throw AuthTransportError.notImplemented("offline")
         }
+    }
+
+    /// A lease that never needs renewing while a test runs.
+    static let leaseExpiry = "2100-01-01T00:00:00.000Z"
+
+    /// Reserves the wallet's single unspent output: BRC-29 change the identity paid itself, as the
+    /// reference storage returns a `TableOutput` row, with its transaction in `inputBeef`.
+    private func beginActionBatch(_ args: [String: Any], _ batch: ActionBatch) throws -> [String: Any] {
+        let id = try XCTUnwrap(args["batchId"] as? String)
+        XCTAssertNil(batchId, "one batch per publish")
+        batchId = id
+        let key = try BRC29.receivingPrivateKey(
+            recipient: batch.identity,
+            sender: batch.identity.publicKey,
+            prefix: Self.derivationPrefix,
+            suffix: Self.derivationSuffix
+        )
+        let lockingScript = try BRC29.lockingScript(for: key.publicKey)
+        let funding = Transaction(
+            version: 1,
+            inputs: [],
+            outputs: [TransactionOutput(satoshis: batch.fundingSatoshis, lockingScript: lockingScript)],
+            lockTime: 0
+        )
+        fundingTransaction = funding
+        let inputBeef = try BEEF(
+            version: .v2, merklePaths: [], transactions: [.raw(funding)], limits: WalletBEEFLimits.standard
+        ).serialized(limits: WalletBEEFLimits.standard)
+        return [
+            "batchId": id,
+            "expiresAt": Self.leaseExpiry,
+            "hardExpiresAt": "2100-01-01T00:10:00.000Z",
+            "changeBasket": [
+                "basketId": 1, "name": "default", "numberOfDesiredUTXOs": 32, "minimumDesiredUTXOValue": 1_000,
+            ],
+            "feeModel": ["model": "sat/kb", "value": 100],
+            "commissionSatoshis": 0,
+            "availableChangeCount": 1,
+            "reservedOutputs": [
+                [
+                    "outputId": 41,
+                    "txid": try funding.transactionID(limits: WalletTransactionLimits.standard).displayHex,
+                    "vout": 0,
+                    "satoshis": Int(batch.fundingSatoshis),
+                    "spendable": true,
+                    "change": true,
+                    "providedBy": "storage",
+                    "purpose": "change",
+                    "type": "P2PKH",
+                    "basketId": 1,
+                    "derivationPrefix": Self.derivationPrefix,
+                    "derivationSuffix": Self.derivationSuffix,
+                    "lockingScript": lockingScript.bytes.map(Int.init),
+                ],
+            ],
+            "explicitOutputs": [],
+            "inputBeef": inputBeef.map(Int.init),
+        ]
+    }
+
+    /// Accepts the manifest and reports every `sendWith` txid with `sendWithStatus`.
+    private func commitActionBatch(_ manifest: [String: Any]) throws -> [String: Any] {
+        let sendWith = manifest["sendWith"] as? [String] ?? []
+        let actions = manifest["actions"] as? [[String: Any]] ?? []
+        return [
+            "batchId": manifest["batchId"] as? String ?? "",
+            "manifestDigest": manifest["digest"] as? String ?? "",
+            "committedTxids": actions.compactMap { $0["txid"] as? String },
+            "alreadyCommitted": false,
+            "sendWithResults": sendWith.map { ["txid": $0, "status": sendWithStatus] },
+        ]
     }
 
     private func createAction(_ args: [String: Any]) throws -> [String: Any] {
@@ -202,6 +337,11 @@ actor PublishTransport: AuthenticatedTransport {
 
     private func envelope(id: Any, result: [String: Any]) throws -> AuthenticatedResponse {
         let data = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "result": result])
+        return AuthenticatedResponse(statusCode: 200, headers: [:], body: Array(data))
+    }
+
+    private func envelope(id: Any, error: [String: String]) throws -> AuthenticatedResponse {
+        let data = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "error": error])
         return AuthenticatedResponse(statusCode: 200, headers: [:], body: Array(data))
     }
 }
