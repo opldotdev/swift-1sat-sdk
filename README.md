@@ -29,8 +29,8 @@ foreign or legacy key into a wallet's own address — generic over source, desti
 provider; the client still reads categorised owner outputs from the 1Sat indexer. Alongside that:
 P1SAT deposit addresses, 1Sat locking templates, MNEE and OpNS clients, and major
 `@1sat/actions` families (ordinals, inscriptions, token transfers, locks, collections, identity,
-OpNS, MNEE, and asset sweep onto P1SAT outputs). Actions also cover cancellable legacy-basket
-migration and WalletPermissionsManager collection metadata/name handling.
+OpNS, MNEE, and asset sweep onto P1SAT outputs). Actions also cover WalletPermissionsManager
+collection metadata/name handling.
 
 Sweep stays **partial by design**. Further `@1sat` surface lands as the wallet needs it.
 
@@ -44,7 +44,7 @@ Sweep stays **partial by design**. Further `@1sat` surface lands as the wallet n
 | `OneSatSweep` | Categorise an address, sweep its fundable BSV, report the rest |
 | `OneSatTemplates` | Locking scripts: inscription, OrdLock v2, BSV-20/21, Cosign, TimeLock, BAP, BitCom, public `MAPTemplate` |
 | `OneSatAddresses` | P1SAT deposit addresses (`[0, "onesat"]`, keyID `"1sat <index>"`) |
-| `OneSatActions` | Major `@1sat/actions` families, spend-side unlock templates, cancellable legacy-basket migration, WPM collection metadata/name handling |
+| `OneSatActions` | Major `@1sat/actions` families, spend-side unlock templates, WPM collection metadata/name handling |
 | `OneSat` | Umbrella, re-exporting the above |
 
 ## Sweep
