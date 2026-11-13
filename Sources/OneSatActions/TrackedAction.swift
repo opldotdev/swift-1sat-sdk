@@ -19,9 +19,9 @@ public enum TrackedAction {
         public var knownTxids: [String]
         public var sendWith: [String]
         /// `trustSelf: 'known'` lets storage accept inputs whose BEEF ancestry it already holds
-        /// (the OrdLock v2 purchase apply step sets it for its front funding). The remote
-        /// `StorageClient` in swift-wallet-toolbox 5d8f781 does not put it on the wire yet,
-        /// so the purchase also sends the full front-funding BEEF.
+        /// (the OrdLock v2 purchase apply step sets it for its front funding, the SIGMA apply
+        /// step for its anchor). The remote `StorageClient` in swift-wallet-toolbox 5d8f781 does
+        /// not put it on the wire yet, so both also send the full BEEF of what they spend.
         public var trustSelf: WalletTrustSelf?
 
         public init(
@@ -53,7 +53,15 @@ public enum TrackedAction {
         return Hex.encode(bytes)
     }
 
+    /// The managed `id:<actionId>_<index>` tag.
+    public static func idTag(_ actionID: String, index: Int) -> String {
+        "id:\(actionID)_\(index)"
+    }
+
     /// Injects `id:<actionId>_<index>` on basketed outputs.
+    ///
+    /// An output that already carries exactly this tag, and no other `id:` tag, is left as is,
+    /// so a caller that stamps the id before adding later tags keeps that order.
     ///
     /// The released local pipeline does not add a permission-module dispatch label;
     /// that routing label is opt-in in the TypeScript implementation.
@@ -68,14 +76,18 @@ public enum TrackedAction {
         }
         let tracked = try outputs.enumerated().map { index, output -> WalletCreateActionOutput in
             guard output.basket != nil else { return output }
+            let tag = idTag(actionID, index: index)
+            let others = output.tags.filter { !$0.hasPrefix("id:") }
+            if output.tags.count == others.count + 1, output.tags.contains(tag) {
+                return output
+            }
             return try WalletCreateActionOutput(
                 lockingScript: output.lockingScript,
                 satoshis: output.satoshis,
                 outputDescription: output.outputDescription,
                 basket: output.basket,
                 customInstructions: output.customInstructions,
-                tags: output.tags.filter { !$0.hasPrefix("id:") }
-                    + ["id:\(actionID)_\(index)"]
+                tags: others + [tag]
             )
         }
         return (tracked, labels)
