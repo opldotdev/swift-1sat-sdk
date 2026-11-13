@@ -75,6 +75,7 @@ final class CollectionMintTests: XCTestCase {
         XCTAssertEqual(anchors.count, 3)
         XCTAssertEqual(publishes.count, 3)
 
+        var anchorActionIDs: [String] = []
         for anchor in anchors {
             XCTAssertEqual(anchor.outputs.count, 1)
             XCTAssertEqual(anchor.outputs[0].satoshis, 2)
@@ -82,7 +83,14 @@ final class CollectionMintTests: XCTestCase {
             XCTAssertFalse(anchor.outputs[0].tags.contains { $0.hasPrefix("id:") })
             XCTAssertFalse(anchor.labels.contains(OneSatConstants.p1satLabel))
             XCTAssertEqual(anchor.options["noSend"] as? Bool, true)
+            XCTAssertEqual(anchor.options["randomizeOutputs"] as? Bool, false)
+            XCTAssertEqual(anchor.options["acceptDelayedBroadcast"] as? Bool, true)
+            // `sigmaAnchorKeyId`: the anchor key is named after the publish's action id.
+            let keyID = try CustomInstructions.parse(XCTUnwrap(anchor.outputs[0].customInstructions)).keyID
+            XCTAssertTrue(keyID.hasPrefix("anchor-"), keyID)
+            anchorActionIDs.append(String(keyID.dropFirst("anchor-".count)))
         }
+        XCTAssertEqual(Set(anchorActionIDs).count, 3)
 
         let scripts = try publishes.map {
             try Script(hex: $0.outputs[0].lockingScript, maximumByteCount: ActionScript.maximumByteCount)
@@ -104,7 +112,11 @@ final class CollectionMintTests: XCTestCase {
             XCTAssertEqual(publish.inputs.count, 1)
             XCTAssertEqual(publish.inputs[0].unlockingScriptLength, 108)
             let outpoint = publish.inputs[0].outpoint
-            XCTAssertEqual(publish.options["noSend"] as? Bool, true)
+            // The publish goes out with its anchor (sendWith), not held back as noSend.
+            XCTAssertEqual(publish.options["noSend"] as? Bool, false)
+            XCTAssertEqual(publish.options["randomizeOutputs"] as? Bool, false)
+            XCTAssertEqual(publish.options["acceptDelayedBroadcast"] as? Bool, true)
+            XCTAssertEqual(publish.options["noSendChange"] as? [String], [])
             let known = try XCTUnwrap(publish.options["knownTxids"] as? [String])
             let sendWith = try XCTUnwrap(publish.options["sendWith"] as? [String])
             let anchorTxid = String(outpoint.split(separator: ".")[0])
@@ -123,6 +135,18 @@ final class CollectionMintTests: XCTestCase {
                     with: Data(XCTUnwrap(publish.outputs[0].customInstructions).utf8)
                 ) as? [String: Any]
             )
+            XCTAssertEqual(instructions["counterparty"] as? String, "self")
+            let address = try expectValidSigma(scripts[index], outpoint: outpoint, identity: identity)
+            addresses.append(address)
+            let idTag = "id:\(anchorActionIDs[index])_0"
+            let typeTag = index == 1 ? "type:image/png" : index == 2 ? "type:ord-fs/json" : "type:text/plain"
+            let collectionTags = index == 0
+                ? ["subType:collection"]
+                : ["subType:collectionItem", "collection:\(Self.collectionId)"]
+            XCTAssertEqual(
+                publish.outputs[0].tags,
+                [typeTag, "origin"] + collectionTags + [idTag, "creator:\(address)"]
+            )
             if index == 0 {
                 XCTAssertTrue(publish.outputs[0].tags.contains("subType:collection"))
                 XCTAssertTrue(publish.outputs[0].tags.contains("type:text/plain"))
@@ -138,8 +162,6 @@ final class CollectionMintTests: XCTestCase {
                     XCTAssertFalse(publish.outputs[0].tags.contains("type:image/png; profile=test"))
                 }
             }
-            let address = try expectValidSigma(scripts[index], outpoint: outpoint)
-            addresses.append(address)
         }
         XCTAssertEqual(Set(addresses).count, 1)
     }
@@ -215,7 +237,7 @@ final class CollectionMintTests: XCTestCase {
         XCTAssertEqual(result.error, "quantity-must-be-positive")
     }
 
-    private func expectValidSigma(_ script: Script, outpoint: String) throws -> String {
+    private func expectValidSigma(_ script: Script, outpoint: String, identity: PrivateKey) throws -> String {
         let bytes = script.bytes
         guard let markerIndex = bytes.lastRange(of: Self.sigmaMarker)?.lowerBound else {
             XCTFail("SIGMA suffix not found")
@@ -243,6 +265,10 @@ final class CollectionMintTests: XCTestCase {
         let address = try Address(try XCTUnwrap(addressText))
         let signature = try BitcoinMessageSignature(signatureBytes)
         XCTAssertTrue(try signature.verifies(message: messageHash, address: address))
+        // The signature recovers to the BAP key the scripted identity names.
+        let bap = try SigmaAssert.bapKey(identity).publicKey
+        XCTAssertEqual(try signature.recoverPublicKey(message: messageHash).compressedBytes, bap.compressedBytes)
+        XCTAssertEqual(address.description, Address(publicKey: bap, network: .mainnet, compressed: true).description)
         return address.description
     }
 
