@@ -2,21 +2,24 @@ import Foundation
 import ToolboxCore
 
 /// `OrdfsMetadata` from `@1sat/types`: what `/1sat/ordfs/metadata` returns for one inscription.
+///
+/// Only `outpoint` is required. TS reads the rest without checking, so a member the server leaves
+/// out decodes as `nil` instead of failing a whole bulk response.
 public struct OrdfsMetadata: Equatable, Sendable, Decodable {
     public let outpoint: String
     public let origin: String?
-    public let sequence: Int
-    public let contentType: String
-    public let contentLength: Int
+    public let sequence: Int?
+    public let contentType: String?
+    public let contentLength: Int?
     public let parent: String?
     public let map: [String: JSONValue]?
 
     public init(
         outpoint: String,
         origin: String? = nil,
-        sequence: Int,
-        contentType: String,
-        contentLength: Int,
+        sequence: Int? = nil,
+        contentType: String? = nil,
+        contentLength: Int? = nil,
         parent: String? = nil,
         map: [String: JSONValue]? = nil
     ) {

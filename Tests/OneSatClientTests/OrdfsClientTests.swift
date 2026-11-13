@@ -192,6 +192,30 @@ final class OrdfsClientTests: XCTestCase {
         XCTAssertNil(latest.origin)
     }
 
+    func test_bulkEntryMissingOptionalMembersStillDecodes() async throws {
+        let body = Array(#"{"x_0":{"outpoint":"x_0"},"y_1":null}"#.utf8)
+        let client = OrdfsClient(baseURL: baseURL, transport: ScriptedHTTP(responses: [(200, body)]))
+
+        let result = try await client.bulkMetadata(["x_0", "y_1"])
+
+        XCTAssertEqual(result["x_0"] ?? nil, OrdfsMetadata(outpoint: "x_0"))
+        XCTAssertNil(result["y_1"] ?? nil)
+        XCTAssertEqual(OrdinalTags.fromMetadata(result["x_0"] ?? nil, fallbackOrigin: "x.0"), ["origin:x_0"])
+    }
+
+    func test_unparseableBodyIsUnreadable() async throws {
+        let client = OrdfsClient(
+            baseURL: baseURL,
+            transport: ScriptedHTTP(responses: [(200, Array("not json".utf8))])
+        )
+        do {
+            _ = try await client.bulkMetadata(["x_0"])
+            XCTFail("expected an error")
+        } catch let error as OneSatClientError {
+            XCTAssertEqual(error, .unreadableResponse)
+        }
+    }
+
     func test_httpFailureSurfacesTheStatus() async throws {
         let http = ScriptedHTTP(responses: [(404, Array("{}".utf8))])
         do {
