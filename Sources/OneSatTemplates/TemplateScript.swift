@@ -38,6 +38,33 @@ enum TemplateScript {
         try appendPush(encoded, to: &script)
     }
 
+    /// The minimal little-endian script number of a non-negative value; `0` is `[]`.
+    /// Up to 9 bytes, since values of 2^63 and above need a `0x00` sign byte.
+    static func minimalScriptNumber(_ value: UInt64) -> [UInt8] {
+        var out: [UInt8] = []
+        var remaining = value
+        while remaining > 0 {
+            out.append(UInt8(truncatingIfNeeded: remaining))
+            remaining >>= 8
+        }
+        if let last = out.last, last & 0x80 != 0 {
+            out.append(0)
+        }
+        return out
+    }
+
+    /// The MINIMALDATA push of `data`: `[]` → `OP_0`, `[1...16]` → `OP_1`..`OP_16`,
+    /// `[0x81]` → `OP_1NEGATE`, otherwise the shortest data push.
+    static func appendMinimalPush(_ data: [UInt8], to script: inout Script) throws {
+        try script.appendMinimalPush(data, maximumScriptByteCount: maximumByteCount)
+    }
+
+    /// Pushes an unsigned value as a minimal script number (0 → `OP_0`, 1...16 → `OP_1`..`OP_16`),
+    /// covering the full `UInt64` range that `appendNumber(Int64)` cannot.
+    static func appendMinimalNumber(_ value: UInt64, to script: inout Script) throws {
+        try appendMinimalPush(minimalScriptNumber(value), to: &script)
+    }
+
     static func operations(_ script: Script) throws -> [ScriptOperation] {
         try script.operations(maximumPushDataByteCount: maximumByteCount)
     }

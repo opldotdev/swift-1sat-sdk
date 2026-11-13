@@ -16,6 +16,7 @@ let publicModules = [
     "OneSatTemplates",
     "OneSatAddresses",
     "OneSatActions",
+    "OneSatCBOR",
 ]
 
 let package = Package(
@@ -63,12 +64,17 @@ let package = Package(
             ]
         ),
 
-        // 1Sat locking scripts: inscription envelope, OrdLock, BSV-20, BSV-21, Cosign, BAP,
-        // BitCom, public MAPTemplate, and CLTV time-lock. Byte-exact with `@1sat/templates`.
-        // Unlock templates live with the action families.
+        // Strict DAG-CBOR encode/decode, matching `@ipld/dag-cbor` as the TS stack uses it.
+        // Pure Swift, no dependencies. Used by 1Color payloads (and later the OpNS record).
+        .target(name: "OneSatCBOR", dependencies: []),
+
+        // 1Sat locking scripts: inscription envelope, OrdLock, BSV-20, BSV-21, 1Color (BRC-162),
+        // Cosign, BAP, BitCom, public MAPTemplate, and CLTV time-lock. Byte-exact with
+        // `@1sat/templates`. Unlock templates live with the action families.
         .target(
             name: "OneSatTemplates",
             dependencies: [
+                "OneSatCBOR",
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
@@ -148,14 +154,21 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "OneSatCBORTests",
+            dependencies: ["OneSatCBOR"]
+        ),
+        .testTarget(
             name: "OneSatTemplatesTests",
             dependencies: [
                 "OneSatTemplates",
+                "OneSatCBOR",
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
                 .product(name: "BSVScript", package: "swift-sdk"),
-            ]
+                .product(name: "BSVTransaction", package: "swift-sdk"),
+            ],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "OneSatAddressesTests",
