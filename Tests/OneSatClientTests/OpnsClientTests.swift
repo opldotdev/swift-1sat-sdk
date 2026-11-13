@@ -142,7 +142,8 @@ final class OpnsClientTests: XCTestCase {
             origin: outpoint,
             sequence: 3,
             contentType: "application/op-ns",
-            contentLength: 4
+            contentLength: 4,
+            map: ["name": "x"]
         ))
         XCTAssertEqual(recorded.count, 1)
         XCTAssertEqual(recorded[0].method, "GET")

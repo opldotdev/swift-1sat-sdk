@@ -49,33 +49,6 @@ public struct OpnsMine: Equatable, Sendable, Decodable {
     public let domain: String
 }
 
-/// `OrdfsMetadata` from `@1sat/types`, without the MAP payload. Only `outpoint` is required;
-/// the other members decode when the server sends them.
-public struct OrdfsMetadata: Equatable, Sendable, Decodable {
-    public let outpoint: String
-    public let origin: String?
-    public let sequence: Int?
-    public let contentType: String?
-    public let contentLength: Int?
-    public let parent: String?
-
-    public init(
-        outpoint: String,
-        origin: String? = nil,
-        sequence: Int? = nil,
-        contentType: String? = nil,
-        contentLength: Int? = nil,
-        parent: String? = nil
-    ) {
-        self.outpoint = outpoint
-        self.origin = origin
-        self.sequence = sequence
-        self.contentType = contentType
-        self.contentLength = contentLength
-        self.parent = parent
-    }
-}
-
 public struct OpnsClient: Sendable {
     private let baseURL: URL
     private let transport: any OneSatHTTPTransport
