@@ -56,10 +56,16 @@ public enum Identity {
         "\(OneSatConstants.bapKeyID)-\(index)"
     }
 
-    /// `base58(ripemd160(sha256(identity-0.address)))`. Address is mainnet.
-    public static func computeBapId(identity: PrivateKey) throws -> String {
-        let address = try derivedAddress(identity, index: 0).description
+    /// `base58(ripemd160(sha256(identity-0.address)))`, with the address encoded for `chain`.
+    /// The same key has a different BAP ID on each chain, as in TS `computeBapId(ctx)`.
+    public static func computeBapId(identity: PrivateKey, chain: OneSatChain = .main) throws -> String {
+        let address = try derivedAddress(identity, index: 0, network: chain.network).description
         return Base58.encode(BSVHashing.hash160(Array(address.utf8)).bytes)
+    }
+
+    /// Port of `computeBapId(ctx)`: the BAP ID of `ctx.identity` on `ctx.chain`.
+    public static func computeBapId(_ ctx: OneSatContext) throws -> String {
+        try computeBapId(identity: ctx.identity, chain: ctx.chain)
     }
 
     /// `nil` when the `bap` basket has no `type:id` output.
@@ -73,7 +79,7 @@ public enum Identity {
             )
         )
         if listed.outputs.isEmpty { return nil }
-        return try computeBapId(identity: ctx.identity)
+        return try computeBapId(ctx)
     }
 
     /// Port of `updateProfile` (`identity/index.ts:450-586`). `profileJSON` must be a JSON object;
@@ -86,7 +92,7 @@ public enum Identity {
 
             let publishedAtTag = "publishedAt:\(Int64(Date().timeIntervalSince1970 * 1000))"
             let existingId = try await resolveBapId(ctx)
-            let bapId = try existingId ?? computeBapId(identity: ctx.identity)
+            let bapId = try existingId ?? computeBapId(ctx)
 
             let existingAliases = try await ctx.storage.listOutputs(
                 ctx.auth,
@@ -111,7 +117,8 @@ public enum Identity {
                     bapId: bapId,
                     seq: 1,
                     signerKeyID: signingKeyID(0),
-                    declareKeyID: signingKeyID(1)
+                    declareKeyID: signingKeyID(1),
+                    network: ctx.chain.network
                 )
                 outputs.append(
                     try WalletCreateActionOutput(
@@ -125,7 +132,8 @@ public enum Identity {
                 )
                 let signedAlias = try AIPSign.apply(
                     to: aliasScript,
-                    signingKey: try derivedKey(ctx.identity, keyID: signingKeyID(1))
+                    signingKey: try derivedKey(ctx.identity, keyID: signingKeyID(1)),
+                    network: ctx.chain.network
                 )
                 outputs.append(
                     try WalletCreateActionOutput(
@@ -145,7 +153,8 @@ public enum Identity {
                 }
                 let signedAlias = try AIPSign.apply(
                     to: aliasScript,
-                    signingKey: try derivedKey(ctx.identity, keyID: keyID)
+                    signingKey: try derivedKey(ctx.identity, keyID: keyID),
+                    network: ctx.chain.network
                 )
                 outputs.append(
                     try WalletCreateActionOutput(
@@ -210,13 +219,14 @@ public enum Identity {
                 return PublishResult(error: Failure.identityExists.rawValue)
             }
 
-            let bapId = try computeBapId(identity: ctx.identity)
+            let bapId = try computeBapId(ctx)
             let id = try buildIdOutput(
                 identity: ctx.identity,
                 bapId: bapId,
                 seq: 1,
                 signerKeyID: signingKeyID(0),
-                declareKeyID: signingKeyID(1)
+                declareKeyID: signingKeyID(1),
+                network: ctx.chain.network
             )
             let output = try WalletCreateActionOutput(
                 lockingScript: id.lockingScript,
@@ -373,9 +383,10 @@ public enum Identity {
         bapId: String,
         seq: Int,
         signerKeyID: String,
-        declareKeyID: String
+        declareKeyID: String,
+        network: BitcoinNetwork
     ) throws -> IdOutput {
-        let declareAddress = try derivedAddress(identity, keyID: declareKeyID).description
+        let declareAddress = try derivedAddress(identity, keyID: declareKeyID, network: network).description
         let script = try pushReturnScript([
             Array(OneSatConstants.bapBitcomAddress.utf8),
             Array("ID".utf8),
@@ -384,7 +395,8 @@ public enum Identity {
         ])
         let signed = try AIPSign.apply(
             to: script,
-            signingKey: try derivedKey(identity, keyID: signerKeyID)
+            signingKey: try derivedKey(identity, keyID: signerKeyID),
+            network: network
         )
         let instructions = try CustomInstructions(
             protocolID: try OneSatConstants.bapProtocolID,
@@ -426,16 +438,24 @@ public enum Identity {
         try derivedKey(identity, keyID: signingKeyID(index))
     }
 
-    private static func derivedAddress(_ identity: PrivateKey, keyID: String) throws -> Address {
+    private static func derivedAddress(
+        _ identity: PrivateKey,
+        keyID: String,
+        network: BitcoinNetwork
+    ) throws -> Address {
         Address(
             publicKey: try derivedKey(identity, keyID: keyID).publicKey,
-            network: .mainnet,
+            network: network,
             compressed: true
         )
     }
 
-    private static func derivedAddress(_ identity: PrivateKey, index: Int) throws -> Address {
-        try derivedAddress(identity, keyID: signingKeyID(index))
+    private static func derivedAddress(
+        _ identity: PrivateKey,
+        index: Int,
+        network: BitcoinNetwork
+    ) throws -> Address {
+        try derivedAddress(identity, keyID: signingKeyID(index), network: network)
     }
 
     private static func parseCandidate(_ output: WalletOutput) -> AliasCandidate {

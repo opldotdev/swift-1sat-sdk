@@ -26,19 +26,22 @@ public enum Sweep {
     ///   - source: where to read the spendable outputs from — the wallet's configured provider.
     ///   - satoshisPerKilobyte: the fee rate. The whole balance minus this fee goes to the
     ///     destination; a sweep keeps no change.
+    ///   - network: the chain the source address is encoded for. Pass the account's chain; a WIF's
+    ///     own prefix says nothing reliable about it (TS sweep uses `ctx.chain`).
     public static func build(
         fromWIF wif: String,
         toAddress destination: String,
         source: any UTXOSource,
         satoshisPerKilobyte: UInt64 = 10,
+        network: BitcoinNetwork = .mainnet,
         limits: TransactionLimits = defaultLimits
     ) async throws -> SweepResult {
         let key = try WIF(wif).privateKey
-        let sourceAddress = Address(publicKey: key.publicKey, network: .mainnet).description
+        let sourceAddress = Address(publicKey: key.publicKey, network: network).description
         let utxos = try await source.spendableOutputs(forAddress: sourceAddress)
         return try build(
             fromWIF: wif, toAddress: destination, utxos: utxos,
-            satoshisPerKilobyte: satoshisPerKilobyte, limits: limits
+            satoshisPerKilobyte: satoshisPerKilobyte, network: network, limits: limits
         )
     }
 
@@ -53,10 +56,11 @@ public enum Sweep {
         toAddress destination: String,
         utxos: [SpendableUTXO],
         satoshisPerKilobyte: UInt64 = 10,
+        network: BitcoinNetwork = .mainnet,
         limits: TransactionLimits = defaultLimits
     ) throws -> SweepResult {
         let key = try WIF(wif).privateKey
-        let sourceAddress = Address(publicKey: key.publicKey, network: .mainnet).description
+        let sourceAddress = Address(publicKey: key.publicKey, network: network).description
         let destinationScript = try Script.payToPublicKeyHash(
             try Address(destination).publicKeyHash,
             maximumByteCount: Int(limits.maximumScriptByteCount)

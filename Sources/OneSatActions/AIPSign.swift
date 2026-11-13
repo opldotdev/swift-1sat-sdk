@@ -31,12 +31,13 @@ enum AIPSign {
     }
 
     /// Appends `|`, AIP prefix, `BITCOIN_ECDSA`, the signer address, and a 65-byte compact signature.
-    static func apply(to script: Script, signingKey: PrivateKey) throws -> Script {
+    /// The signer address is encoded for `network`, as `AIP.sign(..., { chain })` does.
+    static func apply(to script: Script, signingKey: PrivateKey, network: BitcoinNetwork) throws -> Script {
         let message = try messageBuffer(script)
         let signature = try BitcoinSignedMessage.sign(message, using: signingKey, compressed: true)
         let address = Address(
             publicKey: signingKey.publicKey,
-            network: .mainnet,
+            network: network,
             compressed: true
         ).description
         var signed = script

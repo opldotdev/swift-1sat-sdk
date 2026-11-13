@@ -1,5 +1,6 @@
 import BSVTransaction
 import BSVWallet
+import BSVKeys
 import BSVScript
 import OneSatClient
 import OneSatTemplates
@@ -56,6 +57,36 @@ final class OneSatPermissionModuleAdapterTests: XCTestCase {
         XCTAssertTrue(details.contains(where: { $0.label == "Recipient" && !$0.value.isEmpty }))
         XCTAssertFalse(details.contains(where: { $0.value.contains("EVIL") || $0.value == "999999" }))
         XCTAssertEqual(review.summary, "Review BSV21 transaction")
+    }
+
+    /// TS `enrichIntent(..., { chain })`: a review on a testnet account shows testnet addresses.
+    func test_recipientAddressesFollowTheAccountNetwork() async throws {
+        let recipientScript = try Script(
+            bytes: [0x76, 0xa9, 0x14] + Array(repeating: 0x11, count: 20) + [0x88, 0xac],
+            maximumByteCount: 25
+        )
+        let request = try createAction(outputs: [
+            tokenOutput(script: try BSV21.transfer(tokenID: tokenID, amount: "5")
+                .lock(lockingScript: recipientScript).bytes),
+            try WalletCreateActionOutput(
+                lockingScript: recipientScript.bytes,
+                satoshis: 1_000,
+                outputDescription: "Payment"
+            ),
+        ])
+
+        for (network, expected) in [
+            (BitcoinNetwork.mainnet, "12ZEw5Hcv1hTb6YUQJ69y1V7uhcoDz92PH"),
+            (.testnet, "mh5CE8Nbj38iND267s4XnvhSmhDW7yWc6Q"),
+        ] {
+            let review = try await dispatch(
+                asset: .bsv21,
+                request: .action(.createAction(request)),
+                network: network
+            )
+            let recipients = review.panels.flatMap(\.details).filter { $0.label == "Recipient" }
+            XCTAssertEqual(recipients.map(\.value), [expected, expected])
+        }
     }
 
     func test_callerClaimsCannotPromoteANonTokenScript() async throws {
@@ -362,7 +393,8 @@ final class OneSatPermissionModuleAdapterTests: XCTestCase {
         asset: OneSatPermissionAsset,
         request: WalletRequest,
         verifier: Bsv21PermissionVerifier? = nil,
-        resolver: OneSatPermissionInputResolver? = nil
+        resolver: OneSatPermissionInputResolver? = nil,
+        network: BitcoinNetwork = .mainnet
     ) async throws -> OneSatAssetPermissionReview {
         let codec = try makeCodec()
         let registry = try PermissionModuleRegistry()
@@ -371,7 +403,8 @@ final class OneSatPermissionModuleAdapterTests: XCTestCase {
                 asset: asset,
                 codec: codec,
                 verifier: verifier,
-                resolveInputs: resolver
+                resolveInputs: resolver,
+                network: network
             ),
             for: asset.registryScheme
         )

@@ -195,6 +195,24 @@ final class OneSatScannerTests: XCTestCase {
         }
     }
 
+    func test_theNetworkPicksTheIndexerHostUnlessOneIsPassed() {
+        XCTAssertEqual(OneSatScanner().baseURL, URL(string: "https://api.1sat.app"))
+        XCTAssertEqual(OneSatScanner(network: .testnet).baseURL, URL(string: "https://testnet.api.1sat.app"))
+        let custom = URL(string: "https://indexer.example")!
+        XCTAssertEqual(OneSatScanner(baseURL: custom, network: .testnet).baseURL, custom)
+    }
+
+    /// `@1sat/types` constants.ts: ONESAT_{MAINNET,TESTNET}_URL and ONESAT_{MAINNET,TESTNET}_CONTENT_URL.
+    func test_apiHostsMatchTheTypeScriptConstants() {
+        XCTAssertEqual(OneSatAPI.baseURL(for: .mainnet).absoluteString, "https://api.1sat.app")
+        XCTAssertEqual(OneSatAPI.baseURL(for: .testnet).absoluteString, "https://testnet.api.1sat.app")
+        XCTAssertEqual(OneSatAPI.contentURL(for: .mainnet).absoluteString, "https://api.1sat.app/content")
+        XCTAssertEqual(
+            OneSatAPI.contentURL(for: .testnet).absoluteString,
+            "https://testnet.api.1sat.app/content"
+        )
+    }
+
     /// Against the real indexer. Skipped unless asked for.
     func test_liveScanAgainstARealAddress() async throws {
         try XCTSkipUnless(

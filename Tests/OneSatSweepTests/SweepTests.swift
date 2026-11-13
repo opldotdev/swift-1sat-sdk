@@ -18,6 +18,17 @@ final class SweepTests: XCTestCase {
         func spendableOutputs(forAddress address: String) async throws -> [SpendableUTXO] { utxos }
     }
 
+    /// Records the address the sweep reads from.
+    private final class RecordingSource: UTXOSource, @unchecked Sendable {
+        let utxos: [SpendableUTXO]
+        private(set) var askedFor: [String] = []
+        init(utxos: [SpendableUTXO]) { self.utxos = utxos }
+        func spendableOutputs(forAddress address: String) async throws -> [SpendableUTXO] {
+            askedFor.append(address)
+            return utxos
+        }
+    }
+
     private func key(_ byte: UInt8) throws -> PrivateKey {
         try PrivateKey([UInt8](repeating: 0, count: 31) + [byte])
     }
@@ -72,6 +83,39 @@ final class SweepTests: XCTestCase {
         )
 
         XCTAssertTrue(result.transaction.inputs.allSatisfy { !$0.unlockingScript.bytes.isEmpty })
+    }
+
+    /// The account's chain picks the source address, not the WIF's own prefix (TS uses `ctx.chain`).
+    func test_aTestnetSweepReadsTheTestnetAddressWhateverTheWIFPrefix() async throws {
+        let sourceKey = try key(3)
+        let destination = Address(publicKey: try key(4).publicKey, network: .testnet).description
+        let source = RecordingSource(utxos: [try utxo(sourceKey, satoshis: 100_000)])
+
+        let result = try await Sweep.build(
+            fromWIF: WIF(privateKey: sourceKey, network: .mainnet).encoded,
+            toAddress: destination, source: source, network: .testnet
+        )
+
+        XCTAssertEqual(
+            source.askedFor,
+            [Address(publicKey: sourceKey.publicKey, network: .testnet).description]
+        )
+        XCTAssertEqual(result.transaction.outputs.count, 1)
+        XCTAssertTrue(result.transaction.inputs.allSatisfy { !$0.unlockingScript.bytes.isEmpty })
+    }
+
+    func test_anEmptyTestnetAddressIsReportedInTestnetForm() throws {
+        let sourceKey = try key(1)
+        let destination = Address(publicKey: try key(2).publicKey, network: .testnet).description
+        XCTAssertThrowsError(try Sweep.build(
+            fromWIF: WIF(privateKey: sourceKey, network: .mainnet).encoded,
+            toAddress: destination, utxos: [], network: .testnet
+        )) { error in
+            XCTAssertEqual(
+                error as? SweepError,
+                .nothingToSweep(address: Address(publicKey: sourceKey.publicKey, network: .testnet).description)
+            )
+        }
     }
 
     func test_anEmptyAddressIsNothingToSweep() async throws {
