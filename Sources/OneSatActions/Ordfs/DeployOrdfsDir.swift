@@ -115,7 +115,11 @@ public enum DeployOrdfsDir {
                     keyID: try WalletKeyID(keyID),
                     counterparty: .self
                 )
-                manifestScript = try AIPSign.apply(to: built.manifestScript, signingKey: key)
+                manifestScript = try AIPSign.apply(
+                    to: built.manifestScript,
+                    signingKey: key,
+                    network: ctx.chain.network
+                )
             }
             let customInstructions = try resolved?.customInstructions.map {
                 try CustomInstructions(protocolID: $0.protocolID, keyID: $0.keyID).encoded()

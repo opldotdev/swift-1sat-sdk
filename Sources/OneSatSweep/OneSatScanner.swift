@@ -14,19 +14,19 @@ import ToolboxServices
 /// scripts: an owner may control an OrdLock cancellation key, not just a P2PKH address.
 /// A capped or interrupted response is refused so callers retain the source keys and retry.
 public struct OneSatScanner: AssetScanner {
-    /// The 1Sat-stack API base. `https://api.1sat.app` for mainnet.
+    /// The 1Sat-stack API base: `OneSatAPI.baseURL(for:)` unless one is passed.
     public let baseURL: URL
     private let http: any HTTPGet
     /// Maximum rows per scan. Reaching this bound is an explicit incomplete-scan error.
     private let limit: Int
 
     public init(
-        baseURL: URL = URL(string: "https://api.1sat.app")!,
-        network _: BitcoinNetwork = .mainnet,
+        baseURL: URL? = nil,
+        network: BitcoinNetwork = .mainnet,
         http: any HTTPGet = URLSessionHTTPGet(),
         limit: Int = 10_000
     ) {
-        self.baseURL = baseURL
+        self.baseURL = baseURL ?? OneSatAPI.baseURL(for: network)
         self.http = http
         self.limit = limit
     }

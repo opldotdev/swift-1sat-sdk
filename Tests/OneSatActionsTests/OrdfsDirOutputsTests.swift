@@ -160,7 +160,7 @@ final class OrdfsDirOutputsTests: XCTestCase {
         var signedInput: Script?
         let result = try OrdfsDirOutputs.build([file], writeMode: .b, map: [("app", "x")]) { script in
             signedInput = script
-            return try AIPSign.apply(to: script, signingKey: try ActionVectors.identity())
+            return try AIPSign.apply(to: script, signingKey: try ActionVectors.identity(), network: .mainnet)
         }
         XCTAssertNotNil(MAPTemplate.decode(try XCTUnwrap(signedInput)))
         XCTAssertGreaterThan(result.manifestScript.bytes.count, try XCTUnwrap(signedInput).bytes.count)

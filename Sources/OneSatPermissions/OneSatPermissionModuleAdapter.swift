@@ -109,17 +109,21 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
     private let codec: WalletBRC100JSONCodec
     private let verifier: Bsv21PermissionVerifier?
     private let resolveInputs: OneSatPermissionInputResolver?
+    private let network: BitcoinNetwork
 
+    /// `network` encodes the recipient addresses shown in a review. Pass the account's chain.
     public init(
         asset: OneSatPermissionAsset,
         codec: WalletBRC100JSONCodec,
         verifier: Bsv21PermissionVerifier? = nil,
-        resolveInputs: OneSatPermissionInputResolver? = nil
+        resolveInputs: OneSatPermissionInputResolver? = nil,
+        network: BitcoinNetwork = .mainnet
     ) {
         self.asset = asset
         self.codec = codec
         self.verifier = verifier
         self.resolveInputs = resolveInputs
+        self.network = network
     }
 
     public func review(_ request: PermissionModuleRequest) async throws -> PermissionModuleReview {
@@ -139,7 +143,8 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
                 requestID: request.invocationID,
                 request: decoded,
                 originator: request.originator.rawValue,
-                resolveInputs: resolveInputs
+                resolveInputs: resolveInputs,
+                network: network
               ) else {
             return .init(decision: .continueAuthorization)
         }
@@ -162,7 +167,8 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
         requestID: UUID,
         request: WalletRequest,
         originator: String,
-        resolveInputs: OneSatPermissionInputResolver?
+        resolveInputs: OneSatPermissionInputResolver?,
+        network: BitcoinNetwork
     ) async -> OneSatAssetPermissionReview? {
         switch request {
         case .action(.createAction(let value)):
@@ -171,7 +177,8 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
                     requestID: requestID,
                     value: value,
                     originator: originator,
-                    resolveInputs: resolveInputs
+                    resolveInputs: resolveInputs,
+                    network: network
                 )
             }
             let matching = (value.outputs ?? []).enumerated().filter { _, output in
@@ -288,7 +295,8 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
         requestID: UUID,
         value: WalletCreateActionRequest,
         originator: String,
-        resolveInputs: OneSatPermissionInputResolver?
+        resolveInputs: OneSatPermissionInputResolver?,
+        network: BitcoinNetwork
     ) async -> OneSatAssetPermissionReview? {
         var legs: [TokenLeg] = []
         var panels: [OneSatAssetPermissionReview.Panel] = []
@@ -302,7 +310,8 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
                 panels.append(valueOutputPanel(
                     index: index,
                     satoshis: output.satoshis,
-                    lockingScript: output.lockingScript
+                    lockingScript: output.lockingScript,
+                    network: network
                 ))
                 continue
             }
@@ -314,7 +323,8 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
                     variant: .value,
                     details: scriptDetails(
                         satoshis: output.satoshis,
-                        lockingScript: output.lockingScript
+                        lockingScript: output.lockingScript,
+                        network: network
                     )
                 ))
                 continue
@@ -328,7 +338,7 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
                 scriptSuffix: decoded.inscription.scriptSuffix?.bytes
             )
             legs.append(leg)
-            panels.append(panel(for: leg))
+            panels.append(panel(for: leg, network: network))
         }
         guard !legs.isEmpty || contradiction != nil else { return nil }
 
@@ -368,7 +378,7 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
                             details: [
                                 .init(label: "Outpoint", value: outpoint),
                                 .init(label: "Satoshis", value: String(metadata.satoshis)),
-                            ] + lockingScriptDetails(bytes)
+                            ] + lockingScriptDetails(bytes, network: network)
                         ))
                         continue
                     }
@@ -381,7 +391,7 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
                         scriptSuffix: decoded.inscription.scriptSuffix?.bytes
                     )
                     legs.append(leg)
-                    panels.append(panel(for: leg))
+                    panels.append(panel(for: leg, network: network))
                 }
             } catch {
                 unresolvedInputs = true
@@ -472,7 +482,7 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
         )
     }
 
-    private static func panel(for leg: TokenLeg) -> OneSatAssetPermissionReview.Panel {
+    private static func panel(for leg: TokenLeg, network: BitcoinNetwork) -> OneSatAssetPermissionReview.Panel {
         var details: [OneSatAssetPermissionReview.Detail] = [
             .init(label: "Operation", value: leg.token.operation.rawValue),
             .init(label: "Satoshis", value: String(leg.satoshis)),
@@ -484,7 +494,7 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
         if let symbol = leg.token.symbol { details.append(.init(label: "Symbol", value: symbol)) }
         if let outpoint = leg.outpoint { details.append(.init(label: "Outpoint", value: outpoint)) }
         if let suffix = leg.scriptSuffix {
-            if let recipient = p2pkhRecipient(from: suffix) {
+            if let recipient = p2pkhRecipient(from: suffix, network: network) {
                 details.append(.init(label: "Recipient", value: recipient))
             }
             details.append(.init(label: "Recipient script", value: hex(suffix)))
@@ -506,29 +516,32 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
     private static func valueOutputPanel(
         index: Int,
         satoshis: UInt64,
-        lockingScript: [UInt8]
+        lockingScript: [UInt8],
+        network: BitcoinNetwork
     ) -> OneSatAssetPermissionReview.Panel {
         .init(
             title: "Value output",
             subtitle: "Output \(index)",
             variant: .value,
-            details: scriptDetails(satoshis: satoshis, lockingScript: lockingScript)
+            details: scriptDetails(satoshis: satoshis, lockingScript: lockingScript, network: network)
         )
     }
 
     private static func scriptDetails(
         satoshis: UInt64,
-        lockingScript: [UInt8]
+        lockingScript: [UInt8],
+        network: BitcoinNetwork
     ) -> [OneSatAssetPermissionReview.Detail] {
         [.init(label: "Satoshis", value: String(satoshis))]
-            + lockingScriptDetails(lockingScript)
+            + lockingScriptDetails(lockingScript, network: network)
     }
 
     private static func lockingScriptDetails(
-        _ lockingScript: [UInt8]
+        _ lockingScript: [UInt8],
+        network: BitcoinNetwork
     ) -> [OneSatAssetPermissionReview.Detail] {
         var details: [OneSatAssetPermissionReview.Detail] = []
-        if let recipient = p2pkhRecipient(from: lockingScript) {
+        if let recipient = p2pkhRecipient(from: lockingScript, network: network) {
             details.append(.init(label: "Recipient", value: recipient))
         }
         if lockingScript.count <= 128 {
@@ -569,7 +582,7 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
         return transactionID.lowercased() + "_" + String(index)
     }
 
-    private static func p2pkhRecipient(from suffix: [UInt8]) -> String? {
+    private static func p2pkhRecipient(from suffix: [UInt8], network: BitcoinNetwork) -> String? {
         guard suffix.count >= 25,
               let script = try? Script(
                 bytes: Array(suffix.prefix(25)),
@@ -577,7 +590,7 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
               ),
               let bytes = script.publicKeyHash,
               let hash = try? Hash160(bytes) else { return nil }
-        return Address(publicKeyHash: hash, network: .mainnet).description
+        return Address(publicKeyHash: hash, network: network).description
     }
 
     private static func hex(_ bytes: [UInt8]) -> String {

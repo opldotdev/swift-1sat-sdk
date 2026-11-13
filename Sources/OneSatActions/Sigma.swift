@@ -122,7 +122,7 @@ public enum Sigma {
         let signature = try BitcoinSignedMessage.sign(messageHash, using: key, compressed: true)
         let address = Address(
             publicKey: key.publicKey,
-            network: .mainnet,
+            network: ctx.chain.network,
             compressed: true
         ).description
 

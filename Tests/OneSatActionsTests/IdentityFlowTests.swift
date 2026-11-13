@@ -24,7 +24,25 @@ final class IdentityFlowTests: XCTestCase {
     func test_computeBapIdMatchesTheTypeScriptVector() throws {
         let identity = try ActionVectors.identity()
         XCTAssertEqual(try Identity.computeBapId(identity: identity), expectedBapId)
-        XCTAssertEqual(try Identity.computeBapId(identity: identity), expectedBapId)
+        XCTAssertEqual(try Identity.computeBapId(identity: identity, chain: .main), expectedBapId)
+    }
+
+    /// TS `computeBapId({ ...ctx, chain: 'test' })`: identity-0 is `n3fHJti1YvZrkkdNqVixK87ZvCs2HcKKHw`.
+    func test_computeBapIdOnTestnetMatchesTheTypeScriptVector() throws {
+        let identity = try ActionVectors.identity()
+        XCTAssertEqual(try derivedAddress(identity, index: 0, network: .testnet).description,
+                       "n3fHJti1YvZrkkdNqVixK87ZvCs2HcKKHw")
+        XCTAssertEqual(try Identity.computeBapId(identity: identity, chain: .test), "BZCKNYMnk9jXwxeN9ESjxVTjbqH")
+    }
+
+    func test_aipSignerAddressFollowsTheNetwork() throws {
+        let identity = try ActionVectors.identity()
+        let rootKey = try derivedKey(identity, index: 0)
+        let unsigned = try idScript(bapId: expectedBapId, declareAddress: "x")
+        let signed = try AIPSign.apply(to: unsigned, signingKey: rootKey, network: .testnet)
+        let operations = try signed.operations(maximumPushDataByteCount: ActionScript.maximumByteCount)
+        let address = try XCTUnwrap(operations[operations.count - 2].pushedData)
+        XCTAssertEqual(String(bytes: address, encoding: .utf8), "n3fHJti1YvZrkkdNqVixK87ZvCs2HcKKHw")
     }
 
     func test_aipRoundTripRecoversIdentityZeroAddress() throws {
@@ -32,7 +50,7 @@ final class IdentityFlowTests: XCTestCase {
         let rootKey = try derivedKey(identity, index: 0)
         let declare = try derivedAddress(identity, index: 1).description
         let unsigned = try idScript(bapId: expectedBapId, declareAddress: declare)
-        let signed = try AIPSign.apply(to: unsigned, signingKey: rootKey)
+        let signed = try AIPSign.apply(to: unsigned, signingKey: rootKey, network: .mainnet)
         let message = try AIPSign.messageBuffer(unsigned)
         let operations = try signed.operations(maximumPushDataByteCount: ActionScript.maximumByteCount)
         XCTAssertGreaterThanOrEqual(operations.count, 5)
@@ -196,10 +214,14 @@ final class IdentityFlowTests: XCTestCase {
         )
     }
 
-    private func derivedAddress(_ identity: PrivateKey, index: Int) throws -> Address {
+    private func derivedAddress(
+        _ identity: PrivateKey,
+        index: Int,
+        network: BitcoinNetwork = .mainnet
+    ) throws -> Address {
         Address(
             publicKey: try derivedKey(identity, index: index).publicKey,
-            network: .mainnet,
+            network: network,
             compressed: true
         )
     }
