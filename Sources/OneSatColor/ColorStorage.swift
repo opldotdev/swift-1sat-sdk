@@ -5,6 +5,7 @@ import BSVWallet
 import ToolboxActions
 import ToolboxStorage
 import ToolboxStorageClient
+import OneSatMetanet
 
 /// The storage calls the 1Color actions make. `StorageClient` provides them; tests stand in.
 /// The BRC-177 calls come from `NoSendExpiryStorage`.
@@ -43,33 +44,7 @@ public enum ColorBEEF {
     /// `toBinaryAtomic(txid)`: the subject with exactly its ancestry, down to proven or
     /// transaction-ID-only records, and the BUMPs those use.
     public static func atomic(_ txid: TransactionID, in beef: BEEF) throws -> AtomicBEEF {
-        let txLimits = limits.transactionLimits
-        var entries: [TransactionID: BEEFTransaction] = [:]
-        for entry in beef.transactions { entries[try entry.transactionID(limits: txLimits)] = entry }
-        var keep: Set<TransactionID> = []
-        func visit(_ id: TransactionID) {
-            guard !keep.contains(id), let entry = entries[id] else { return }
-            keep.insert(id)
-            guard case .raw(let transaction) = entry else { return }
-            for input in transaction.inputs { visit(input.previousOutput.transactionID) }
-        }
-        visit(txid)
-        var paths: [MerklePath] = []
-        var remap: [Int: Int] = [:]
-        var kept: [BEEFTransaction] = []
-        for entry in beef.transactions where keep.contains(try entry.transactionID(limits: txLimits)) {
-            if case .rawWithMerklePath(let transaction, let index) = entry {
-                if remap[index] == nil {
-                    remap[index] = paths.count
-                    paths.append(beef.merklePaths[index])
-                }
-                kept.append(.rawWithMerklePath(transaction: transaction, merklePathIndex: remap[index]!))
-            } else {
-                kept.append(entry)
-            }
-        }
-        let trimmed = try BEEF(version: beef.version, merklePaths: paths, transactions: kept, limits: limits)
-        return try AtomicBEEF(subjectTransactionID: txid, beef: trimmed, limits: limits)
+        try MetanetBEEF.atomic(txid, in: beef)
     }
 
     /// The source transactions of the given outpoints, each with its ancestry, merged.

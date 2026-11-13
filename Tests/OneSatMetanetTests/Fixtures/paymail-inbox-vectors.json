@@ -1,0 +1,315 @@
+{
+ "recipientPrivateKey": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+ "recipientKey": "03ab5d2e79cfd621b1b027ffb24e2453ed7fb571ba9a841ff0e2473466cabd168d",
+ "anyoneKey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+ "prefix": "AQIDBAUGBwgJCgsMDQ4PEA==",
+ "suffix": "8O/u7ezr6uno5+bl5OPi4Q==",
+ "parentTxid": "20205da2a9580c0f3ceb6fc9c2e886585e80608039bf497636198ef08810c77d",
+ "paymentTxid": "a6f1924e33880a481428ef7bb3d44c1f69d68ce796b1081010be9d589c530d5f",
+ "paymentScript": "76a914ab718f3717919e8b5195045573aa8367ac9ba48888ac",
+ "plainHex": "0200beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d20200201000100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac000000000001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac00000000",
+ "atomicHex": "010101015f0d539c589dbe101008b196e78cd6691f4cd4b37bef2814480a88334e92f1a60100beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020020100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac00000000010001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac0000000000",
+ "trailingHex": "0200beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d20200301000100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac000000000001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac0000000002efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+ "generator": "@bsv/sdk 4.1.0; b-open-io/1sat-sdk 71fd3ba packages/actions/src/sync/syncMessages.ts run unmodified with a stub MessageBoxClient and a wallet that records internalizeAction",
+ "cases": [
+  {
+   "name": "plain",
+   "swiftBody": "{\"beef\":\"0200beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d20200201000100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac000000000001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac00000000\",\"outputIndex\":1,\"derivationPrefix\":\"AQIDBAUGBwgJCgsMDQ4PEA==\",\"derivationSuffix\":\"8O/u7ezr6uno5+bl5OPi4Q==\",\"senderIdentityKey\":\"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",\"satoshis\":3000,\"alias\":\"luke\"}",
+   "processed": 1,
+   "failed": 0,
+   "acknowledged": [
+    "m-plain"
+   ],
+   "tx": "010101015f0d539c589dbe101008b196e78cd6691f4cd4b37bef2814480a88334e92f1a60200beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d20200201000100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac000000000001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac00000000",
+   "descriptionUTF16": [
+    80,
+    97,
+    121,
+    109,
+    97,
+    105,
+    108,
+    32,
+    112,
+    97,
+    121,
+    109,
+    101,
+    110,
+    116,
+    32,
+    116,
+    111,
+    32,
+    108,
+    117,
+    107,
+    101
+   ],
+   "outputs": [
+    {
+     "outputIndex": 1,
+     "protocol": "wallet payment",
+     "paymentRemittance": {
+      "derivationPrefix": "AQIDBAUGBwgJCgsMDQ4PEA==",
+      "derivationSuffix": "8O/u7ezr6uno5+bl5OPi4Q==",
+      "senderIdentityKey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+     }
+    }
+   ],
+   "argumentKeys": [
+    "description",
+    "outputs",
+    "tx"
+   ]
+  },
+  {
+   "name": "atomic",
+   "swiftBody": "{\"beef\":\"010101015f0d539c589dbe101008b196e78cd6691f4cd4b37bef2814480a88334e92f1a60100beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020020100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac00000000010001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac0000000000\",\"outputIndex\":1,\"derivationPrefix\":\"AQIDBAUGBwgJCgsMDQ4PEA==\",\"derivationSuffix\":\"8O/u7ezr6uno5+bl5OPi4Q==\",\"senderIdentityKey\":\"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",\"satoshis\":3000,\"alias\":\"abcdefghijklmnopqrstuvwxyz01234\"}",
+   "processed": 1,
+   "failed": 0,
+   "acknowledged": [
+    "m-atomic"
+   ],
+   "tx": "010101015f0d539c589dbe101008b196e78cd6691f4cd4b37bef2814480a88334e92f1a60100beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020020100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac00000000010001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac0000000000",
+   "descriptionUTF16": [
+    80,
+    97,
+    121,
+    109,
+    97,
+    105,
+    108,
+    32,
+    112,
+    97,
+    121,
+    109,
+    101,
+    110,
+    116,
+    32,
+    116,
+    111,
+    32,
+    97,
+    98,
+    99,
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    115,
+    116,
+    117,
+    118,
+    119,
+    120,
+    121,
+    122,
+    48,
+    49,
+    50,
+    51,
+    52
+   ],
+   "outputs": [
+    {
+     "outputIndex": 1,
+     "protocol": "wallet payment",
+     "paymentRemittance": {
+      "derivationPrefix": "AQIDBAUGBwgJCgsMDQ4PEA==",
+      "derivationSuffix": "8O/u7ezr6uno5+bl5OPi4Q==",
+      "senderIdentityKey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+     }
+    }
+   ],
+   "argumentKeys": [
+    "description",
+    "outputs",
+    "tx"
+   ]
+  },
+  {
+   "name": "trailingTxidOnly",
+   "swiftBody": "{\"beef\":\"0200beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d20200301000100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac000000000001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac0000000002efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef\",\"outputIndex\":1,\"derivationPrefix\":\"AQIDBAUGBwgJCgsMDQ4PEA==\",\"derivationSuffix\":\"8O/u7ezr6uno5+bl5OPi4Q==\",\"senderIdentityKey\":\"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",\"satoshis\":3000,\"alias\":\"abcdefghijklmnopqrstuvwxyz0123456789\"}",
+   "processed": 1,
+   "failed": 0,
+   "acknowledged": [
+    "m-trailingTxidOnly"
+   ],
+   "tx": "010101015f0d539c589dbe101008b196e78cd6691f4cd4b37bef2814480a88334e92f1a60200beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d20200201000100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac000000000001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac00000000",
+   "descriptionUTF16": [
+    80,
+    97,
+    121,
+    109,
+    97,
+    105,
+    108,
+    32,
+    112,
+    97,
+    121,
+    109,
+    101,
+    110,
+    116,
+    32,
+    116,
+    111,
+    32,
+    97,
+    98,
+    99,
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    115,
+    116,
+    117,
+    118,
+    119,
+    120,
+    121,
+    122,
+    48,
+    49,
+    50,
+    51,
+    52
+   ],
+   "outputs": [
+    {
+     "outputIndex": 1,
+     "protocol": "wallet payment",
+     "paymentRemittance": {
+      "derivationPrefix": "AQIDBAUGBwgJCgsMDQ4PEA==",
+      "derivationSuffix": "8O/u7ezr6uno5+bl5OPi4Q==",
+      "senderIdentityKey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+     }
+    }
+   ],
+   "argumentKeys": [
+    "description",
+    "outputs",
+    "tx"
+   ]
+  },
+  {
+   "name": "stringBody",
+   "swiftBody": "\"{\\\"beef\\\":\\\"0200beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d20200201000100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac000000000001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac00000000\\\",\\\"outputIndex\\\":1,\\\"derivationPrefix\\\":\\\"AQIDBAUGBwgJCgsMDQ4PEA==\\\",\\\"derivationSuffix\\\":\\\"8O/u7ezr6uno5+bl5OPi4Q==\\\",\\\"senderIdentityKey\\\":\\\"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\\\",\\\"satoshis\\\":3000,\\\"alias\\\":\\\"abcdefghijklmnopqrstuvwxyz0123\ud83d\ude00x\\\"}\"",
+   "processed": 1,
+   "failed": 0,
+   "acknowledged": [
+    "m-stringBody"
+   ],
+   "tx": "010101015f0d539c589dbe101008b196e78cd6691f4cd4b37bef2814480a88334e92f1a60200beef01fe00350c00010100027dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d20200201000100000001cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd000000000151ffffffff0188130000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88ac000000000001000000017dc71088f08e19367649bf398060805e5886e8c2c96feb3c0f0c58a9a25d2020000000000151ffffffff02b0040000000000001976a9144666596ad87ac304841e1f398aaadd5ff69844ee88acb80b0000000000001976a914ab718f3717919e8b5195045573aa8367ac9ba48888ac00000000",
+   "descriptionUTF16": [
+    80,
+    97,
+    121,
+    109,
+    97,
+    105,
+    108,
+    32,
+    112,
+    97,
+    121,
+    109,
+    101,
+    110,
+    116,
+    32,
+    116,
+    111,
+    32,
+    97,
+    98,
+    99,
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112,
+    113,
+    114,
+    115,
+    116,
+    117,
+    118,
+    119,
+    120,
+    121,
+    122,
+    48,
+    49,
+    50,
+    51,
+    55357
+   ],
+   "outputs": [
+    {
+     "outputIndex": 1,
+     "protocol": "wallet payment",
+     "paymentRemittance": {
+      "derivationPrefix": "AQIDBAUGBwgJCgsMDQ4PEA==",
+      "derivationSuffix": "8O/u7ezr6uno5+bl5OPi4Q==",
+      "senderIdentityKey": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+     }
+    }
+   ],
+   "argumentKeys": [
+    "description",
+    "outputs",
+    "tx"
+   ]
+  },
+  {
+   "name": "notJSON",
+   "swiftBody": "not json",
+   "processed": 0,
+   "failed": 1,
+   "acknowledged": []
+  },
+  {
+   "name": "emptyBeef",
+   "swiftBody": "{\"beef\":\"0200beef0000\",\"outputIndex\":1,\"derivationPrefix\":\"AQIDBAUGBwgJCgsMDQ4PEA==\",\"derivationSuffix\":\"8O/u7ezr6uno5+bl5OPi4Q==\",\"senderIdentityKey\":\"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\",\"satoshis\":3000,\"alias\":\"x\"}",
+   "processed": 0,
+   "failed": 1,
+   "acknowledged": []
+  }
+ ]
+}
