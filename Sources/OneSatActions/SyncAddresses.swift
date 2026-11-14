@@ -30,17 +30,43 @@ public enum SyncAddresses {
         }
     }
 
+    /// One transaction the sync could not take in, and why. TS logs these with `console.error`;
+    /// here they come back in ``Result`` so the caller can show a stalled sync.
+    public struct Failure: Equatable, Sendable {
+        public let txid: String
+        public let message: String
+
+        public init(txid: String, message: String) {
+            self.txid = txid
+            self.message = message
+        }
+    }
+
     public struct Result: Equatable, Sendable {
         public let processed: Int
         public let failed: Int
         public let lastScore: Double
         public let addresses: [String]
+        /// One entry per failed transaction, in sync order; `failed == failures.count`.
+        public let failures: [Failure]
+        /// Why the closing `sweepDeposit` failed, if it did. The deposits stay in the basket for
+        /// the next sync.
+        public let sweepError: String?
 
-        public init(processed: Int, failed: Int, lastScore: Double, addresses: [String]) {
+        public init(
+            processed: Int,
+            failed: Int,
+            lastScore: Double,
+            addresses: [String],
+            failures: [Failure] = [],
+            sweepError: String? = nil
+        ) {
             self.processed = processed
             self.failed = failed
             self.lastScore = lastScore
             self.addresses = addresses
+            self.failures = failures
+            self.sweepError = sweepError
         }
     }
 
@@ -108,7 +134,7 @@ public enum SyncAddresses {
         }
 
         var processed = 0
-        var failed = 0
+        var failures: [Failure] = []
         for txid in order {
             guard let txOutputs = outputsByTxid[txid] else { continue }
             if try await store.has(txid) { continue }
@@ -123,24 +149,33 @@ public enum SyncAddresses {
                 try await store.add(txid)
                 processed += 1
             } catch {
-                failed += 1
+                failures.append(Failure(txid: txid, message: String(describing: error)))
             }
         }
 
-        if maxSafeScore > last {
+        // TS advances the cursor only when every transaction succeeded. The cursor is the only
+        // record of what is left, so moving it past a failure loses that deposit once it is
+        // deeper than the reorg window. Holding it back re-fetches the range next sync, and
+        // `store.has` skips what is already done.
+        if failures.isEmpty, maxSafeScore > last {
             try await store.setLastScore(maxSafeScore)
         }
 
         // A failed sweep leaves deposits in the basket for the next sync.
+        var sweepError: String?
         do {
             _ = try await SweepDeposit.execute(ctx)
-        } catch {}
+        } catch {
+            sweepError = String(describing: error)
+        }
 
         return Result(
             processed: processed,
-            failed: failed,
+            failed: failures.count,
             lastScore: maxSafeScore,
-            addresses: addresses
+            addresses: addresses,
+            failures: failures,
+            sweepError: sweepError
         )
     }
 
@@ -155,15 +190,12 @@ public enum SyncAddresses {
             return
         }
 
+        // `/1sat/beef/:txid` answers Atomic BEEF; TS reads it with `Beef.fromBinary`, which also
+        // takes plain BEEF.
         let bytes = try await beef.beef(forTxid: txid)
-        let parsed = try BEEF(bytes: bytes, limits: WalletBEEFLimits.standard)
         let subjectID = try TransactionID(displayHex: txid)
-        let atomic = try AtomicBEEF(
-            subjectTransactionID: subjectID,
-            beef: parsed,
-            limits: WalletBEEFLimits.standard
-        )
-        guard let subject = try parsed.transaction(
+        let atomic = try OneSatBEEF.atomic(bytes, subject: subjectID)
+        guard let subject = try atomic.beef.transaction(
             for: subjectID,
             limits: WalletBEEFLimits.standard.transactionLimits
         ) else {

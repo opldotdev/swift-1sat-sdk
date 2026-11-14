@@ -120,6 +120,99 @@ final class SyncAddressesTests: XCTestCase {
         }
     }
 
+    /// `/1sat/beef/:txid` answers Atomic BEEF (BRC-95). Plain `BEEF(bytes:)` refused it with
+    /// `invalidVersion(0x01010101)`, so no deposit was ever internalized.
+    func test_internalizesADepositServedAsAtomicBEEF() async throws {
+        let identity = try ActionVectors.identity()
+        let fixture = try atomicDepositFixture(identity: identity)
+        XCTAssertEqual(Array(fixture.atomicBytes.prefix(4)), [0x01, 0x01, 0x01, 0x01])
+        XCTAssertThrowsError(
+            try BEEF(bytes: fixture.atomicBytes, limits: WalletBEEFLimits.standard)
+        ) { error in
+            XCTAssertEqual(error as? BEEFError, .invalidVersion(16_843_009))
+        }
+
+        let store = MemoryStore()
+        let internalizer = CapturingInternalizer()
+        let result = try await SyncAddresses.execute(
+            try context(identity: identity, services: HeightServices(height: 100)),
+            internalizer: internalizer,
+            beef: FixedBeef(bytes: fixture.atomicBytes),
+            syncSource: FixedSync(outputs: [
+                SyncOutput(outpoint: "\(fixture.txid).1", score: 90),
+            ]),
+            store: store,
+            request: SyncAddresses.Request()
+        )
+
+        XCTAssertEqual(result.processed, 1)
+        XCTAssertEqual(result.failed, 0)
+        XCTAssertEqual(result.failures, [])
+        let stored = try await store.has(fixture.txid)
+        XCTAssertTrue(stored)
+        let storedScore = try await store.lastScore()
+        XCTAssertEqual(storedScore, 90)
+
+        let requests = await internalizer.requests
+        XCTAssertEqual(requests.count, 1)
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.transaction, fixture.atomic)
+        XCTAssertEqual(request.description, "Received 1500 sats")
+        XCTAssertEqual(request.outputs.map(\.outputIndex), [1])
+    }
+
+    /// TS `syncAddresses`: a transaction that fails is logged and counted, the rest still sync,
+    /// and the cursor stays put so the failure is fetched again next time.
+    func test_aFailedTxidIsReportedWithoutStoppingTheRestAndHoldsTheCursor() async throws {
+        let identity = try ActionVectors.identity()
+        let fixture = try atomicDepositFixture(identity: identity)
+        let broken = String(repeating: "44", count: 32)
+        let store = MemoryStore()
+        let internalizer = CapturingInternalizer()
+        let result = try await SyncAddresses.execute(
+            try context(identity: identity, services: HeightServices(height: 100)),
+            internalizer: internalizer,
+            beef: BeefByTxid(bytes: [
+                broken: [0xde, 0xad, 0xbe, 0xef],
+                fixture.txid: fixture.atomicBytes,
+            ]),
+            syncSource: FixedSync(outputs: [
+                SyncOutput(outpoint: "\(broken).0", score: 80),
+                SyncOutput(outpoint: "\(fixture.txid).1", score: 90),
+            ]),
+            store: store,
+            request: SyncAddresses.Request()
+        )
+
+        XCTAssertEqual(result.processed, 1)
+        XCTAssertEqual(result.failed, 1)
+        XCTAssertEqual(result.failures.map(\.txid), [broken])
+        XCTAssertTrue(result.failures[0].message.contains("invalidVersion"), result.failures[0].message)
+        XCTAssertEqual(result.lastScore, 90)
+        let storedScore = try await store.lastScore()
+        XCTAssertEqual(storedScore, 0)
+        let brokenStored = try await store.has(broken)
+        let goodStored = try await store.has(fixture.txid)
+        XCTAssertFalse(brokenStored)
+        XCTAssertTrue(goodStored)
+        let requestCount = await internalizer.requests.count
+        XCTAssertEqual(requestCount, 1)
+    }
+
+    func test_aFailedSweepIsReported() async throws {
+        let identity = try ActionVectors.identity()
+        let result = try await SyncAddresses.execute(
+            try context(identity: identity, services: HeightServices(height: 100)),
+            internalizer: CapturingInternalizer(),
+            beef: ProbeBeef(),
+            syncSource: FixedSync(outputs: []),
+            store: MemoryStore(),
+            request: SyncAddresses.Request()
+        )
+        XCTAssertEqual(result.failures, [])
+        XCTAssertNotNil(result.sweepError)
+    }
+
     func test_allSpentTxidIsMarkedProcessedWithoutInternalize() async throws {
         let identity = try ActionVectors.identity()
         let txid = String(repeating: "11", count: 32)
@@ -255,6 +348,60 @@ final class SyncAddressesTests: XCTestCase {
         )
     }
 
+    private struct AtomicDepositFixture {
+        let txid: String
+        let atomic: AtomicBEEF
+        let atomicBytes: [UInt8]
+    }
+
+    /// What `/1sat/beef/:txid` serves: the subject (dust at vout 0, 1500 sats to deposit address 0
+    /// at vout 1) and the parent it spends, in a BRC-95 envelope naming the subject.
+    private func atomicDepositFixture(identity: PrivateKey) throws -> AtomicDepositFixture {
+        let address = try DepositAddresses.address(identity: identity, index: 0)
+        let p2pkh = try Script.payToPublicKeyHash(
+            address,
+            maximumByteCount: Int(WalletTransactionLimits.standard.maximumScriptByteCount)
+        )
+        let opTrue = try Script(bytes: [0x51], maximumByteCount: 10_000)
+        let limits = WalletBEEFLimits.standard
+        let parent = Transaction(
+            version: 1,
+            inputs: [],
+            outputs: [TransactionOutput(satoshis: 2_000, lockingScript: opTrue)],
+            lockTime: 0
+        )
+        let parentID = try parent.transactionID(limits: limits.transactionLimits)
+        let subject = Transaction(
+            version: 1,
+            inputs: [
+                TransactionInput(
+                    previousOutput: Outpoint(transactionID: parentID, outputIndex: 0),
+                    unlockingScript: try Script(bytes: [], maximumByteCount: 10)
+                ),
+            ],
+            outputs: [
+                TransactionOutput(satoshis: 1, lockingScript: p2pkh),
+                TransactionOutput(satoshis: 1_500, lockingScript: p2pkh),
+            ],
+            lockTime: 0
+        )
+        let subjectID = try subject.transactionID(limits: limits.transactionLimits)
+        let atomic = try AtomicBEEF(
+            subjectTransactionID: subjectID,
+            beef: try BEEF(
+                merklePaths: [],
+                transactions: [.raw(parent), .raw(subject)],
+                limits: limits
+            ),
+            limits: limits
+        )
+        return AtomicDepositFixture(
+            txid: subjectID.displayHex,
+            atomic: atomic,
+            atomicBytes: try atomic.serialized(limits: limits)
+        )
+    }
+
     private func context(
         identity: PrivateKey,
         services: (any WalletServices)?
@@ -318,6 +465,14 @@ private struct FixedSync: OwnerSyncSource {
 private struct FixedBeef: ListingBeefSource {
     let bytes: [UInt8]
     func beef(forTxid _: String) async throws -> [UInt8] { bytes }
+}
+
+private struct BeefByTxid: ListingBeefSource {
+    let bytes: [String: [UInt8]]
+    func beef(forTxid txid: String) async throws -> [UInt8] {
+        guard let found = bytes[txid] else { throw ServiceError.notImplemented("beef \(txid)") }
+        return found
+    }
 }
 
 private actor ProbeSync: OwnerSyncSource {
