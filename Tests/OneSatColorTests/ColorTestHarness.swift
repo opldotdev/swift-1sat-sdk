@@ -379,6 +379,17 @@ actor MockWallet: ColorWalletStorage {
         return WalletAbortActionResult(aborted: true)
     }
 
+    /// Holds output `vout` of `transaction` in `basket`, as an earlier action of this wallet would.
+    func hold(_ transaction: Transaction, vout: UInt32, basket: String, customInstructions: String, tags: [String]) throws {
+        let id = try transaction.transactionID(limits: harnessTxLimits)
+        transactions[id] = transaction
+        let output = transaction.outputs[Int(vout)]
+        records.append(Record(
+            outpoint: Outpoint(transactionID: id, outputIndex: vout), satoshis: output.satoshis,
+            script: output.lockingScript.bytes, basket: basket, customInstructions: customInstructions, tags: tags
+        ))
+    }
+
     func record(_ outpoint: String) -> Record? {
         records.first { $0.outpoint.description == outpoint }
     }
@@ -398,6 +409,12 @@ actor MockOverlay: ColorOverlayProvider {
     func refuse(_ topic: String) { refused.insert(topic) }
     func forget(_ outpoint: String) { unspent.removeValue(forKey: outpoint) }
     func failNext(_ count: Int) { failures = count }
+    /// Admits `outpoint` (output `vout` of the transaction in `beef`) as unspent.
+    func admit(_ beef: [UInt8], outpoint: String, vout: UInt32) {
+        let entry = Entry(beef: beef, vout: vout)
+        unspent[outpoint] = entry
+        everAdmitted[outpoint] = entry
+    }
 
     func spendability(assetID: ColorAssetID, outpoints: [String]) async throws -> ColorOutputList {
         ColorOutputList(outputs: outpoints.compactMap { unspent[$0].map { ColorOutputList.Item(beef: $0.beef, outputIndex: $0.vout) } })

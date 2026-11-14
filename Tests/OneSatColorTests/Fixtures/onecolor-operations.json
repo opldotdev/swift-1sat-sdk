@@ -1,0 +1,1570 @@
+{
+  "meta": {
+    "generator": "mint.ts (Bun) with published packages",
+    "packages": {
+      "@bopen-io/color-permission-module": "0.2.3",
+      "@bsv/templates": "2.2.0",
+      "@bsv/sdk": "4.1.0",
+      "@bsv/wallet-toolbox-client": "2.16.0"
+    }
+  },
+  "authorityOperation": [
+    {
+      "inputs": 0,
+      "outputs": 0,
+      "operation": "authority-end"
+    },
+    {
+      "inputs": 0,
+      "outputs": 1,
+      "operation": "authority-split"
+    },
+    {
+      "inputs": 0,
+      "outputs": 2,
+      "operation": "authority-split"
+    },
+    {
+      "inputs": 0,
+      "outputs": 3,
+      "operation": "authority-split"
+    },
+    {
+      "inputs": 1,
+      "outputs": 0,
+      "operation": "authority-end"
+    },
+    {
+      "inputs": 1,
+      "outputs": 1,
+      "operation": "authority-transfer"
+    },
+    {
+      "inputs": 1,
+      "outputs": 2,
+      "operation": "authority-split"
+    },
+    {
+      "inputs": 1,
+      "outputs": 3,
+      "operation": "authority-split"
+    },
+    {
+      "inputs": 2,
+      "outputs": 0,
+      "operation": "authority-end"
+    },
+    {
+      "inputs": 2,
+      "outputs": 1,
+      "operation": "authority-combine"
+    },
+    {
+      "inputs": 2,
+      "outputs": 2,
+      "operation": "authority-transfer"
+    },
+    {
+      "inputs": 2,
+      "outputs": 3,
+      "operation": "authority-split"
+    },
+    {
+      "inputs": 3,
+      "outputs": 0,
+      "operation": "authority-end"
+    },
+    {
+      "inputs": 3,
+      "outputs": 1,
+      "operation": "authority-combine"
+    },
+    {
+      "inputs": 3,
+      "outputs": 2,
+      "operation": "authority-combine"
+    },
+    {
+      "inputs": 3,
+      "outputs": 3,
+      "operation": "authority-transfer"
+    }
+  ],
+  "requiredOperations": [
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": []
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "5"
+      },
+      "error": "BRC-207: token outputs exceed the authenticated input balance"
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "5"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "5"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "10"
+      },
+      "error": "BRC-207: token outputs exceed the authenticated input balance"
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "10"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "10"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "authority-split"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "mint",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "mint",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "mint",
+        "authority-split"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "10"
+      },
+      "operations": [
+        "mint",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "10"
+      },
+      "operations": [
+        "mint",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "10"
+      },
+      "operations": [
+        "mint",
+        "authority-split"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "authority-combine"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "mint",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "mint",
+        "authority-combine"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "mint",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "10"
+      },
+      "operations": [
+        "mint",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "10"
+      },
+      "operations": [
+        "mint",
+        "authority-combine"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "0",
+        "minted": "10"
+      },
+      "operations": [
+        "mint",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "burn"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "5",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "5",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "5"
+      },
+      "error": "BRC-207: token outputs exceed the authenticated input balance"
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "5"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "5"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-split"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-split"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "transfer",
+        "mint",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "transfer",
+        "mint",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "transfer",
+        "mint",
+        "authority-split"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-combine"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-combine"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "transfer",
+        "mint",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "transfer",
+        "mint",
+        "authority-combine"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "0",
+        "minted": "5"
+      },
+      "operations": [
+        "transfer",
+        "mint",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "10",
+        "minted": "0"
+      },
+      "operations": [
+        "burn"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "10",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "10",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "burn"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "5",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "5",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "10",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "10",
+        "burned": "0",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "10",
+        "burned": "0",
+        "minted": "0"
+      },
+      "error": "BRC-207: an authority output needs an authority input of the same asset"
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "10",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "10",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "10",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-split"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "burn",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "burn",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "burn",
+        "authority-split"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "10",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "10",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "10",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-split"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "10",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "10",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-combine"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "0",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "0",
+        "burned": "10",
+        "minted": "0"
+      },
+      "operations": [
+        "burn",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "burn",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "burn",
+        "authority-combine"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "5",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "5",
+        "burned": "5",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "burn",
+        "authority-transfer"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 0
+      },
+      "supplyChange": {
+        "transferred": "10",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-end"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 1
+      },
+      "supplyChange": {
+        "transferred": "10",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-combine"
+      ]
+    },
+    {
+      "inputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "outputs": {
+        "value": "10",
+        "authority": 2
+      },
+      "supplyChange": {
+        "transferred": "10",
+        "burned": "0",
+        "minted": "0"
+      },
+      "operations": [
+        "transfer",
+        "authority-transfer"
+      ]
+    }
+  ]
+}
