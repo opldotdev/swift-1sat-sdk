@@ -145,17 +145,17 @@ final class CollectionMintTests: XCTestCase {
                 : ["subType:collectionItem", "collection:\(Self.collectionId)"]
             XCTAssertEqual(
                 publish.outputs[0].tags,
-                [typeTag, "origin"] + collectionTags + [idTag, "creator:\(address)"]
+                storageTags([typeTag, "origin"] + collectionTags + [idTag, "creator:\(address)"])
             )
             if index == 0 {
-                XCTAssertTrue(publish.outputs[0].tags.contains("subType:collection"))
+                XCTAssertTrue(publish.outputs[0].tags.contains(storageTag("subType:collection")))
                 XCTAssertTrue(publish.outputs[0].tags.contains("type:text/plain"))
                 XCTAssertFalse(publish.outputs[0].tags.contains("type:text/plain; charset=utf-8"))
                 XCTAssertNil(instructions["collection"])
             } else {
-                XCTAssertTrue(publish.outputs[0].tags.contains("subType:collectionItem"))
+                XCTAssertTrue(publish.outputs[0].tags.contains(storageTag("subType:collectionItem")))
                 XCTAssertTrue(publish.outputs[0].tags.contains("collection:\(Self.collectionId)"))
-                XCTAssertFalse(publish.outputs[0].tags.contains { $0.hasPrefix("collectionId:") })
+                XCTAssertFalse(publish.outputs[0].tags.contains { $0.hasPrefix(storageTag("collectionId:")) })
                 XCTAssertEqual(instructions["collection"] as? String, Self.collectionId)
                 if index == 1 {
                     XCTAssertTrue(publish.outputs[0].tags.contains("type:image/png"))
@@ -290,7 +290,7 @@ final class CollectionMintTests: XCTestCase {
             }
             let inputs = (args["inputs"] as? [[String: Any]] ?? []).map { input in
                 CapturedInput(
-                    outpoint: input["outpoint"] as? String ?? "",
+                    outpoint: storageOutpoint(input["outpoint"]) ?? "",
                     unlockingScriptLength: (input["unlockingScriptLength"] as? NSNumber)?.uint32Value ?? 0
                 )
             }
@@ -471,7 +471,7 @@ private actor MintTransport: AuthenticatedTransport {
                 inputBeef = []
             }
             inputs = requestedInputs.map { input in
-                let outpoint = input["outpoint"] as? String ?? ""
+                let outpoint = storageOutpoint(input["outpoint"]) ?? ""
                 let parts = outpoint.split(separator: ".")
                 return [
                     "sourceTxid": parts.isEmpty ? "" : String(parts[0]),

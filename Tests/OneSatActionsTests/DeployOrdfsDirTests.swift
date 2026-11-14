@@ -239,7 +239,7 @@ final class DeployOrdfsDirTests: XCTestCase {
         let main = creates[1]
         let inputs = try XCTUnwrap(main["inputs"] as? [[String: Any]])
         XCTAssertEqual(inputs.count, 1)
-        XCTAssertEqual(inputs[0]["outpoint"] as? String, "\(anchorTxid).0")
+        XCTAssertEqual(storageOutpoint(inputs[0]["outpoint"]), "\(anchorTxid).0")
         XCTAssertEqual(
             (inputs[0]["unlockingScriptLength"] as? NSNumber)?.intValue,
             Int(OneSatConstants.p2pkhUnlockingScriptLength)
@@ -290,7 +290,7 @@ final class DeployOrdfsDirTests: XCTestCase {
         // Manifest tags, then the action id the anchor key was named after, then `creator:`.
         XCTAssertEqual(
             requested[3]["tags"] as? [String],
-            ["type:ord-fs/json", "origin", "id:\(actionID)_3", "creator:\(creator)"]
+            storageTags(["type:ord-fs/json", "origin", "id:\(actionID)_3", "creator:\(creator)"])
         )
         XCTAssertEqual(requested[3]["basket"] as? String, OneSatConstants.ordinalsBasket)
         XCTAssertEqual(requested[3]["outputDescription"] as? String, "manifest (ord-fs/json)")

@@ -233,7 +233,7 @@ actor PublishTransport: AuthenticatedTransport {
         let requested = args["outputs"] as? [[String: Any]] ?? []
         let requestedInputs = args["inputs"] as? [[String: Any]] ?? []
         let options = args["options"] as? [String: Any] ?? [:]
-        let change = options["noSendChange"] as? [String] ?? []
+        let change = (options["noSendChange"] as? [Any] ?? []).map { storageOutpoint($0) ?? "" }
 
         var inputs: [[String: Any]] = []
         var paidIn: UInt64 = 0
@@ -242,7 +242,7 @@ actor PublishTransport: AuthenticatedTransport {
             inputBeef = (args["inputBEEF"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.uint8Value }
             let graph = try BEEF(bytes: inputBeef, limits: WalletBEEFLimits.standard)
             for input in requestedInputs {
-                let source = try Self.resolve(try Outpoint(input["outpoint"] as? String ?? ""), in: graph)
+                let source = try Self.resolve(try Outpoint(storageOutpoint(input["outpoint"]) ?? ""), in: graph)
                 inputs.append(source.row.merging(["unlockingScriptLength": input["unlockingScriptLength"] as Any]) { $1 })
                 paidIn += source.output.satoshis
             }

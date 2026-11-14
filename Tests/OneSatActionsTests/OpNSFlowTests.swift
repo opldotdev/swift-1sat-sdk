@@ -56,7 +56,7 @@ final class OpNSFlowTests: XCTestCase {
         XCTAssertEqual(options["randomizeOutputs"] as? Bool, false)
         let inputs = try XCTUnwrap(args["inputs"] as? [[String: Any]])
         XCTAssertEqual(inputs.count, 1)
-        XCTAssertEqual(inputs[0]["outpoint"] as? String, ActionVectors.outpoint)
+        XCTAssertEqual(storageOutpoint(inputs[0]["outpoint"]), ActionVectors.outpoint)
         XCTAssertEqual(inputs[0]["inputDescription"] as? String, "OpNS name to register")
         XCTAssertEqual((inputs[0]["unlockingScriptLength"] as? NSNumber)?.intValue, 108)
 

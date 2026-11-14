@@ -45,7 +45,7 @@ final class IdentityUpdateProfileTests: XCTestCase {
         XCTAssertEqual(idOutput.basket, "bap")
         XCTAssertEqual(idOutput.customInstructions, idCustomInstructions)
         XCTAssertTrue(idOutput.tags.contains("type:id"))
-        XCTAssertTrue(idOutput.tags.contains("bapId:\(expectedBapId)"))
+        XCTAssertTrue(idOutput.tags.contains(storageTag("bapId:\(expectedBapId)")))
         XCTAssertTrue(idOutput.tags.contains("seq:1"))
 
         let aliasOutput = first.outputs[1]
@@ -54,8 +54,8 @@ final class IdentityUpdateProfileTests: XCTestCase {
         XCTAssertEqual(aliasOutput.basket, "bap")
         XCTAssertNil(aliasOutput.customInstructions)
         XCTAssertTrue(aliasOutput.tags.contains("type:alias"))
-        XCTAssertTrue(aliasOutput.tags.contains("bapId:\(expectedBapId)"))
-        XCTAssertTrue(aliasOutput.tags.contains { $0.hasPrefix("publishedAt:") })
+        XCTAssertTrue(aliasOutput.tags.contains(storageTag("bapId:\(expectedBapId)")))
+        XCTAssertTrue(aliasOutput.tags.contains { $0.hasPrefix(storageTag("publishedAt:")) })
 
         let idScript = try Script(
             hex: idOutput.lockingScript,
@@ -117,7 +117,7 @@ final class IdentityUpdateProfileTests: XCTestCase {
         XCTAssertEqual(aliasOutput.satoshis, 0)
         XCTAssertEqual(aliasOutput.outputDescription, "BAP ALIAS")
         XCTAssertTrue(aliasOutput.tags.contains("type:alias"))
-        XCTAssertTrue(aliasOutput.tags.contains("bapId:\(expectedBapId)"))
+        XCTAssertTrue(aliasOutput.tags.contains(storageTag("bapId:\(expectedBapId)")))
 
         let aliasScript = try Script(
             hex: aliasOutput.lockingScript,

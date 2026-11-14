@@ -284,7 +284,7 @@ actor Bsv21CreateStorage: AuthenticatedTransport {
     var createdInputs: [Bsv21CreateFixture.Input] {
         (createArgs?["inputs"] as? [[String: Any]] ?? []).map {
             Bsv21CreateFixture.Input(
-                outpoint: $0["outpoint"] as? String ?? "",
+                outpoint: storageOutpoint($0["outpoint"]) ?? "",
                 inputDescription: $0["inputDescription"] as? String ?? "",
                 unlockingScriptLength: ($0["unlockingScriptLength"] as? NSNumber)?.intValue ?? -1
             )
@@ -347,7 +347,7 @@ actor Bsv21CreateStorage: AuthenticatedTransport {
             ]
         }
         var inputs: [[String: Any]] = requestedInputs.map { input in
-            let outpoint = input["outpoint"] as? String ?? ""
+            let outpoint = storageOutpoint(input["outpoint"]) ?? ""
             let parts = outpoint.split(separator: ".")
             let source = sources[outpoint] ?? Source(lockingScript: "51", satoshis: 1)
             return [

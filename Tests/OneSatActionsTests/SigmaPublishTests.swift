@@ -99,7 +99,7 @@ final class SigmaPublishTests: XCTestCase {
         XCTAssertEqual(prepared.tags.prefix(2), ["type:text/plain", "origin"])
         XCTAssertEqual(
             flow.output["tags"] as? [String],
-            prepared.tags + ["id:\(flow.actionID)_0", "creator:\(flow.creator)"]
+            storageTags(prepared.tags + ["id:\(flow.actionID)_0", "creator:\(flow.creator)"])
         )
         // The CI built for the output goes out unchanged, as the TS apply step leaves it.
         XCTAssertEqual(flow.output["customInstructions"] as? String, prepared.customInstructions)
@@ -375,7 +375,7 @@ final class SigmaPublishTests: XCTestCase {
         XCTAssertEqual(result.collectionId, "\(try XCTUnwrap(result.txid))_0")
         XCTAssertEqual(
             flow.output["tags"] as? [String],
-            ["type:image/png", "origin", "subType:collection", "id:\(flow.actionID)_0", "creator:\(flow.creator)"]
+            storageTags(["type:image/png", "origin", "subType:collection", "id:\(flow.actionID)_0", "creator:\(flow.creator)"])
         )
         try assertCollectionCI(flow.output, name: "Root", collection: nil)
     }
@@ -404,14 +404,14 @@ final class SigmaPublishTests: XCTestCase {
         )
         XCTAssertEqual(
             flow.output["tags"] as? [String],
-            [
+            storageTags([
                 "type:image/png",
                 "origin",
                 "subType:collectionItem",
                 "collection:\(collectionId)",
                 "id:\(flow.actionID)_0",
                 "creator:\(flow.creator)",
-            ]
+            ])
         )
         try assertCollectionCI(flow.output, name: "Item", collection: collectionId)
     }
@@ -503,7 +503,7 @@ final class SigmaPublishTests: XCTestCase {
         let main = creates[1]
         let inputs = try XCTUnwrap(main["inputs"] as? [[String: Any]])
         XCTAssertEqual(inputs.count, 1)
-        XCTAssertEqual(inputs[0]["outpoint"] as? String, "\(anchorTxid).0")
+        XCTAssertEqual(storageOutpoint(inputs[0]["outpoint"]), "\(anchorTxid).0")
         XCTAssertEqual(inputs[0]["inputDescription"] as? String, "Sigma anchor")
         XCTAssertEqual((inputs[0]["unlockingScriptLength"] as? NSNumber)?.intValue, 108)
         let options = try XCTUnwrap(main["options"] as? [String: Any])

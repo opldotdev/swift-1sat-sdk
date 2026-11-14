@@ -55,7 +55,7 @@ final class SweepDepositTests: XCTestCase {
 
         let inputs = try XCTUnwrap(args["inputs"] as? [[String: Any]])
         XCTAssertEqual(inputs.count, 1)
-        XCTAssertEqual(inputs[0]["outpoint"] as? String, ActionVectors.outpoint)
+        XCTAssertEqual(storageOutpoint(inputs[0]["outpoint"]), ActionVectors.outpoint)
         XCTAssertEqual(inputs[0]["inputDescription"] as? String, "Deposit sweep")
         XCTAssertEqual(
             (inputs[0]["unlockingScriptLength"] as? NSNumber)?.uint32Value,
