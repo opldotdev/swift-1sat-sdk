@@ -180,18 +180,65 @@ enum ColorModule {
         }
     }
 
-    /// Submits to the given topics, up to three attempts.
+    /// Submits an Atomic BEEF to the given topics, up to three attempts while the provider throws,
+    /// then requires the STEAK to admit the transaction's own token outputs for every topic
+    /// (`expectedAdmissions`).
+    ///
+    /// A 2xx answer that admits less is a refusal, thrown as `ColorError.notAdmitted` and not
+    /// retried. The 0.2.3 module ignores the STEAK here and completes on any answer; `@1sat/actions`
+    /// `receive` checks it the same way for a delivery (`<topic> did not admit <txid>.<i>`).
     static func submit(_ overlay: any ColorOverlayProvider, topics: [String], beef: [UInt8]) async throws {
+        let atomic = try AtomicBEEF(bytes: beef, limits: beefLimits)
+        guard let transaction = try atomic.beef.transaction(for: atomic.subjectTransactionID, limits: txLimits) else {
+            throw ColorError.invalid("submitted transaction")
+        }
+        let txid = atomic.subjectTransactionID.displayHex
         var failure: (any Error)?
         for _ in 0..<OneColorConstants.submitAttempts {
+            let steak: [String: ColorAdmittance]
             do {
-                _ = try await overlay.submit(topics: topics, beef: beef)
-                return
+                steak = try await overlay.submit(topics: topics, beef: beef)
             } catch {
                 failure = error
+                continue
             }
+            try assertAdmitted(steak, topics: topics, transaction: transaction, txid: txid)
+            return
         }
         throw failure ?? ColorError.overlay("submit failed")
+    }
+
+    /// The vouts each topic must admit: output 0 when it is a deploy, for the discovery topic; the
+    /// asset's non-deploy token outputs, for `tm_color_<assetId>`.
+    static func expectedAdmissions(
+        _ transaction: Transaction, txid: String, topics: [String]
+    ) -> [String: [UInt32]] {
+        var expected: [String: [UInt32]] = [:]
+        for topic in topics { expected[topic] = [] }
+        for (index, output) in transaction.outputs.enumerated() {
+            let vout = UInt32(index)
+            guard let token = try? ColorTokenOutput.read(output.lockingScript, txid: txid, vout: vout) else { continue }
+            let topic = token.deploy
+                ? (vout == 0 ? ColorIdentifiers.discoveryTopic : nil)
+                : ColorIdentifiers.topic(token.assetID)
+            if let topic, expected[topic] != nil { expected[topic]?.append(vout) }
+        }
+        return expected
+    }
+
+    /// Throws `ColorError.notAdmitted` for the first topic, in order, whose STEAK entry is missing
+    /// or omits one of its expected outputs.
+    static func assertAdmitted(
+        _ steak: [String: ColorAdmittance], topics: [String], transaction: Transaction, txid: String
+    ) throws {
+        let expected = expectedAdmissions(transaction, txid: txid, topics: topics)
+        for topic in topics {
+            let admitted = Set(steak[topic]?.outputsToAdmit ?? [])
+            let missing = (expected[topic] ?? []).filter { !admitted.contains($0) }
+            if !missing.isEmpty {
+                throw ColorError.notAdmitted(topic: topic, outpoints: missing.map { "\(txid).\($0)" })
+            }
+        }
     }
 
     /// The topics a transaction goes to: the discovery topic for a deploy, and each asset that
@@ -348,6 +395,10 @@ enum ColorModule {
 
     /// Splits the selected inputs into an output of exactly `amount` and token change, broadcast
     /// and submitted, and returns the exact output as the handoff's input.
+    ///
+    /// The overlay must admit both outputs. When it does not, this throws (`notAdmitted`) and the
+    /// broadcast split stays in the wallet's baskets; the next selection resubmits it
+    /// (`resubmitHeld`) before choosing it.
     static func split(
         _ ctx: OneColorContext, overlay: any ColorOverlayProvider, assetID: ColorAssetID,
         selected: [ColorManagedInput], amount: UInt64

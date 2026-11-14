@@ -19,6 +19,10 @@ public struct Deploy1ColorResult: Equatable, Sendable {
     /// The deploy output's custody as filed (encrypted). Keep it with `tx` until the deploy is filed
     /// and admitted: `resubmitDeploy` needs it to file a deploy whose filing failed.
     public var customInstructions: String?
+    /// True once `tm_color` admitted the deploy output (its STEAK lists output 0). A 2xx answer
+    /// that admits nothing leaves it false, with `error` set and `tx` and `customInstructions`
+    /// kept for `resubmitDeploy`.
+    public var submitted: Bool = false
     public var error: String?
 }
 
@@ -43,8 +47,9 @@ public enum OneColorActions {
     /// output 0, keyed to this wallet under `ISSUE`; once broadcast it is filed into its asset
     /// basket and submitted to `tm_color`. The asset ID is `<txid>_0`.
     ///
-    /// When submission fails after the broadcast, the result carries the txid, the transaction and
-    /// the asset ID with the error, so the caller can resubmit.
+    /// When submission fails after the broadcast, or the overlay answers without admitting the
+    /// deploy output, the result carries the txid, the transaction and the asset ID with the error
+    /// and `submitted` false, so the caller can resubmit.
     public static func deploy(
         _ ctx: OneColorContext, amount: UInt64, decimals: Int? = nil, symbol: String? = nil,
         icon: OneColorIcon? = nil
@@ -104,12 +109,13 @@ public enum OneColorActions {
                 options: try ColorExecutor.options()
             )
             let signed = try await ColorExecutor.execute(ctx, request: request, tokenInputs: [])
+            // Broadcast: the txid and asset ID are reported even if a later step throws.
             let txid = signed.transactionID.displayHex
-            let atomic = try signed.atomicBEEF()
             let assetID = try ColorAssetID(txid: txid, vout: 0)
             result.txid = txid
-            result.tx = atomic
             result.assetID = assetID.description
+            let atomic = try signed.atomicBEEF()
+            result.tx = atomic
 
             // File the deploy into its asset basket; storage merges the insertion into its own action.
             _ = try await ctx.storage.colorInternalizeAction(ctx.auth, try WalletInternalizeActionRequest(
@@ -123,6 +129,7 @@ public enum OneColorActions {
                 )]
             ))
             try await ColorModule.submit(overlay, topics: [ColorIdentifiers.discoveryTopic], beef: atomic)
+            result.submitted = true
             return result
         } catch {
             result.error = error.localizedDescription
@@ -182,6 +189,7 @@ public enum OneColorActions {
                 ))
             }
             try await ColorModule.submit(overlay, topics: [ColorIdentifiers.discoveryTopic], beef: tx)
+            result.submitted = true
             return result
         } catch {
             result.error = error.localizedDescription
@@ -196,6 +204,10 @@ public enum OneColorActions {
     ///
     /// When delivery fails the result carries the error with `txid` and `tx`, so the caller can
     /// retry delivery or abort the send.
+    ///
+    /// A partial send splits first. When the overlay does not admit both split outputs, the send
+    /// stops before the handoff with that error and no `txid`; the split stays in the wallet, and
+    /// the next send resubmits it before selecting it.
     public static func send(
         _ ctx: OneColorContext, assetID assetText: String, amount: UInt64, to handle: String,
         expirySeconds: Int = OneColorConstants.sendExpirySeconds, memo: String? = nil
@@ -282,8 +294,8 @@ public enum OneColorActions {
                 }
             )
             let txid = handoff.signed.transactionID.displayHex
-            let atomic = try handoff.signed.atomicBEEF()
             result.txid = txid
+            let atomic = try handoff.signed.atomicBEEF()
             result.tx = atomic
 
             // 4. Deliver.

@@ -333,7 +333,7 @@ public enum Tokens {
         try outputs.append(
             WalletCreateActionOutput(
                 lockingScript: try ActionScript.payToPublicKeyHash(details.feeAddress).bytes,
-                satoshis: details.feePerOutput * UInt64(tokenOutputCount),
+                satoshis: try overlayFee(perOutput: details.feePerOutput, outputs: UInt64(tokenOutputCount)),
                 outputDescription: "Overlay processing fee",
                 tags: []
             )

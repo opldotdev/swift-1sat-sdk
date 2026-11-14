@@ -365,6 +365,98 @@ final class Bsv21MintTests: XCTestCase {
         XCTAssertEqual(both.error, "auth-and-end-minting-are-mutually-exclusive")
     }
 
+    // MARK: Overlay fee ceiling (Swift only: TS `mintBsv21` has no `maxFee`)
+
+    func test_aFeeAboveMaxFeeIsRefusedBeforeSigning() async throws {
+        let authority = try authority()
+        let storage = try storage(authority)
+        let overlay = activeOverlay(feePerOutput: 1_000)
+        // A mint plus the continuing authority: two token outputs, 2,000 sats.
+        let result = await Tokens.mint(
+            try bsv21CreateContext(storage: storage, bsv21: overlay),
+            Tokens.MintRequest(tokenId: authority.tokenId, mint: Tokens.MintOutput(amount: 1), maxFee: 1_999)
+        )
+        XCTAssertEqual(result.error, "overlay-fee-exceeds-max-fee: 2000 sats > maxFee 1999 sats")
+        XCTAssertEqual(
+            result.error,
+            OneSatActionError.overlayFeeExceedsMaxFee(fee: 2_000, maxFee: 1_999).wireMessage
+        )
+        XCTAssertNil(result.txid)
+        let methods = await storage.methods
+        XCTAssertFalse(methods.contains("createAction"), "nothing is created or signed")
+        let submitted = await overlay.transferTokenIds
+        XCTAssertTrue(submitted.isEmpty)
+        // The fee is the one read at mint time.
+        let fresh = await overlay.detailsFresh
+        XCTAssertEqual(fresh, [true])
+    }
+
+    func test_aFeeAtMaxFeeIsPaid() async throws {
+        let authority = try authority()
+        let storage = try storage(authority)
+        let result = await Tokens.mint(
+            try bsv21CreateContext(storage: storage, bsv21: activeOverlay(feePerOutput: 1_000)),
+            Tokens.MintRequest(tokenId: authority.tokenId, mint: Tokens.MintOutput(amount: 1), maxFee: 2_000)
+        )
+        XCTAssertNil(result.error, result.error ?? "")
+        XCTAssertTrue(result.overlaySubmitted)
+        let outputs = await storage.createdOutputs
+        XCTAssertEqual(outputs.map(\.satoshis), [1, 1, 2_000])
+    }
+
+    func test_maxFeeCountsOnlyTheTokenOutputsEmitted() throws {
+        let identity = try ActionVectors.identity()
+        let authority = try authority()
+        let row = try Bsv21CreateFixture.walletOutput(authority.row)
+        let details = Bsv21TokenDetails(
+            isActive: true, feeAddress: ActionVectors.templateAddress, feePerOutput: 700, decimals: 0
+        )
+        // Ending minting with a final mint emits one token output: 700 sats.
+        let final = try Tokens.prepareMint(
+            identity: identity,
+            Tokens.MintRequest(
+                tokenId: authority.tokenId, mint: Tokens.MintOutput(amount: 5), endMinting: true, maxFee: 700
+            ),
+            details: details,
+            authority: row
+        )
+        XCTAssertEqual(final.outputs.map(\.satoshis), [1, 700])
+        XCTAssertThrowsError(try Tokens.prepareMint(
+            identity: identity,
+            Tokens.MintRequest(tokenId: authority.tokenId, mint: Tokens.MintOutput(amount: 5), maxFee: 1_399),
+            details: details,
+            authority: row
+        )) { error in
+            XCTAssertEqual(error as? OneSatActionError, .overlayFeeExceedsMaxFee(fee: 1_400, maxFee: 1_399))
+        }
+        // No fee asked: any ceiling passes, zero included.
+        let free = try Tokens.prepareMint(
+            identity: identity,
+            Tokens.MintRequest(tokenId: authority.tokenId, mint: Tokens.MintOutput(amount: 5), maxFee: 0),
+            details: Bsv21TokenDetails(
+                isActive: true, feeAddress: ActionVectors.templateAddress, feePerOutput: 0, decimals: 0
+            ),
+            authority: row
+        )
+        XCTAssertEqual(free.outputs.map(\.satoshis), [1, 1])
+    }
+
+    func test_aFeeThatOverflowsIsRefused() async throws {
+        let authority = try authority()
+        let storage = try storage(authority)
+        let result = await Tokens.mint(
+            try bsv21CreateContext(storage: storage, bsv21: activeOverlay(feePerOutput: UInt64.max)),
+            Tokens.MintRequest(tokenId: authority.tokenId, mint: Tokens.MintOutput(amount: 1))
+        )
+        XCTAssertEqual(result.error, "overlay-fee-overflow")
+        let methods = await storage.methods
+        XCTAssertFalse(methods.contains("createAction"))
+        XCTAssertEqual(try Tokens.overlayFee(perOutput: UInt64.max, outputs: 1), UInt64.max)
+        XCTAssertThrowsError(try Tokens.overlayFee(perOutput: UInt64.max / 2 + 1, outputs: 2)) { error in
+            XCTAssertEqual(error as? OneSatActionError, .overlayFeeOverflow)
+        }
+    }
+
     func test_aMultisigAuthorityIsRefusedClearly() async throws {
         let authority = try authority(
             customInstructions: #"{"amt":"0","op":"deploy+auth","protocolID":[0,"onesat"],"keyID":"k","multiSig":true}"#

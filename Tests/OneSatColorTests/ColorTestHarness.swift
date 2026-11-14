@@ -405,10 +405,18 @@ actor MockOverlay: ColorOverlayProvider {
     private(set) var submissions: [[String]] = []
     var refused: Set<String> = []
     var failures = 0
+    /// Submissions still to answer 200 with a STEAK that admits nothing, changing no state.
+    var admitNothing = 0
+    /// Output indexes the next submission leaves out of its admission (a partial STEAK).
+    var withheld: Set<UInt32> = []
 
     func refuse(_ topic: String) { refused.insert(topic) }
     func forget(_ outpoint: String) { unspent.removeValue(forKey: outpoint) }
     func failNext(_ count: Int) { failures = count }
+    /// The next `count` submissions answer 200 with `outputsToAdmit: []` for every topic.
+    func admitNothingNext(_ count: Int) { admitNothing = count }
+    /// The next submission admits every expected output except these.
+    func withholdNext(_ vouts: Set<UInt32>) { withheld = vouts }
     /// Admits `outpoint` (output `vout` of the transaction in `beef`) as unspent.
     func admit(_ beef: [UInt8], outpoint: String, vout: UInt32) {
         let entry = Entry(beef: beef, vout: vout)
@@ -442,6 +450,13 @@ actor MockOverlay: ColorOverlayProvider {
         let txid = try subject.transactionID(limits: harnessTxLimits).displayHex
         let answer = try beef.serialized(limits: harnessBEEFLimits)
         var steak: [String: ColorAdmittance] = [:]
+        if admitNothing > 0 {
+            admitNothing -= 1
+            for topic in topics { steak[topic] = ColorAdmittance(outputsToAdmit: []) }
+            return steak
+        }
+        let withholding = withheld
+        withheld = []
         for topic in topics {
             if refused.contains(topic) {
                 steak[topic] = ColorAdmittance(outputsToAdmit: [])
@@ -453,7 +468,7 @@ actor MockOverlay: ColorOverlayProvider {
                 let fits = topic == ColorIdentifiers.discoveryTopic
                     ? token.deploy
                     : !token.deploy && ColorIdentifiers.topic(token.assetID) == topic
-                if fits { admit.append(UInt32(vout)) }
+                if fits, !withholding.contains(UInt32(vout)) { admit.append(UInt32(vout)) }
             }
             for input in subject.inputs { unspent.removeValue(forKey: input.previousOutput.description) }
             for vout in admit {
