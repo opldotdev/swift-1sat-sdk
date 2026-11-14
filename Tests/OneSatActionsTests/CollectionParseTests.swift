@@ -307,6 +307,66 @@ final class CollectionParseTests: XCTestCase {
         XCTAssertNil(grouping.itemsByCollectionId[historicalId])
     }
 
+    func test_groupReadsLowercasedTagsStorageNowHoldsAlongsideCamelCaseRows() throws {
+        let otherCollectionId = String(repeating: "d", count: 64) + "_0"
+        let lowerParent = try walletOutput(
+            outpoint: "\(originTxid).0",
+            tags: ["type:image/png", "origin", "subtype:collection"]
+        )
+        let camelParent = try walletOutput(
+            outpoint: "\(originTxid).6",
+            tags: ["type:image/png", "origin", "subType:collection"]
+        )
+        let lowerItem = try walletOutput(
+            outpoint: "\(originTxid).1",
+            tags: ["type:image/png", "subtype:collectionitem", "collection:\(itemCollectionId)"]
+        )
+        let camelItem = try walletOutput(
+            outpoint: "\(originTxid).2",
+            tags: ["type:image/png", "subType:collectionItem", "collection:\(itemCollectionId)"]
+        )
+        let lowerHistoricalItem = try walletOutput(
+            outpoint: "\(originTxid).3",
+            tags: ["subtype:collectionitem", "collectionid:\(itemCollectionId)"]
+        )
+        let camelHistoricalItem = try walletOutput(
+            outpoint: "\(originTxid).4",
+            tags: ["subType:collectionItem", "collectionId:\(otherCollectionId)"]
+        )
+        let lone = try walletOutput(
+            outpoint: "\(originTxid).5",
+            tags: ["type:image/png", "collectionid:\(itemCollectionId)"]
+        )
+
+        let grouping = CollectionParse.group(ordinalOutputs: [
+            lowerParent, camelParent, lowerItem, camelItem, lowerHistoricalItem, camelHistoricalItem, lone,
+        ])
+        XCTAssertEqual(grouping.parents, [lowerParent, camelParent])
+        XCTAssertEqual(
+            grouping.itemsByCollectionId[itemCollectionId],
+            [lowerItem, camelItem, lowerHistoricalItem]
+        )
+        XCTAssertEqual(grouping.itemsByCollectionId[otherCollectionId], [camelHistoricalItem])
+        XCTAssertEqual(grouping.itemsByCollectionId.count, 2)
+        XCTAssertEqual(grouping.standalone, [lone])
+    }
+
+    func test_groupPrefersCanonicalCollectionTagWhenBothExistLowercased() throws {
+        let historicalId = String(repeating: "c", count: 64) + "_2"
+        let output = try walletOutput(
+            outpoint: "\(originTxid).1",
+            tags: [
+                "subtype:collectionitem",
+                "collectionid:\(historicalId)",
+                "collection:\(itemCollectionId)",
+            ]
+        )
+
+        let grouping = CollectionParse.group(ordinalOutputs: [output])
+        XCTAssertEqual(grouping.itemsByCollectionId[itemCollectionId], [output])
+        XCTAssertNil(grouping.itemsByCollectionId[historicalId])
+    }
+
     func test_legacyNameTagMovesToCustomInstructionsNameWithoutReemitting() {
         let resolved = Ordinals.resolveOrdinalTags(
             outpoint: "\(originTxid).0",
