@@ -121,6 +121,36 @@ final class PurchaseFlowTests: XCTestCase {
         XCTAssertTrue(instructions.keyID.hasPrefix("\(OneSatConstants.ordlockFundingKeyPrefix) "))
     }
 
+    /// `/1sat/beef` answers Atomic BEEF; the purchase reads the listing through it and carries on
+    /// to the funding step exactly as with plain BEEF.
+    func test_purchaseReadsAnAtomicListingResponse() async throws {
+        let fixture = try listingFixture()
+        let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
+        let identity = try ActionVectors.identity()
+        let atomic = try OneSatTestBEEF.atomicEnvelope(
+            plain: fixture.beefBytes,
+            subject: fixture.outpoint.transactionID
+        )
+        XCTAssertThrowsError(try BEEF(bytes: atomic, limits: WalletBEEFLimits.standard))
+        let ctx = OneSatContext(
+            identity: identity,
+            storage: StorageClient(
+                endpoint: URL(string: "https://example.invalid")!,
+                transport: transport
+            ),
+            auth: AuthID(identityKey: Hex.encode(identity.publicKey.compressedBytes)),
+            listings: RecordedListingSource(bytes: atomic)
+        )
+
+        let result = await Ordinals.purchase(
+            ctx,
+            Ordinals.PurchaseRequest(outpoint: fixture.outpoint)
+        )
+        XCTAssertNil(result.txid)
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["listOutputs", "createAction"])
+    }
+
     /// The purchase action itself: front funding then the listing; cushion, payout
     /// at the listing's input index, the basketed receive, then fees.
     func test_purchaseLayoutPutsThePayoutAtTheListingIndex() throws {

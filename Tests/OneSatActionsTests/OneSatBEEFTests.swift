@@ -32,13 +32,52 @@ final class OneSatBEEFTests: XCTestCase {
         )
     }
 
-    func test_atomicRefusesASubjectTheGraphDoesNotEndIn() throws {
+    /// `toBinaryAtomic(txid)` cuts the transactions after `txid`: an earlier subject is wrapped
+    /// with its own ancestry only.
+    func test_atomicForAnEarlierSubjectDropsTheNewerTransactions() throws {
         let fixture = try chain()
-        XCTAssertThrowsError(
-            try OneSatBEEF.atomic(fixture.atomicBytes, subject: fixture.parentID)
-        ) { error in
-            XCTAssertEqual(error as? BEEFError, .unrelatedTransaction(fixture.childID))
+        let atomic = try OneSatBEEF.atomic(fixture.atomicBytes, subject: fixture.parentID)
+        XCTAssertEqual(atomic.subjectTransactionID, fixture.parentID)
+        XCTAssertEqual(
+            try atomic.beef.transactions.map { try $0.transactionID(limits: limits.transactionLimits) },
+            [fixture.parentID]
+        )
+    }
+
+    /// The subject-txid check stays: a txid the graph does not hold is refused by name.
+    func test_atomicRefusesASubjectTheGraphDoesNotHold() throws {
+        let fixture = try chain()
+        let missing = try TransactionID(displayHex: String(repeating: "ab", count: 32))
+        XCTAssertThrowsError(try OneSatBEEF.atomic(fixture.atomicBytes, subject: missing)) { error in
+            XCTAssertEqual(error as? BEEFError, .missingSubjectTransaction(missing))
         }
+    }
+
+    /// `Beef.fromBinary` keeps an unrelated transaction the server put in the envelope;
+    /// `AtomicBEEF(bytes:)` refuses it with `unrelatedTransaction`. The graph reads, and the
+    /// wrapped envelope is cut back to the subject's ancestry.
+    func test_anEnvelopeCarryingAnUnrelatedTransactionStillReads() throws {
+        let fixture = try chain()
+        let stray = Transaction(
+            version: 2,
+            inputs: [],
+            outputs: [TransactionOutput(satoshis: 7, lockingScript: try Script(bytes: [0x52], maximumByteCount: 10))],
+            lockTime: 0
+        )
+        let strayID = try stray.transactionID(limits: limits.transactionLimits)
+        let padded = try BEEF(
+            merklePaths: [],
+            transactions: [.raw(stray), .raw(try XCTUnwrap(fixture.beef.transactions.first?.transaction)),
+                           .raw(try XCTUnwrap(fixture.beef.transactions.last?.transaction))],
+            limits: limits
+        )
+        let bytes = try OneSatTestBEEF.atomicEnvelope(padded, subject: fixture.childID)
+        XCTAssertThrowsError(try AtomicBEEF(bytes: bytes, limits: limits)) { error in
+            XCTAssertEqual(error as? BEEFError, .unrelatedTransaction(strayID))
+        }
+
+        XCTAssertEqual(try OneSatBEEF.graph(bytes), padded)
+        XCTAssertEqual(try OneSatBEEF.atomic(bytes, subject: fixture.childID), fixture.atomic)
     }
 
     func test_aBrokenAtomicEnvelopeReportsItsOwnError() throws {
@@ -110,4 +149,21 @@ final class OneSatBEEFTests: XCTestCase {
 private struct Served: ListingBeefSource {
     let bytes: [UInt8]
     func beef(forTxid _: String) async throws -> [UInt8] { bytes }
+}
+
+/// Hand-built BRC-95 envelopes, so a test can serve `/1sat/beef` bytes the way the server does,
+/// including envelopes `AtomicBEEF(subjectTransactionID:beef:)` would refuse to build.
+enum OneSatTestBEEF {
+    static func atomicEnvelope(_ beef: BEEF, subject: TransactionID) throws -> [UInt8] {
+        [0x01, 0x01, 0x01, 0x01] + subject.wireBytes
+            + (try beef.serialized(limits: WalletBEEFLimits.standard))
+    }
+
+    /// Plain BEEF bytes re-served as an Atomic envelope naming `subject`.
+    static func atomicEnvelope(plain bytes: [UInt8], subject: TransactionID) throws -> [UInt8] {
+        try atomicEnvelope(
+            try BEEF(bytes: bytes, limits: WalletBEEFLimits.standard),
+            subject: subject
+        )
+    }
 }
