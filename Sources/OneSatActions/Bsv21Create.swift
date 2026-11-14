@@ -132,22 +132,29 @@ extension Tokens {
     /// - `mint`: new supply, to `destination` (default self).
     /// - `auth`: where the continuing authority goes. Nil means self, unless `endMinting`.
     /// - `endMinting`: emit no authority, ending minting for good. Cannot be combined with `auth`.
+    /// - `maxFee`: the most, in satoshis, the overlay fee output may carry. The fee is
+    ///   `fee_per_output` from the token details read at mint time, times the token outputs; when it
+    ///   is higher the mint is refused before anything is signed (`overlayFeeExceedsMaxFee`). Nil
+    ///   pays what the indexer asks, as TS does (`MintBsv21Input` has no ceiling).
     public struct MintRequest: Equatable, Sendable {
         public let tokenId: String
         public let mint: MintOutput?
         public let auth: Destination?
         public let endMinting: Bool
+        public let maxFee: UInt64?
 
         public init(
             tokenId: String,
             mint: MintOutput? = nil,
             auth: Destination? = nil,
-            endMinting: Bool = false
+            endMinting: Bool = false,
+            maxFee: UInt64? = nil
         ) {
             self.tokenId = tokenId
             self.mint = mint
             self.auth = auth
             self.endMinting = endMinting
+            self.maxFee = maxFee
         }
     }
 
@@ -538,10 +545,14 @@ extension Tokens {
         // One fee per emitted token output, counted before the fee output is added.
         let tokenOutputCount = UInt64(outputs.count)
         if tokenOutputCount > 0, details.feePerOutput > 0 {
+            let fee = try overlayFee(perOutput: details.feePerOutput, outputs: tokenOutputCount)
+            if let maxFee = request.maxFee, fee > maxFee {
+                throw OneSatActionError.overlayFeeExceedsMaxFee(fee: fee, maxFee: maxFee)
+            }
             try outputs.append(
                 WalletCreateActionOutput(
                     lockingScript: try ActionScript.payToPublicKeyHash(details.feeAddress).bytes,
-                    satoshis: details.feePerOutput * tokenOutputCount,
+                    satoshis: fee,
                     outputDescription: "Overlay processing fee",
                     tags: ["fee:overlay"]
                 )
@@ -581,8 +592,18 @@ extension Tokens {
         )
     }
 
+    /// `fee_per_output` times the token outputs, refused on overflow.
+    static func overlayFee(perOutput: UInt64, outputs: UInt64) throws -> UInt64 {
+        let (fee, overflow) = perOutput.multipliedReportingOverflow(by: outputs)
+        if overflow { throw OneSatActionError.overlayFeeOverflow }
+        return fee
+    }
+
     /// `mintBsv21`: spends this wallet's authority for `tokenId` to mint supply, move the
     /// authority, or end minting, then submits to `tm_<tokenId>`.
+    ///
+    /// The token details, and so the fee, are read fresh here; `request.maxFee` caps that fee
+    /// before the mint is signed.
     public static func mint(
         _ ctx: OneSatContext,
         _ request: MintRequest,

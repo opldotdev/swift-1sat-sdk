@@ -626,6 +626,35 @@ final class FamilyBuilderTests: XCTestCase {
         XCTAssertEqual(resolved, beef)
     }
 
+    func test_tokenSendRefusesAnOverlayFeeThatOverflows() throws {
+        let identity = try ActionVectors.identity()
+        let input = try walletOutput(
+            tags: ["bsv21:\(ActionVectors.tokenID)", "amt:80", "id:tok_0"],
+            instructions: try CustomInstructions(keyID: "tok-0").encoded()
+        )
+        XCTAssertThrowsError(
+            try Tokens.buildSend(
+                identity: identity,
+                tokenId: ActionVectors.tokenID,
+                recipients: [
+                    Tokens.Recipient(amount: 50, destination: .address(ActionVectors.payAddress)),
+                ],
+                selected: [Tokens.SelectedInput(output: input, amount: 80)],
+                totalIn: 80,
+                details: Bsv21TokenDetails(
+                    isActive: true,
+                    feeAddress: ActionVectors.templateAddress,
+                    feePerOutput: UInt64.max,
+                    decimals: 0,
+                    symbol: "GOLD"
+                ),
+                changeKeyID: "change-1"
+            )
+        ) { error in
+            XCTAssertEqual(error as? OneSatActionError, .overlayFeeOverflow)
+        }
+    }
+
     func test_tokenSendRefusesInputsWithoutCustomInstructions() throws {
         let identity = try ActionVectors.identity()
         let first = try WalletOutput(

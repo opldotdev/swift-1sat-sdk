@@ -66,6 +66,11 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case multiSigAuthNotSupported
     /// A deploy whose transaction carries no BSV-21 deploy at output 0.
     case notABsv21Deploy
+    /// The overlay fee the indexer asks for (`fee_per_output` times the token outputs) is above
+    /// the caller's `maxFee`. Swift only: `@1sat/actions` pays whatever the indexer returns.
+    case overlayFeeExceedsMaxFee(fee: UInt64, maxFee: UInt64)
+    /// `fee_per_output` times the token output count does not fit in a `UInt64`.
+    case overlayFeeOverflow
 
     /// Exact `error` strings from `@1sat/actions`.
     public var wireMessage: String {
@@ -192,6 +197,10 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "multisig-auth-not-supported"
         case .notABsv21Deploy:
             return "not-a-bsv21-deploy"
+        case .overlayFeeExceedsMaxFee(let fee, let maxFee):
+            return "overlay-fee-exceeds-max-fee: \(fee) sats > maxFee \(maxFee) sats"
+        case .overlayFeeOverflow:
+            return "overlay-fee-overflow"
         }
     }
 }

@@ -12,7 +12,9 @@ public struct Mint1ColorResult: Equatable, Sendable {
     public var assetID: String?
     /// `<txid>.<vout>` of the continuing authority; nil when minting was ended.
     public var authorityOutpoint: String?
-    /// True once `tm_color_<assetId>` accepted the transaction.
+    /// True once `tm_color_<assetId>` admitted the minted output and the continuing authority (its
+    /// STEAK lists every one of them). A 2xx answer that admits less leaves it false, with `error`
+    /// set and `tx` kept for `resubmitMint`.
     public var submitted: Bool = false
     public var error: String?
 }
@@ -26,8 +28,8 @@ extension OneColorActions {
     /// authority continues in a new output unless `endMinting` is set, which ends minting from this
     /// authority for good.
     ///
-    /// When the overlay does not accept the broadcast mint, the result carries `txid`, `tx` and
-    /// the error with `submitted` false; `resubmitMint` finishes it. Without the BEEF, the next send
+    /// When the overlay does not accept the broadcast mint, or answers without admitting its token
+    /// outputs, the result carries `txid`, `tx` and the error with `submitted` false; `resubmitMint` finishes it. Without the BEEF, the next send
     /// or mint that selects the minted outputs resubmits the wallet's own copy first.
     public static func mint(
         _ ctx: OneColorContext, assetID: String, amount: UInt64, endMinting: Bool = false
@@ -67,12 +69,13 @@ extension OneColorActions {
                 throw ColorError.custody("a \(assetID) input is no longer spendable")
             }
             let signed = try await ColorExecutor.execute(ctx, request: built.request, tokenInputs: selected)
+            // Broadcast: the txid is reported even if a later step throws.
             let txid = signed.transactionID.displayHex
-            let atomic = try signed.atomicBEEF()
             result.txid = txid
-            result.tx = atomic
             result.assetID = assetID.description
             result.authorityOutpoint = built.authorityIndex.map { "\(txid).\($0)" }
+            let atomic = try signed.atomicBEEF()
+            result.tx = atomic
 
             try await ColorModule.submit(overlay, topics: [ColorIdentifiers.topic(assetID)], beef: atomic)
             result.submitted = true
