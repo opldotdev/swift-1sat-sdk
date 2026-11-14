@@ -260,6 +260,32 @@ final class OpnsBindTests: XCTestCase {
         XCTAssertEqual(asked, [txid])
     }
 
+    /// `getBeefForTxid` serves Atomic BEEF; the bind reads through the envelope.
+    func test_resolveReadsAnAtomicBEEFResponse() async throws {
+        let identity = try ActionVectors.identity()
+        let tx = try bindTransaction(
+            lock: try script(SignOrdinalInputTests.lockFull),
+            spending: ActionVectors.outpoint,
+            outputsBefore: 1
+        )
+        let id = try tx.transactionID(limits: WalletTransactionLimits.standard)
+        let txid = id.displayHex
+        let origin = String(repeating: "aa", count: 32) + "_0"
+        let http = ScriptedHTTP(responses: [
+            (200, json(#"{"name":"alice","outpoint":"\#(origin)"}"#)),
+            (200, json(#"{"outpoint":"\#(txid)_1","origin":"\#(origin)","sequence":3,"contentType":"application/op-ns","contentLength":0}"#)),
+        ])
+        let atomic = try OneSatTestBEEF.atomicEnvelope(plain: try beefBytes([tx]), subject: id)
+
+        let resolved = try await OpNS.resolveBind(
+            name: "alice",
+            opns: OpnsClient(baseURL: baseURL, transport: http),
+            beef: RecordingBeef(bytes: atomic)
+        )
+        XCTAssertEqual(resolved.identityKey, Hex.encode(identity.publicKey.compressedBytes))
+        XCTAssertEqual(resolved.outpoint, "\(txid).1")
+    }
+
     func test_resolveRefusesAMissingOutput() async throws {
         let tx = try bindTransaction(
             lock: try script(SignOrdinalInputTests.lockFull),

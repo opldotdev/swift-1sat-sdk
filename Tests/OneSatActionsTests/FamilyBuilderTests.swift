@@ -586,6 +586,46 @@ final class FamilyBuilderTests: XCTestCase {
         )
     }
 
+    /// `sendBsv21` falls back to `getBeefForTxid`, which serves Atomic BEEF.
+    func test_tokenSendReadsAtomicBEEFFromTheListingSource() async throws {
+        let source = Transaction(
+            version: 1,
+            inputs: [],
+            outputs: [
+                TransactionOutput(
+                    satoshis: 1,
+                    lockingScript: try Script(bytes: [0x51], maximumByteCount: 10_000)
+                ),
+            ],
+            lockTime: 0
+        )
+        let sourceID = try source.transactionID(limits: WalletTransactionLimits.standard)
+        let beef = try BEEF(
+            merklePaths: [],
+            transactions: [.raw(source)],
+            limits: WalletBEEFLimits.standard
+        )
+        let listed = try WalletListOutputsResult(
+            totalOutputs: 1,
+            beef: nil,
+            outputs: [
+                try WalletOutput(
+                    satoshis: 1,
+                    spendable: true,
+                    customInstructions: try CustomInstructions(keyID: "tok-0").encoded(),
+                    tags: ["bsv21:\(ActionVectors.tokenID)", "amt:80"],
+                    outpoint: Outpoint(transactionID: sourceID, outputIndex: 0)
+                ),
+            ]
+        )
+        let resolved = try await Tokens.resolveInputBEEF(
+            listed: listed,
+            selected: [Tokens.SelectedInput(output: listed.outputs[0], amount: 80)],
+            listings: AtomicListingSource(bytes: try OneSatTestBEEF.atomicEnvelope(beef, subject: sourceID))
+        )
+        XCTAssertEqual(resolved, beef)
+    }
+
     func test_tokenSendRefusesInputsWithoutCustomInstructions() throws {
         let identity = try ActionVectors.identity()
         let first = try WalletOutput(
@@ -695,4 +735,9 @@ private struct RejectTransport: AuthenticatedTransport {
     ) async throws -> AuthenticatedResponse {
         throw AuthTransportError.notImplemented("offline")
     }
+}
+
+private struct AtomicListingSource: ListingBeefSource {
+    let bytes: [UInt8]
+    func beef(forTxid _: String) async throws -> [UInt8] { bytes }
 }
