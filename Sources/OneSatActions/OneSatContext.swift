@@ -21,9 +21,11 @@ public enum OneSatChain: String, Equatable, Sendable {
 ///
 /// Field names match `@1sat/actions` `tokens/index.ts` `ctx.services.bsv21`.
 public protocol Bsv21ActionServices: Sendable {
-    /// GET /{tokenId}. Actions gate on the status, so implementations must not serve it
-    /// from a cache (`getTokenDetails(tokenId, { fresh: true })`).
-    func tokenDetails(tokenId: String) async throws -> Bsv21TokenDetails
+    /// GET /{tokenId} (`Bsv21Client.getTokenDetails(tokenId, { fresh })`). The deploy data never
+    /// changes, but the status does: with `fresh` an implementation must fetch, and may refresh a
+    /// cache with the answer; without it, it may answer from that cache. Every action that gates
+    /// on the status (send, purchase, mint) asks for `fresh`, as the TS actions do.
+    func tokenDetails(tokenId: String, fresh: Bool) async throws -> Bsv21TokenDetails
     /// POST /{tokenId}/outputs/status: one state per outpoint, in request order, with each
     /// outpoint echoed exactly as sent.
     func outputStatus(tokenId: String, outpoints: [String]) async throws -> [Tokens.OutputStatus]

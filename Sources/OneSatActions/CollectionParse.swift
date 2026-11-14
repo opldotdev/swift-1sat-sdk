@@ -1,4 +1,5 @@
 import Foundation
+import OneSatTemplates
 import BSVCore
 import BSVWallet
 
@@ -416,18 +417,6 @@ public enum CollectionMap {
 
     /// Mirrors `CustomInstructions.jsonString` so MAP bytes match `JSON.stringify`.
     private static func jsonString(_ value: String) -> String {
-        var escaped = "\""
-        for scalar in value.unicodeScalars {
-            switch scalar {
-            case "\"": escaped += "\\\""
-            case "\\": escaped += "\\\\"
-            case "\n": escaped += "\\n"
-            case "\r": escaped += "\\r"
-            case "\t": escaped += "\\t"
-            default: escaped.unicodeScalars.append(scalar)
-            }
-        }
-        escaped += "\""
-        return escaped
+        JSONText.quote(value)
     }
 }

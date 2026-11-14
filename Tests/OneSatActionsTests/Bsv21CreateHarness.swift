@@ -186,6 +186,8 @@ actor Bsv21CreateOverlay: Bsv21ActionServices {
     var transferError: Error?
     private(set) var discoveries: [[UInt8]] = []
     private(set) var transfers: [(tokenId: String, tx: [UInt8])] = []
+    /// The `fresh` flag of every `tokenDetails` call, in order.
+    private(set) var detailsFresh: [Bool] = []
 
     init(details: Bsv21TokenDetails = Bsv21TokenDetails(
         isActive: true, feeAddress: ActionVectors.templateAddress, feePerOutput: 0, decimals: 0
@@ -198,7 +200,8 @@ actor Bsv21CreateOverlay: Bsv21ActionServices {
 
     var transferTokenIds: [String] { transfers.map(\.tokenId) }
 
-    func tokenDetails(tokenId _: String) async throws -> Bsv21TokenDetails {
+    func tokenDetails(tokenId _: String, fresh: Bool) async throws -> Bsv21TokenDetails {
+        detailsFresh.append(fresh)
         if let detailsError { throw detailsError }
         return details
     }

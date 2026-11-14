@@ -399,7 +399,7 @@ public enum Tokens {
             }
             let details: Bsv21TokenDetails
             do {
-                details = try await bsv21.tokenDetails(tokenId: request.tokenId)
+                details = try await bsv21.tokenDetails(tokenId: request.tokenId, fresh: true)
             } catch {
                 return ActionResult.failure(.tokenNotFound)
             }
@@ -496,7 +496,7 @@ public enum Tokens {
             } catch {
                 return ActionResult.failure(.listingNotFoundInOverlay)
             }
-            let details = try await bsv21.tokenDetails(tokenId: request.tokenId)
+            let details = try await bsv21.tokenDetails(tokenId: request.tokenId, fresh: true)
             let parsed = try await listings.beefGraph(forTxid: request.outpoint.transactionID.displayHex)
             let limits = WalletBEEFLimits.standard.transactionLimits
             guard let listingTx = parsed.transactions.compactMap(\.transaction).first(where: {

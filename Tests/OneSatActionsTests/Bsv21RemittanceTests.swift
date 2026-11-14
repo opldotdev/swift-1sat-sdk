@@ -1,3 +1,4 @@
+import Foundation
 import BSVTransaction
 import BSVWallet
 import XCTest
@@ -158,5 +159,32 @@ final class Bsv21RemittanceTests: XCTestCase {
         let spend = try CustomInstructions.parse(encoded)
         XCTAssertEqual(spend.keyID, "k1")
         XCTAssertEqual(spend.name, "Hello")
+    }
+
+    /// `buildCustomInstructions` writes control characters in user-typed fields as `JSON.stringify`
+    /// does (`Fixtures/json-stringify-remittance.json`, generated with Bun).
+    func test_customInstructionsEscapeControlCharactersAsJSONStringify() throws {
+        let url = try XCTUnwrap(
+            Bundle.module.url(forResource: "Fixtures/json-stringify-remittance", withExtension: "json")
+                ?? Bundle.module.url(forResource: "json-stringify-remittance", withExtension: "json", subdirectory: "Fixtures")
+        )
+        let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let remittance = try XCTUnwrap(root["remittance"] as? [String: Any])
+        let fields = try XCTUnwrap(remittance["fields"] as? [String: Any])
+        func text(_ units: Any?) throws -> String {
+            String(decoding: try XCTUnwrap(units as? [Int]).map { UInt16($0) }, as: UTF16.self)
+        }
+        let built = Bsv21Remittance.buildCustomInstructions(
+            token: Bsv21Remittance.Fields(
+                id: try text(fields["id"]), amt: try text(fields["amt"]), op: try text(fields["op"]),
+                symbol: try text(fields["sym"]), decimals: try text(fields["dec"]), icon: try text(fields["icon"])
+            ),
+            protocolID: try WalletProtocolID(securityLevel: .everyApp, name: try text(remittance["protocolName"])),
+            keyID: try text(fields["keyID"]),
+            counterparty: try text(fields["counterparty"])
+        )
+        XCTAssertEqual(built, try XCTUnwrap(remittance["json"] as? String))
+        // Foundation reads the escaped text back to the same symbol.
+        XCTAssertEqual(Bsv21Remittance.parseCustomInstructions(built).fields?.symbol, try text(fields["sym"]))
     }
 }

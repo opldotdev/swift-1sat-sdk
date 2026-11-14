@@ -62,8 +62,8 @@ extension Tokens {
     /// `DeployBsv21Response`, plus `discoverySubmitted`.
     ///
     /// TS logs a failed discovery submit and returns success. Here the deploy still succeeds (it
-    /// is on chain), and `discoverySubmitted` is false so the caller can retry with
-    /// `submitDeploy` instead of the failure going unseen.
+    /// is on chain), `discoverySubmitted` is false and `submitError` says why, so the caller can
+    /// retry with `submitDeploy` instead of the failure going unseen.
     public struct DeployResult: Equatable, Sendable {
         public let txid: String?
         /// Atomic BEEF of the deploy.
@@ -75,6 +75,8 @@ extension Tokens {
         public let error: String?
         public let actionId: String?
         public let discoverySubmitted: Bool
+        /// Why the discovery submit failed, when the deploy was broadcast but not submitted.
+        public let submitError: String?
 
         public init(
             txid: String? = nil,
@@ -83,7 +85,8 @@ extension Tokens {
             authOutpoint: String? = nil,
             error: String? = nil,
             actionId: String? = nil,
-            discoverySubmitted: Bool = false
+            discoverySubmitted: Bool = false,
+            submitError: String? = nil
         ) {
             self.txid = txid
             self.tx = tx
@@ -92,6 +95,7 @@ extension Tokens {
             self.error = error
             self.actionId = actionId
             self.discoverySubmitted = discoverySubmitted
+            self.submitError = submitError
         }
 
         static func failure(_ error: OneSatActionError, actionId: String? = nil) -> Self {
@@ -147,7 +151,8 @@ extension Tokens {
         }
     }
 
-    /// `mintBsv21` result, plus `overlaySubmitted` (TS logs a failed `tm_<tokenId>` submit).
+    /// `mintBsv21` result, plus `overlaySubmitted` and `submitError` (TS logs a failed
+    /// `tm_<tokenId>` submit).
     public struct MintResult: Equatable, Sendable {
         public let txid: String?
         public let tx: [UInt8]?
@@ -156,6 +161,8 @@ extension Tokens {
         public let error: String?
         public let actionId: String?
         public let overlaySubmitted: Bool
+        /// Why the `tm_<tokenId>` submit failed, when the mint was broadcast but not submitted.
+        public let submitError: String?
 
         public init(
             txid: String? = nil,
@@ -163,7 +170,8 @@ extension Tokens {
             authOutpoint: String? = nil,
             error: String? = nil,
             actionId: String? = nil,
-            overlaySubmitted: Bool = false
+            overlaySubmitted: Bool = false,
+            submitError: String? = nil
         ) {
             self.txid = txid
             self.tx = tx
@@ -171,6 +179,7 @@ extension Tokens {
             self.error = error
             self.actionId = actionId
             self.overlaySubmitted = overlaySubmitted
+            self.submitError = submitError
         }
 
         static func failure(_ error: OneSatActionError, actionId: String? = nil) -> Self {
@@ -334,6 +343,13 @@ extension Tokens {
         try await bsv21.submitDiscovery(tx: tx)
     }
 
+    /// The reason an overlay submit failed, as the result reports it.
+    static func submitFailure(_ error: any Error) -> String {
+        if let error = error as? OneSatActionError { return error.wireMessage }
+        if let error = error as? LocalizedError, let description = error.errorDescription { return description }
+        return String(describing: error)
+    }
+
     /// `executeBsv21Deploy` plus the caller's discovery submit.
     private static func executeDeploy(
         _ ctx: OneSatContext,
@@ -364,13 +380,16 @@ extension Tokens {
             }
             let tokenId = "\(txid)_0"
             var submitted = false
+            var submitError: String?
             if let tx = result.tx {
                 do {
                     try await submitDeploy(ctx, tx: tx)
                     submitted = true
                 } catch {
-                    submitted = false
+                    submitError = submitFailure(error)
                 }
+            } else {
+                submitError = "no transaction to submit"
             }
             return DeployResult(
                 txid: txid,
@@ -378,7 +397,8 @@ extension Tokens {
                 tokenId: tokenId,
                 authOutpoint: isAuth ? tokenId : nil,
                 actionId: result.actionId,
-                discoverySubmitted: submitted
+                discoverySubmitted: submitted,
+                submitError: submitError
             )
         } catch let error as OneSatActionError {
             return .failure(error)
@@ -574,7 +594,7 @@ extension Tokens {
             guard let bsv21 = ctx.bsv21 else { return .failure(.servicesRequired) }
             let details: Bsv21TokenDetails
             do {
-                details = try await bsv21.tokenDetails(tokenId: request.tokenId)
+                details = try await bsv21.tokenDetails(tokenId: request.tokenId, fresh: true)
             } catch {
                 return .failure(.tokenNotFound)
             }
@@ -629,20 +649,24 @@ extension Tokens {
                 return .failure(.noTxidReturned, actionId: result.actionId)
             }
             var submitted = false
+            var submitError: String?
             if let tx = result.tx {
                 do {
                     try await bsv21.submitTransfer(tx: tx, tokenId: request.tokenId)
                     submitted = true
                 } catch {
-                    submitted = false
+                    submitError = submitFailure(error)
                 }
+            } else {
+                submitError = "no transaction to submit"
             }
             return MintResult(
                 txid: txid,
                 tx: result.tx,
                 authOutpoint: prepared.authOutputIndex.map { "\(txid)_\($0)" },
                 actionId: result.actionId,
-                overlaySubmitted: submitted
+                overlaySubmitted: submitted,
+                submitError: submitError
             )
         } catch let error as OneSatActionError {
             return .failure(error)
