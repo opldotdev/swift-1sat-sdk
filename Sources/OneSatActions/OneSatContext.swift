@@ -31,7 +31,11 @@ public protocol Bsv21ActionServices: Sendable {
     func fundingTemplate(tokenId: String) async throws -> Tokens.FundingTemplate
     /// POST /{tokenId}/fund with the funding transaction's BEEF.
     func submitFunding(tokenId: String, beef: [UInt8]) async throws -> Tokens.OverlayStatus
+    /// POST /overlay/submit with `X-Topics: tm_<tokenId>`: a transfer or mint (`submitBsv21`).
     func submitTransfer(tx: [UInt8], tokenId: String) async throws
+    /// POST /overlay/submit with `X-Topics: tm_bsv21`: a deploy, so the indexer discovers the new
+    /// token (`OverlayClient.submitBsv21Discovery` in `@1sat/client`).
+    func submitDiscovery(tx: [UInt8]) async throws
 }
 
 public struct Bsv21TokenDetails: Equatable, Sendable {

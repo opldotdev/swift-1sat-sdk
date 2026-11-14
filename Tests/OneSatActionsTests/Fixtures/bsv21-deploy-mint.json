@@ -1,0 +1,1189 @@
+{
+  "meta": {
+    "generator": "gen.ts with published packages; crypto.getRandomValues fills counter*16+i per call",
+    "packages": {
+      "@1sat/actions": "0.1.6",
+      "@1sat/templates": "0.1.1",
+      "@bsv/sdk": "4.1.0",
+      "@1sat/types": "0.1.1"
+    },
+    "identityHex": "ffbd04ccf50e9822ac4387cc180d1a5021c16c89b288013fc8b9a2111dfa2da2",
+    "recipientPublicKey": "03b2f8418683b81f8843368fd31fb9b1fc37bd87c83928d65fa480ca994b1ea954",
+    "actionTxid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "cases": {
+    "deployMintDec0": {
+      "input": {
+        "symbol": "TEST",
+        "amount": "21000000"
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "tokenId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0"
+      },
+      "request": {
+        "description": "Deploy TEST (21000000 fixed supply)",
+        "labels": [],
+        "inputs": [],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230003f7b2270223a226273762d3230222c226f70223a226465706c6f792b6d696e74222c2273796d223a2254455354222c22616d74223a223231303030303030227d6876a91442a7c7545c33fbca52a3ed1b42d3f052afcc322a88ac",
+            "satoshis": 1,
+            "outputDescription": "Deploy TEST",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:deploy",
+              "id:2021222324252627_0"
+            ],
+            "customInstructions": "{\"amt\":\"21000000\",\"op\":\"deploy+mint\",\"sym\":\"TEST\",\"dec\":\"0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-deploy-TEST-1011121314151617\"}"
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [],
+      "overlay": [
+        "tm_bsv21"
+      ]
+    },
+    "deployMintDec8": {
+      "input": {
+        "symbol": "TEST",
+        "amount": "2100000000000000",
+        "decimals": 8
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "tokenId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0"
+      },
+      "request": {
+        "description": "Deploy TEST (2100000000000000 fixed supply)",
+        "labels": [],
+        "inputs": [],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c517b2270223a226273762d3230222c226f70223a226465706c6f792b6d696e74222c2273796d223a2254455354222c22616d74223a2232313030303030303030303030303030222c22646563223a2238227d6876a91442a7c7545c33fbca52a3ed1b42d3f052afcc322a88ac",
+            "satoshis": 1,
+            "outputDescription": "Deploy TEST",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:deploy",
+              "id:2021222324252627_0"
+            ],
+            "customInstructions": "{\"amt\":\"2100000000000000\",\"op\":\"deploy+mint\",\"sym\":\"TEST\",\"dec\":\"8\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-deploy-TEST-1011121314151617\"}"
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [],
+      "overlay": [
+        "tm_bsv21"
+      ]
+    },
+    "deployMintIcon": {
+      "input": {
+        "symbol": "ICON",
+        "amount": "1000",
+        "decimals": 2,
+        "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "tokenId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0"
+      },
+      "request": {
+        "description": "Deploy ICON (1000 fixed supply)",
+        "labels": [],
+        "inputs": [],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c917b2270223a226273762d3230222c226f70223a226465706c6f792b6d696e74222c2273796d223a2249434f4e222c22616d74223a2231303030222c22646563223a2232222c2269636f6e223a22626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262625f30227d6876a9148ff47207ebbd0d11ae626e622e49b31b820a54b788ac",
+            "satoshis": 1,
+            "outputDescription": "Deploy ICON",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:deploy",
+              "id:2021222324252627_0"
+            ],
+            "customInstructions": "{\"amt\":\"1000\",\"op\":\"deploy+mint\",\"sym\":\"ICON\",\"dec\":\"2\",\"icon\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-deploy-ICON-1011121314151617\"}"
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [],
+      "overlay": [
+        "tm_bsv21"
+      ]
+    },
+    "deployMintAddress": {
+      "input": {
+        "symbol": "ADDR",
+        "amount": "500",
+        "destination": {
+          "address": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        }
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "tokenId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0"
+      },
+      "request": {
+        "description": "Deploy ADDR (500 fixed supply)",
+        "labels": [],
+        "inputs": [],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230003a7b2270223a226273762d3230222c226f70223a226465706c6f792b6d696e74222c2273796d223a2241444452222c22616d74223a22353030227d6876a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888ac",
+            "satoshis": 1,
+            "outputDescription": "Deploy ADDR",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:deploy",
+              "id:1011121314151617_0"
+            ],
+            "customInstructions": null
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [],
+      "overlay": [
+        "tm_bsv21"
+      ]
+    },
+    "deployMintCounterparty": {
+      "input": {
+        "symbol": "PEER",
+        "amount": "7",
+        "destination": {
+          "counterparty": "03b2f8418683b81f8843368fd31fb9b1fc37bd87c83928d65fa480ca994b1ea954"
+        }
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "tokenId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0"
+      },
+      "request": {
+        "description": "Deploy PEER (7 fixed supply)",
+        "labels": [],
+        "inputs": [],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d323000387b2270223a226273762d3230222c226f70223a226465706c6f792b6d696e74222c2273796d223a2250454552222c22616d74223a2237227d6876a9148ad688ca098964bced3cafde5586d2df3ce9fc5f88ac",
+            "satoshis": 1,
+            "outputDescription": "Deploy PEER",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:deploy",
+              "id:2021222324252627_0"
+            ],
+            "customInstructions": "{\"amt\":\"7\",\"op\":\"deploy+mint\",\"sym\":\"PEER\",\"dec\":\"0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-deploy-PEER-1011121314151617\",\"counterparty\":\"03b2f8418683b81f8843368fd31fb9b1fc37bd87c83928d65fa480ca994b1ea954\"}"
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [],
+      "overlay": [
+        "tm_bsv21"
+      ]
+    },
+    "deployMintZero": {
+      "input": {
+        "symbol": "ZERO",
+        "amount": "0"
+      },
+      "result": {
+        "error": "amount-must-be-positive"
+      },
+      "request": null,
+      "listCalls": [],
+      "overlay": []
+    },
+    "deployMintDiscoveryFails": {
+      "input": {
+        "symbol": "TEST",
+        "amount": "1"
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "tokenId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0"
+      },
+      "request": {
+        "description": "Deploy TEST (1 fixed supply)",
+        "labels": [],
+        "inputs": [],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d323000387b2270223a226273762d3230222c226f70223a226465706c6f792b6d696e74222c2273796d223a2254455354222c22616d74223a2231227d6876a91442a7c7545c33fbca52a3ed1b42d3f052afcc322a88ac",
+            "satoshis": 1,
+            "outputDescription": "Deploy TEST",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:deploy",
+              "id:2021222324252627_0"
+            ],
+            "customInstructions": "{\"amt\":\"1\",\"op\":\"deploy+mint\",\"sym\":\"TEST\",\"dec\":\"0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-deploy-TEST-1011121314151617\"}"
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [],
+      "overlay": [
+        "tm_bsv21"
+      ]
+    },
+    "deployAuthDec0": {
+      "input": {
+        "symbol": "AUTH"
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "tokenId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0",
+        "authOutpoint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0"
+      },
+      "request": {
+        "description": "Deploy AUTH (mintable)",
+        "labels": [],
+        "inputs": [],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230002e7b2270223a226273762d3230222c226f70223a226465706c6f792b61757468222c2273796d223a2241555448227d6876a914d5dd4b0af39fd5ff76e389f15030e8b54f2a181188ac",
+            "satoshis": 1,
+            "outputDescription": "Deploy AUTH auth",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:deploy",
+              "bsv21:auth",
+              "id:2021222324252627_0"
+            ],
+            "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"AUTH\",\"dec\":\"0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-AUTH-1011121314151617\"}"
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [],
+      "overlay": [
+        "tm_bsv21"
+      ]
+    },
+    "deployAuthIcon": {
+      "input": {
+        "symbol": "AUTH",
+        "decimals": 2,
+        "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "tokenId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0",
+        "authOutpoint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0"
+      },
+      "request": {
+        "description": "Deploy AUTH (mintable)",
+        "labels": [],
+        "inputs": [],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c847b2270223a226273762d3230222c226f70223a226465706c6f792b61757468222c2273796d223a2241555448222c22646563223a2232222c2269636f6e223a22626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262625f30227d6876a914d5dd4b0af39fd5ff76e389f15030e8b54f2a181188ac",
+            "satoshis": 1,
+            "outputDescription": "Deploy AUTH auth",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:deploy",
+              "bsv21:auth",
+              "id:2021222324252627_0"
+            ],
+            "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"AUTH\",\"dec\":\"2\",\"icon\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-AUTH-1011121314151617\"}"
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [],
+      "overlay": [
+        "tm_bsv21"
+      ]
+    },
+    "mintWithContinuingAuth": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "mint": {
+          "amount": "500"
+        }
+      },
+      "authorities": [
+        {
+          "outpoint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.1",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0\",\"amt\":\"0\",\"op\":\"auth\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"other\"}"
+        },
+        {
+          "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:deploy",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-TEST-0001\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2,
+          "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "authOutpoint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_1"
+      },
+      "request": {
+        "description": "Mint 500 TEST",
+        "labels": [
+          "p bsv21 token aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "Mint authority",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c707b2270223a226273762d3230222c226f70223a226d696e74222c226964223a22616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161615f30222c22616d74223a22353030227d6876a91484afdae29cacf4d739b6278e2ea19b6c507d7bbf88ac",
+            "satoshis": 1,
+            "outputDescription": "Mint 500 tokens",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "id:3031323334353637_0"
+            ],
+            "customInstructions": "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"amt\":\"500\",\"op\":\"mint\",\"sym\":\"TEST\",\"dec\":\"2\",\"icon\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-mint-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0-1011121314151617\"}"
+          },
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c647b2270223a226273762d3230222c226f70223a2261757468222c226964223a22616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161615f30227d6876a914612e0d82301d283b98772d7ddc3ef632fe2f572f88ac",
+            "satoshis": 1,
+            "outputDescription": "Continuing mint authority",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "bsv21:auth",
+              "id:3031323334353637_1"
+            ],
+            "customInstructions": "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"amt\":\"0\",\"op\":\"auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"icon\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0-2021222324252627\"}"
+          },
+          {
+            "lockingScript": "76a91477bff20c60e522dfaa3350c39b030a5d004e839a88ac",
+            "satoshis": 2000,
+            "outputDescription": "Overlay processing fee",
+            "basket": null,
+            "tags": [
+              "fee:overlay"
+            ],
+            "customInstructions": null
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [
+        {
+          "basket": "bsv21",
+          "tags": [
+            "bsv21:auth"
+          ],
+          "tagQueryMode": "all",
+          "includeTags": true,
+          "includeCustomInstructions": true,
+          "include": "entire transactions",
+          "limit": 1000
+        }
+      ],
+      "overlay": [
+        "tm_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+      ]
+    },
+    "mintToAddressEndMinting": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "mint": {
+          "amount": "9",
+          "destination": {
+            "address": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+          }
+        },
+        "endMinting": true
+      },
+      "authorities": [
+        {
+          "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:deploy",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-TEST-0001\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2,
+          "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 0
+        }
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203"
+      },
+      "request": {
+        "description": "Mint 9 TEST",
+        "labels": [
+          "p bsv21 token aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "Mint authority",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c6e7b2270223a226273762d3230222c226f70223a226d696e74222c226964223a22616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161615f30222c22616d74223a2239227d6876a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888ac",
+            "satoshis": 1,
+            "outputDescription": "Mint 9 tokens",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "id:1011121314151617_0"
+            ],
+            "customInstructions": "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"amt\":\"9\",\"op\":\"mint\",\"sym\":\"TEST\",\"dec\":\"2\",\"icon\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0\"}"
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [
+        {
+          "basket": "bsv21",
+          "tags": [
+            "bsv21:auth"
+          ],
+          "tagQueryMode": "all",
+          "includeTags": true,
+          "includeCustomInstructions": true,
+          "include": "entire transactions",
+          "limit": 1000
+        }
+      ],
+      "overlay": [
+        "tm_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+      ]
+    },
+    "authTransferOnly": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "auth": {
+          "destination": {
+            "counterparty": "03b2f8418683b81f8843368fd31fb9b1fc37bd87c83928d65fa480ca994b1ea954"
+          }
+        }
+      },
+      "authorities": [
+        {
+          "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:deploy",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-TEST-0001\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2,
+          "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "authOutpoint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_0"
+      },
+      "request": {
+        "description": "Re-issue TEST authority",
+        "labels": [
+          "p bsv21 token aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "Mint authority",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c647b2270223a226273762d3230222c226f70223a2261757468222c226964223a22616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161615f30227d6876a91425bcd0858b2a2e3949894e570e38f5177d2fbeb488ac",
+            "satoshis": 1,
+            "outputDescription": "Continuing mint authority",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "bsv21:auth",
+              "id:2021222324252627_0"
+            ],
+            "customInstructions": "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"amt\":\"0\",\"op\":\"auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"icon\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0-1011121314151617\",\"counterparty\":\"03b2f8418683b81f8843368fd31fb9b1fc37bd87c83928d65fa480ca994b1ea954\"}"
+          },
+          {
+            "lockingScript": "76a91477bff20c60e522dfaa3350c39b030a5d004e839a88ac",
+            "satoshis": 1000,
+            "outputDescription": "Overlay processing fee",
+            "basket": null,
+            "tags": [
+              "fee:overlay"
+            ],
+            "customInstructions": null
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [
+        {
+          "basket": "bsv21",
+          "tags": [
+            "bsv21:auth"
+          ],
+          "tagQueryMode": "all",
+          "includeTags": true,
+          "includeCustomInstructions": true,
+          "include": "entire transactions",
+          "limit": 1000
+        }
+      ],
+      "overlay": [
+        "tm_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+      ]
+    },
+    "endMintingOnly": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "endMinting": true
+      },
+      "authorities": [
+        {
+          "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:deploy",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-TEST-0001\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2,
+          "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203"
+      },
+      "request": {
+        "description": "End TEST mint authority",
+        "labels": [
+          "p bsv21 token aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "Mint authority",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [
+        {
+          "basket": "bsv21",
+          "tags": [
+            "bsv21:auth"
+          ],
+          "tagQueryMode": "all",
+          "includeTags": true,
+          "includeCustomInstructions": true,
+          "include": "entire transactions",
+          "limit": 1000
+        }
+      ],
+      "overlay": [
+        "tm_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+      ]
+    },
+    "mintCarriesTrackedAuthority": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "mint": {
+          "amount": "3"
+        }
+      },
+      "authorities": [
+        {
+          "outpoint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.1",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+            "bsv21:auth",
+            "id:feedbeef_1"
+          ],
+          "customInstructions": "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"amt\":\"0\",\"op\":\"auth\",\"sym\":\"CARRY\",\"dec\":\"5\",\"icon\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee_0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-carry\",\"counterparty\":\"03b2f8418683b81f8843368fd31fb9b1fc37bd87c83928d65fa480ca994b1ea954\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "authOutpoint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_1"
+      },
+      "request": {
+        "description": "Mint 3 TEST",
+        "labels": [
+          "p bsv21 token aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "p bsv21 input id feedbeef_1"
+        ],
+        "inputs": [
+          {
+            "outpoint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.1",
+            "inputDescription": "Mint authority",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c6e7b2270223a226273762d3230222c226f70223a226d696e74222c226964223a22616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161615f30222c22616d74223a2233227d6876a91484afdae29cacf4d739b6278e2ea19b6c507d7bbf88ac",
+            "satoshis": 1,
+            "outputDescription": "Mint 3 tokens",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "id:3031323334353637_0"
+            ],
+            "customInstructions": "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"amt\":\"3\",\"op\":\"mint\",\"sym\":\"CARRY\",\"dec\":\"5\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-mint-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0-1011121314151617\",\"icon\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee_0\"}"
+          },
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c647b2270223a226273762d3230222c226f70223a2261757468222c226964223a22616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161615f30227d6876a914612e0d82301d283b98772d7ddc3ef632fe2f572f88ac",
+            "satoshis": 1,
+            "outputDescription": "Continuing mint authority",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "bsv21:auth",
+              "id:3031323334353637_1"
+            ],
+            "customInstructions": "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"amt\":\"0\",\"op\":\"auth\",\"sym\":\"CARRY\",\"dec\":\"5\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0-2021222324252627\",\"icon\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee_0\"}"
+          },
+          {
+            "lockingScript": "76a91477bff20c60e522dfaa3350c39b030a5d004e839a88ac",
+            "satoshis": 2000,
+            "outputDescription": "Overlay processing fee",
+            "basket": null,
+            "tags": [
+              "fee:overlay"
+            ],
+            "customInstructions": null
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [
+        {
+          "basket": "bsv21",
+          "tags": [
+            "bsv21:auth"
+          ],
+          "tagQueryMode": "all",
+          "includeTags": true,
+          "includeCustomInstructions": true,
+          "include": "entire transactions",
+          "limit": 1000
+        },
+        {
+          "basket": "bsv21",
+          "tags": [
+            "id:feedbeef_1"
+          ],
+          "tagQueryMode": "all",
+          "includeTags": true,
+          "includeCustomInstructions": true,
+          "limit": 1
+        },
+        {
+          "basket": "bsv21",
+          "tags": [
+            "id:feedbeef_1"
+          ],
+          "tagQueryMode": "all",
+          "includeTags": true,
+          "includeCustomInstructions": true,
+          "limit": 1
+        }
+      ],
+      "overlay": [
+        "tm_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+      ]
+    },
+    "mintNoSymbolDetails": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "mint": {
+          "amount": "4"
+        }
+      },
+      "authorities": [
+        {
+          "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:deploy",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-TEST-0001\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "txid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "tx": "010203",
+        "authOutpoint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc_1"
+      },
+      "request": {
+        "description": "Mint 4 aaaaaaaa",
+        "labels": [
+          "p bsv21 token aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "Mint authority",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c6e7b2270223a226273762d3230222c226f70223a226d696e74222c226964223a22616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161615f30222c22616d74223a2234227d6876a91484afdae29cacf4d739b6278e2ea19b6c507d7bbf88ac",
+            "satoshis": 1,
+            "outputDescription": "Mint 4 tokens",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "id:3031323334353637_0"
+            ],
+            "customInstructions": "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"amt\":\"4\",\"op\":\"mint\",\"dec\":\"0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-mint-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0-1011121314151617\"}"
+          },
+          {
+            "lockingScript": "0063036f726451126170706c69636174696f6e2f6273762d3230004c647b2270223a226273762d3230222c226f70223a2261757468222c226964223a22616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161615f30227d6876a914612e0d82301d283b98772d7ddc3ef632fe2f572f88ac",
+            "satoshis": 1,
+            "outputDescription": "Continuing mint authority",
+            "basket": "bsv21",
+            "tags": [
+              "bsv21:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "bsv21:auth",
+              "id:3031323334353637_1"
+            ],
+            "customInstructions": "{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"amt\":\"0\",\"op\":\"auth\",\"dec\":\"0\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0-2021222324252627\"}"
+          },
+          {
+            "lockingScript": "76a91477bff20c60e522dfaa3350c39b030a5d004e839a88ac",
+            "satoshis": 2000,
+            "outputDescription": "Overlay processing fee",
+            "basket": null,
+            "tags": [
+              "fee:overlay"
+            ],
+            "customInstructions": null
+          }
+        ],
+        "options": {
+          "randomizeOutputs": false,
+          "signAndProcess": false
+        }
+      },
+      "listCalls": [
+        {
+          "basket": "bsv21",
+          "tags": [
+            "bsv21:auth"
+          ],
+          "tagQueryMode": "all",
+          "includeTags": true,
+          "includeCustomInstructions": true,
+          "include": "entire transactions",
+          "limit": 1000
+        }
+      ],
+      "overlay": [
+        "tm_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+      ]
+    },
+    "errorAuthAndEnd": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "auth": {},
+        "endMinting": true
+      },
+      "authorities": [
+        {
+          "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:deploy",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-TEST-0001\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2,
+          "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "error": "auth-and-end-minting-are-mutually-exclusive"
+      },
+      "request": null,
+      "listCalls": [],
+      "overlay": []
+    },
+    "errorNothing": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0"
+      },
+      "authorities": [
+        {
+          "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:deploy",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-TEST-0001\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2,
+          "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "error": "must-provide-mint-or-auth"
+      },
+      "request": null,
+      "listCalls": [],
+      "overlay": []
+    },
+    "errorMintZero": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "mint": {
+          "amount": "0"
+        }
+      },
+      "authorities": [
+        {
+          "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:deploy",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-TEST-0001\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2,
+          "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "error": "mint-amount-must-be-positive"
+      },
+      "request": null,
+      "listCalls": [],
+      "overlay": []
+    },
+    "errorInactive": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "mint": {
+          "amount": "1"
+        }
+      },
+      "authorities": [
+        {
+          "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:deploy",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"amt\":\"0\",\"op\":\"deploy+auth\",\"sym\":\"TEST\",\"dec\":\"2\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"bsv21-auth-TEST-0001\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2,
+          "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+        },
+        "status": {
+          "is_active": false,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "error": "token-not-active"
+      },
+      "request": null,
+      "listCalls": [],
+      "overlay": []
+    },
+    "errorNoAuthority": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "mint": {
+          "amount": "1"
+        }
+      },
+      "authorities": [
+        {
+          "outpoint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.1",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0",
+            "bsv21:auth"
+          ],
+          "customInstructions": "{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0\",\"amt\":\"0\",\"op\":\"auth\",\"protocolID\":[0,\"onesat\"],\"keyID\":\"other\"}"
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2,
+          "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "error": "no-auth-utxo-for-token"
+      },
+      "request": null,
+      "listCalls": [
+        {
+          "basket": "bsv21",
+          "tags": [
+            "bsv21:auth"
+          ],
+          "tagQueryMode": "all",
+          "includeTags": true,
+          "includeCustomInstructions": true,
+          "include": "entire transactions",
+          "limit": 1000
+        }
+      ],
+      "overlay": []
+    },
+    "errorAuthorityWithoutCI": {
+      "input": {
+        "tokenId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+        "mint": {
+          "amount": "1"
+        }
+      },
+      "authorities": [
+        {
+          "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+          "satoshis": 1,
+          "spendable": true,
+          "tags": [
+            "bsv21:deploy",
+            "bsv21:auth"
+          ]
+        }
+      ],
+      "details": {
+        "token": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "sym": "TEST",
+          "dec": 2,
+          "icon": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0"
+        },
+        "status": {
+          "is_active": true,
+          "fee_address": "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+          "fee_per_output": 1000
+        }
+      },
+      "result": {
+        "error": "auth-utxo-missing-custom-instructions"
+      },
+      "request": null,
+      "listCalls": [
+        {
+          "basket": "bsv21",
+          "tags": [
+            "bsv21:auth"
+          ],
+          "tagQueryMode": "all",
+          "includeTags": true,
+          "includeCustomInstructions": true,
+          "include": "entire transactions",
+          "limit": 1000
+        }
+      ],
+      "overlay": []
+    }
+  }
+}

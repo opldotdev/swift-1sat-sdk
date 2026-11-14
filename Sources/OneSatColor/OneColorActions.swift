@@ -16,6 +16,9 @@ public struct Deploy1ColorResult: Equatable, Sendable {
     public var tx: [UInt8]?
     /// `<txid>_0`.
     public var assetID: String?
+    /// The deploy output's custody as filed (encrypted). Keep it with `tx` until the deploy is filed
+    /// and admitted: `resubmitDeploy` needs it to file a deploy whose filing failed.
+    public var customInstructions: String?
     public var error: String?
 }
 
@@ -76,6 +79,7 @@ public enum OneColorActions {
             )
             // A deploy output has no basket until it is signed, so its custody is encrypted here.
             let instructions = try await ColorMetadata.encrypt(custody.json, identity: ctx.identity)
+            result.customInstructions = instructions
             let request = try WalletCreateActionRequest(
                 description: authority ? "Deploy 1Color token (authority)" : "Deploy 1Color token (fixed supply)",
                 outputs: [try WalletCreateActionOutput(
@@ -106,6 +110,65 @@ public enum OneColorActions {
                 )]
             ))
             try await ColorModule.submit(overlay, topics: [ColorIdentifiers.discoveryTopic], beef: atomic)
+            return result
+        } catch {
+            result.error = error.localizedDescription
+            return result
+        }
+    }
+
+    /// Finishes a deploy that `deploy` broadcast but could not file or submit: files output 0 into
+    /// its asset basket unless storage already lists it there, then submits the deploy to `tm_color`.
+    ///
+    /// `tx` is the deploy's Atomic BEEF and `customInstructions` the custody `deploy` returned. The
+    /// custody is only needed when the deploy is not filed yet; it is checked against the output's
+    /// key before anything is filed. `@1sat/actions` has no counterpart: in TS the BRC-207 module
+    /// files the deploy inside the wallet's own action.
+    public static func resubmitDeploy(
+        _ ctx: OneColorContext, tx: [UInt8], customInstructions: String? = nil
+    ) async -> Deploy1ColorResult {
+        var result = Deploy1ColorResult()
+        do {
+            let overlay = try ctx.requireOverlay()
+            let atomic = try AtomicBEEF(bytes: tx, limits: beefLimits)
+            guard let deployTx = try atomic.beef.transaction(for: atomic.subjectTransactionID, limits: ColorModule.txLimits),
+                  let first = deployTx.outputs.first else {
+                throw ColorError.invalid("deploy transaction")
+            }
+            let txid = atomic.subjectTransactionID.displayHex
+            guard let token = try ColorTokenOutput.read(first.lockingScript, txid: txid, vout: 0), token.deploy else {
+                throw ColorError.invalid("deploy output")
+            }
+            let assetID = try ColorAssetID(txid: txid, vout: 0)
+            result.txid = txid
+            result.tx = tx
+            result.assetID = assetID.description
+            result.customInstructions = customInstructions
+
+            let basket = ColorIdentifiers.basket(assetID, role: token.role)
+            let outpoint = "\(txid).0"
+            let filed = try await ColorModule.listBasket(ctx, basket: basket)
+                .contains { $0.outpoint.description == outpoint }
+            if !filed {
+                guard let customInstructions else {
+                    throw ColorError.custody("the deploy is not filed and no custody was given to file it")
+                }
+                guard let plaintext = await ColorMetadata.decrypt(customInstructions, identity: ctx.identity) else {
+                    throw ColorError.custody("the deploy custody cannot be read")
+                }
+                let custody = try ColorCustody.parse(plaintext)
+                guard custody.asset == .issue else { throw ColorError.custody("a deploy's custody asset must be ISSUE") }
+                try ColorKeys.assertOwned(token, custody: custody, identity: ctx.identity)
+                _ = try await ctx.storage.colorInternalizeAction(ctx.auth, try WalletInternalizeActionRequest(
+                    transaction: atomic,
+                    description: "File the deployed asset",
+                    outputs: [try WalletInternalizeOutput(
+                        outputIndex: 0, protocol: .basketInsertion,
+                        insertionRemittance: try WalletBasketInsertion(basket: basket, customInstructions: customInstructions)
+                    )]
+                ))
+            }
+            try await ColorModule.submit(overlay, topics: [ColorIdentifiers.discoveryTopic], beef: tx)
             return result
         } catch {
             result.error = error.localizedDescription
