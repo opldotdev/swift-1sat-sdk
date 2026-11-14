@@ -203,6 +203,32 @@ final class TokenPurchaseFlowTests: XCTestCase {
         XCTAssertNil(result.txid)
     }
 
+    /// An Atomic `/1sat/beef` response reads like plain BEEF: the listing output is found and
+    /// judged, so the failure is about the script, not the envelope.
+    func test_purchaseReadsAnAtomicListingResponse() async throws {
+        let fixture = try listingFixture(
+            script: try Script(bytes: [0x51], maximumByteCount: 10_000)
+        )
+        let atomic = try OneSatTestBEEF.atomicEnvelope(
+            plain: fixture.beefBytes,
+            subject: fixture.outpoint.transactionID
+        )
+        let ctx = try dummyContext(
+            identity: try ActionVectors.identity(),
+            bsv21: StubBsv21(details: Self.activeDetails),
+            listings: RecordingListingSource(bytes: atomic)
+        )
+        let result = await Tokens.purchase(
+            ctx,
+            Tokens.PurchaseRequest(
+                tokenId: ActionVectors.tokenID,
+                outpoint: fixture.outpoint,
+                amount: 500
+            )
+        )
+        XCTAssertEqual(result.error, OneSatActionError.notAnOrdLockListing.wireMessage)
+    }
+
     func test_purchaseSpendsHeldFrontFundingThenTheListing() async throws {
         let envelope = try await capturedPurchaseEnvelope(
             details: Self.activeDetails,

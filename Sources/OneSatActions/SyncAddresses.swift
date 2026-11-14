@@ -72,11 +72,24 @@ public enum SyncAddresses {
 
     private static let reorgSafeDepth = 6
 
+    /// `SYNC_PROTOCOLS`: deposits are derived under `ONESAT_PROTOCOL` and, for addresses handed
+    /// out before the rename, `LEGACY_ONESAT_PROTOCOL` (`[0, "p 1sat"]`).
+    public static func syncProtocols() throws -> [WalletProtocolID] {
+        [
+            try OneSatConstants.p1satProtocolID,
+            try WalletProtocolID(
+                securityLevel: .silent,
+                name: OneSatConstants.legacyP1SatProtocolName
+            ),
+        ]
+    }
+
     public static func execute(
         _ ctx: OneSatContext,
         internalizer: any ActionInternalizer,
         beef: any ListingBeefSource,
         syncSource: any OwnerSyncSource,
+        assets: any DepositAssetSource,
         store: any ProcessedTxStore,
         request: Request
     ) async throws -> Result {
@@ -84,28 +97,31 @@ public enum SyncAddresses {
             throw OneSatActionError.servicesRequired
         }
 
-        var derived: [DerivedDeposit] = []
+        // TS: every protocol, then every index under it, so `addresses` lists the ONESAT set
+        // first and the legacy set after it.
+        var derived: [DepositDerivation] = []
         if request.count > 0 {
-            derived.reserveCapacity(request.count)
-            for index in request.startIndex..<(request.startIndex + request.count) {
-                let address = try DepositAddresses.address(
-                    identity: ctx.identity,
-                    index: index,
-                    prefix: request.prefix,
-                    network: ctx.chain.network
-                )
-                let lockingScript = try Script.payToPublicKeyHash(
-                    address,
-                    maximumByteCount: Int(WalletTransactionLimits.standard.maximumScriptByteCount)
-                )
-                derived.append(
-                    DerivedDeposit(
-                        address: address.description,
-                        prefix: request.prefix,
-                        suffix: String(index),
-                        lockingScript: lockingScript
+            let deriver = ctx.deriver
+            for protocolID in try syncProtocols() {
+                for index in request.startIndex..<(request.startIndex + request.count) {
+                    let suffix = String(index)
+                    let publicKey = try deriver.derivePublicKey(
+                        protocolID: protocolID,
+                        keyID: WalletKeyID("\(request.prefix) \(suffix)"),
+                        counterparty: .self,
+                        forSelf: true
                     )
-                )
+                    let address = Address(publicKey: publicKey, network: ctx.chain.network)
+                    derived.append(
+                        DepositDerivation(
+                            address: address.description,
+                            publicKeyHash: address.publicKeyHash.bytes,
+                            prefix: request.prefix,
+                            suffix: suffix,
+                            protocolID: protocolID
+                        )
+                    )
+                }
             }
         }
         let addresses = derived.map(\.address)
@@ -143,8 +159,10 @@ public enum SyncAddresses {
                     txid,
                     outputs: txOutputs,
                     derived: derived,
+                    network: ctx.chain.network,
                     internalizer: internalizer,
-                    beef: beef
+                    beef: beef,
+                    assets: assets
                 )
                 try await store.add(txid)
                 processed += 1
@@ -179,77 +197,76 @@ public enum SyncAddresses {
         )
     }
 
+    /// `processTxid` + `internalizeBeef` in address mode.
     private static func processTxid(
         _ txid: String,
         outputs: [SyncOutput],
-        derived: [DerivedDeposit],
+        derived: [DepositDerivation],
+        network: BitcoinNetwork,
         internalizer: any ActionInternalizer,
-        beef: any ListingBeefSource
+        beef: any ListingBeefSource,
+        assets: any DepositAssetSource
     ) async throws {
         if outputs.allSatisfy({ $0.spendTxid?.isEmpty == false }) {
             return
         }
 
         // `/1sat/beef/:txid` answers Atomic BEEF; TS reads it with `Beef.fromBinary`, which also
-        // takes plain BEEF.
-        let bytes = try await beef.beef(forTxid: txid)
+        // takes plain BEEF, and hands the wallet `toBinaryAtomic(txid)`.
+        let graph = try OneSatBEEF.graph(try await beef.beef(forTxid: txid))
         let subjectID = try TransactionID(displayHex: txid)
-        let atomic = try OneSatBEEF.atomic(bytes, subject: subjectID)
-        guard let subject = try atomic.beef.transaction(
+        guard let subject = try graph.transaction(
             for: subjectID,
             limits: WalletBEEFLimits.standard.transactionLimits
         ) else {
             throw OneSatActionError.noBeefAvailable
         }
 
-        let actionID = TrackedAction.randomActionID()
-        var money: [WalletInternalizeOutput] = []
-        var sats: UInt64 = 0
-        for (vout, output) in subject.outputs.enumerated() {
-            guard let deposit = derived.first(where: { $0.lockingScript == output.lockingScript }),
-                  output.satoshis >= 2
-            else { continue }
-            let instructions = try CustomInstructions(
-                protocolID: try OneSatConstants.p1satProtocolID,
-                keyID: "\(deposit.prefix) \(deposit.suffix)",
-                counterparty: .self
-            ).encoded(includeSelfCounterparty: true)
-            money.append(
-                WalletInternalizeOutput(
-                    outputIndex: UInt32(vout),
-                    remittance: .basketInsertion(
-                        try WalletBasketInsertion(
-                            basket: OneSatConstants.depositBasket,
-                            customInstructions: instructions,
-                            tags: ["id:\(actionID)_\(vout)"]
-                        )
-                    )
-                )
-            )
-            sats += output.satoshis
-        }
-
-        if money.isEmpty { return }
+        let indexed = try await DepositIndex.classify(
+            subject,
+            txid: txid,
+            graph: graph,
+            derived: derived,
+            network: network,
+            assets: assets
+        )
+        if indexed.outputs.isEmpty { return }
 
         let request = try WalletInternalizeActionRequest(
-            transaction: atomic,
-            description: buildDescription(sats: sats),
-            outputs: money
+            transaction: try OneSatBEEF.atomic(subjectID, in: graph),
+            description: indexed.description,
+            labels: indexed.labels,
+            outputs: indexed.outputs
         )
         _ = try await internalizer.internalizeAction(request)
     }
 
     /// TS `buildDescription` money branch, truncated to 50 characters.
     static func buildDescription(sats: UInt64) -> String {
-        let desc = "Received \(sats) sats"
-        if desc.count <= 50 { return desc }
-        return "\(desc.prefix(47))..."
+        buildDescription(parts: [], sats: sats)
+    }
+
+    /// TS `buildDescription`: asset parts in output order, then the plain-sats total.
+    static func buildDescription(parts: [String], sats: UInt64) -> String {
+        var parts = parts
+        if sats > 0 { parts.append("\(sats) sats") }
+        if parts.isEmpty { return "Received via sync" }
+        let desc = "Received \(parts.joined(separator: " + "))"
+        let units = Array(desc.utf16)
+        if units.count <= 50 { return desc }
+        var cut = units.prefix(47)
+        if let last = cut.last, UTF16.isLeadSurrogate(last) { cut = cut.dropLast() }
+        return String(decoding: cut, as: UTF16.self) + "..."
     }
 }
 
-private struct DerivedDeposit: Sendable {
+/// One deposit address and how its key was derived (`SyncedDerivation`).
+struct DepositDerivation: Sendable {
     let address: String
+    let publicKeyHash: [UInt8]
     let prefix: String
     let suffix: String
-    let lockingScript: Script
+    let protocolID: WalletProtocolID
+
+    var keyID: String { "\(prefix) \(suffix)" }
 }

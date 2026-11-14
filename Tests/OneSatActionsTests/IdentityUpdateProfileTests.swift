@@ -133,6 +133,41 @@ final class IdentityUpdateProfileTests: XCTestCase {
         XCTAssertEqual(relinquished, [aliasOutpoint])
     }
 
+    /// A TS wallet behind the permissions manager stores the ID record's customInstructions
+    /// encrypted. The alias is still signed by the key the highest `seq:` declares.
+    func test_existingIdentityWithEncryptedInstructionsSignsWithSeqKey() async throws {
+        let transport = ScriptedTransport(
+            idOutputs: [
+                [
+                    "outpoint": idOutpoint,
+                    "satoshis": 0,
+                    "spendable": true,
+                    "tags": ["type:id", "bapId:\(expectedBapId)", "seq:2"],
+                    "customInstructions": "q83vASNFZ4mrze8BI0VniQ==",
+                ],
+            ],
+            aliasOutputs: [],
+            completeAction: true
+        )
+        let identity = try ActionVectors.identity()
+        let result = await Identity.updateProfile(
+            try context(identity: identity, transport: transport),
+            profileJSON: profileJSON
+        )
+        XCTAssertNil(result.error, result.error ?? "")
+        XCTAssertNotNil(result.txid)
+
+        let captured = await transport.capturedCreateAction()
+        let update = try XCTUnwrap(captured)
+        XCTAssertEqual(update.description, "BAP alias update")
+        XCTAssertEqual(update.outputs.count, 1)
+        let aliasScript = try Script(
+            hex: update.outputs[0].lockingScript,
+            maximumByteCount: ActionScript.maximumByteCount
+        )
+        try assertValidAIP(on: aliasScript, identity: identity, index: 2)
+    }
+
     func test_resolveWithoutIdOutputsSurfacesExactMessage() async throws {
         let transport = ScriptedTransport(
             idOutputs: [

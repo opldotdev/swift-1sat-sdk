@@ -11,30 +11,44 @@ public enum Sigma {
     public static let compactSignatureLength = 65
     public static let addressPlaceholderLength = 34
 
-    /// `resolveCurrentKeyId` (`aip.ts:37-67`). Highest `seq:N` in the BAP basket.
+    /// `resolveCurrentKeyId` (`aip.ts:29-60`). The `seq:N` ID record declares
+    /// `identity-N` as the current signing key, so the highest `seq:` tag decides the key.
+    /// `identity-0` is reserved for publishing and rotation and is never returned.
+    /// customInstructions are not read: a wallet behind the permissions manager
+    /// stores them encrypted.
     public static func resolveCurrentKeyId(_ ctx: OneSatContext) async throws -> String {
         let listed = try await ctx.storage.listOutputs(
             ctx.auth,
             try WalletListOutputsRequest(
                 basket: OneSatConstants.bapBasket,
                 tags: ["type:id"],
-                includeCustomInstructions: true,
                 includeTags: true,
                 pagination: try WalletPagination(limit: 100)
             )
         )
-        var maxSeq = -1
-        var keyID: String?
+        var maxSeq = 0
         for output in listed.outputs {
             guard let seqTag = output.tags?.first(where: { $0.hasPrefix("seq:") }) else { continue }
-            guard let seq = Int(seqTag.dropFirst(4)) else { continue }
-            guard seq > maxSeq, let instructions = output.customInstructions else { continue }
-            maxSeq = seq
-            let parsed = try JSONSerialization.jsonObject(with: Data(instructions.utf8))
-            keyID = (parsed as? [String: Any])?["keyID"] as? String
+            guard let seq = parseSeq(seqTag.dropFirst(4)) else { continue }
+            if seq > maxSeq { maxSeq = seq }
         }
-        guard let keyID else { throw OneSatActionError.noBapIdentity }
-        return keyID
+        guard maxSeq >= 1 else { throw OneSatActionError.noBapIdentity }
+        return Identity.signingKeyID(maxSeq)
+    }
+
+    /// `Number.parseInt(text, 10)`: leading whitespace, an optional sign, then the
+    /// leading decimal digits. `nil` where TS gets `NaN` (no digits) or where the
+    /// value does not fit an `Int`.
+    static func parseSeq(_ text: Substring) -> Int? {
+        var rest = text.drop(while: { $0.isWhitespace })
+        var negative = false
+        if let sign = rest.first, sign == "+" || sign == "-" {
+            negative = sign == "-"
+            rest = rest.dropFirst()
+        }
+        let digits = rest.prefix(while: { $0.isASCII && $0.isNumber })
+        guard !digits.isEmpty, let value = Int(digits) else { return nil }
+        return negative ? -value : value
     }
 
     /// `applySigma` (`sigma.ts:66-118`). Appends `SIGMA BSM <address> <compactSig> <vin>`.

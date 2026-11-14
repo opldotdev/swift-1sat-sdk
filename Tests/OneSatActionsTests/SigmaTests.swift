@@ -91,14 +91,80 @@ final class SigmaTests: XCTestCase {
     }
 
     func test_resolveCurrentKeyIdPicksHighestSeq() async throws {
+        let keyID = try await resolveKeyID([
+            identityOutput(seq: 1, keyID: Identity.signingKeyID(1), prefix: "e"),
+            identityOutput(seq: 3, keyID: Identity.signingKeyID(3), prefix: "d"),
+            identityOutput(seq: 2, keyID: Identity.signingKeyID(2), prefix: "f"),
+        ])
+        XCTAssertEqual(keyID, Identity.signingKeyID(3))
+    }
+
+    /// TS `aip.ts:36-60` never reads customInstructions, so a plaintext record that
+    /// names another key does not change the result: the `seq:` tag decides.
+    func test_resolveCurrentKeyIdDerivesFromSeqNotPlaintextInstructions() async throws {
+        let keyID = try await resolveKeyID([
+            identityOutput(seq: 1, instructions: "{\"protocolID\":[1,\"sigma\"],\"keyID\":\"identity-0\"}"),
+        ])
+        // Identities published before TS b0b6dff1 declared identity-0 at seq:1; TS signs with identity-1.
+        XCTAssertEqual(keyID, Identity.signingKeyID(1))
+    }
+
+    /// A wallet behind the permissions manager stores customInstructions encrypted.
+    func test_resolveCurrentKeyIdIgnoresEncryptedInstructions() async throws {
+        let keyID = try await resolveKeyID([
+            identityOutput(seq: 2, instructions: "q83vASNFZ4mrze8BI0VniQ==", prefix: "e"),
+            identityOutput(seq: 1, instructions: "not json {", prefix: "f"),
+        ])
+        XCTAssertEqual(keyID, Identity.signingKeyID(2))
+    }
+
+    func test_resolveCurrentKeyIdWithoutInstructions() async throws {
+        let keyID = try await resolveKeyID([identityOutput(seq: 1, instructions: nil)])
+        XCTAssertEqual(keyID, Identity.signingKeyID(1))
+    }
+
+    func test_resolveCurrentKeyIdDoesNotRequestInstructions() async throws {
         let identity = try ActionVectors.identity()
         let transport = try ScriptedTransport(outputsJSON: JSONSerialization.data(withJSONObject: [
-            identityOutput(seq: 1, keyID: Identity.signingKeyID(1), prefix: "e"),
-            identityOutput(seq: 2, keyID: Identity.signingKeyID(2), prefix: "f"),
+            identityOutput(seq: 1, keyID: Identity.signingKeyID(1)),
         ]))
         let ctx = try context(identity: identity, transport: transport)
-        let keyID = try await Sigma.resolveCurrentKeyId(ctx)
-        XCTAssertEqual(keyID, Identity.signingKeyID(2))
+        _ = try await Sigma.resolveCurrentKeyId(ctx)
+        let bodies = await transport.bodies
+        let body = try XCTUnwrap(bodies.first)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(body)) as? [String: Any])
+        let params = try XCTUnwrap(object["params"] as? [Any])
+        let args = try XCTUnwrap(params.compactMap { $0 as? [String: Any] }.first { $0["basket"] != nil })
+        XCTAssertEqual(args["basket"] as? String, OneSatConstants.bapBasket)
+        XCTAssertEqual(args["tags"] as? [String], ["type:id"])
+        XCTAssertEqual(args["includeTags"] as? Bool, true)
+        XCTAssertNotEqual(args["includeCustomInstructions"] as? Bool, true)
+    }
+
+    func test_resolveCurrentKeyIdRejectsSeqZero() async throws {
+        try await assertNoBapIdentity([identityOutput(seq: 0, keyID: Identity.signingKeyID(0))])
+    }
+
+    func test_resolveCurrentKeyIdRejectsIdOutputsWithoutValidSeq() async throws {
+        try await assertNoBapIdentity([
+            identityOutput(tags: ["type:id"], prefix: "a"),
+            identityOutput(tags: ["type:id", "seq:"], prefix: "b"),
+            identityOutput(tags: ["type:id", "seq:abc"], prefix: "c"),
+            identityOutput(tags: ["type:id", "seq:-4"], prefix: "d"),
+        ])
+    }
+
+    /// `Number.parseInt(tag.slice(4), 10)` takes leading digits after optional whitespace and sign.
+    func test_parseSeqMatchesParseInt() {
+        XCTAssertEqual(Sigma.parseSeq("7"), 7)
+        XCTAssertEqual(Sigma.parseSeq("12abc"), 12)
+        XCTAssertEqual(Sigma.parseSeq(" 3"), 3)
+        XCTAssertEqual(Sigma.parseSeq("+5"), 5)
+        XCTAssertEqual(Sigma.parseSeq("-2"), -2)
+        XCTAssertEqual(Sigma.parseSeq("1.9"), 1)
+        XCTAssertNil(Sigma.parseSeq(""))
+        XCTAssertNil(Sigma.parseSeq("abc"))
+        XCTAssertNil(Sigma.parseSeq("-"))
     }
 
     func test_resolveCurrentKeyIdThrowsWhenNoIdentity() async throws {
@@ -150,14 +216,51 @@ final class SigmaTests: XCTestCase {
     }
 
     private func identityOutput(seq: Int, keyID: String, prefix: Character = "f") -> [String: Any] {
-        let instructions = "{\"protocolID\":[1,\"sigma\"],\"keyID\":\"\(keyID)\"}"
-        return [
+        identityOutput(
+            seq: seq,
+            instructions: "{\"protocolID\":[1,\"sigma\"],\"keyID\":\"\(keyID)\"}",
+            prefix: prefix
+        )
+    }
+
+    private func identityOutput(seq: Int, instructions: String?, prefix: Character = "f") -> [String: Any] {
+        identityOutput(tags: ["type:id", "seq:\(seq)"], instructions: instructions, prefix: prefix)
+    }
+
+    private func identityOutput(
+        tags: [String],
+        instructions: String? = nil,
+        prefix: Character = "f"
+    ) -> [String: Any] {
+        var output: [String: Any] = [
             "outpoint": "\(String(repeating: prefix, count: 64)).0",
             "satoshis": 0,
             "spendable": true,
-            "tags": ["type:id", "seq:\(seq)"],
-            "customInstructions": instructions,
+            "tags": tags,
         ]
+        if let instructions {
+            output["customInstructions"] = instructions
+        }
+        return output
+    }
+
+    private func resolveKeyID(_ outputs: [[String: Any]]) async throws -> String {
+        let identity = try ActionVectors.identity()
+        let transport = try ScriptedTransport(outputsJSON: JSONSerialization.data(withJSONObject: outputs))
+        return try await Sigma.resolveCurrentKeyId(try context(identity: identity, transport: transport))
+    }
+
+    private func assertNoBapIdentity(
+        _ outputs: [[String: Any]],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        do {
+            let keyID = try await resolveKeyID(outputs)
+            XCTFail("expected noBapIdentity, got \(keyID)", file: file, line: line)
+        } catch let error as OneSatActionError {
+            XCTAssertEqual(error, .noBapIdentity, file: file, line: line)
+        }
     }
 
     private func derivedAddress(_ identity: PrivateKey, keyID: String) throws -> Address {
