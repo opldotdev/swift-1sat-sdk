@@ -686,8 +686,7 @@ public enum Ordinals {
             guard let listings = ctx.listings else {
                 return ActionResult.failure(.servicesRequiredForPurchase)
             }
-            let beef = try await listings.beef(forTxid: request.outpoint.transactionID.displayHex)
-            let parsed = try BEEF(bytes: beef, limits: WalletBEEFLimits.standard)
+            let parsed = try await listings.beefGraph(forTxid: request.outpoint.transactionID.displayHex)
             let limits = WalletBEEFLimits.standard.transactionLimits
             guard let listingTx = parsed.transactions.compactMap(\.transaction).first(where: {
                 (try? $0.transactionID(limits: limits).displayHex)

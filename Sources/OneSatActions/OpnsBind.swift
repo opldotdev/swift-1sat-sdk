@@ -91,10 +91,7 @@ extension OpNS {
         let txid = outpoint.transactionID.displayHex
         let vout = outpoint.outputIndex
 
-        let parsed = try BEEF(
-            bytes: try await beef.beef(forTxid: txid),
-            limits: WalletBEEFLimits.standard
-        )
+        let parsed = try await beef.beefGraph(forTxid: txid)
         guard let transaction = try parsed.transaction(
                   for: outpoint.transactionID,
                   limits: WalletBEEFLimits.standard.transactionLimits

@@ -497,8 +497,7 @@ public enum Tokens {
                 return ActionResult.failure(.listingNotFoundInOverlay)
             }
             let details = try await bsv21.tokenDetails(tokenId: request.tokenId)
-            let beef = try await listings.beef(forTxid: request.outpoint.transactionID.displayHex)
-            let parsed = try BEEF(bytes: beef, limits: WalletBEEFLimits.standard)
+            let parsed = try await listings.beefGraph(forTxid: request.outpoint.transactionID.displayHex)
             let limits = WalletBEEFLimits.standard.transactionLimits
             guard let listingTx = parsed.transactions.compactMap(\.transaction).first(where: {
                 (try? $0.transactionID(limits: limits).displayHex)
@@ -679,15 +678,9 @@ public enum Tokens {
             if !txids.contains(txid) { txids.append(txid) }
         }
         guard let first = txids.first else { throw OneSatActionError.noBeefAvailable }
-        var merged = try BEEF(
-            bytes: try await listings.beef(forTxid: first),
-            limits: WalletBEEFLimits.standard
-        )
+        var merged = try await listings.beefGraph(forTxid: first)
         for txid in txids.dropFirst() {
-            let next = try BEEF(
-                bytes: try await listings.beef(forTxid: txid),
-                limits: WalletBEEFLimits.standard
-            )
+            let next = try await listings.beefGraph(forTxid: txid)
             merged = try merged.merging(next, limits: WalletBEEFLimits.standard)
         }
         return merged
