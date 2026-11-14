@@ -176,9 +176,12 @@ final class IdentityFlowTests: XCTestCase {
             "{\"protocolID\":[1,\"sigma\"],\"keyID\":\"identity-1\"}"
         )
         let tags = try XCTUnwrap(outputs[0]["tags"] as? [String])
-        XCTAssertTrue(tags.contains("type:id"))
-        XCTAssertTrue(tags.contains("bapId:\(expectedBapId)"))
-        XCTAssertTrue(tags.contains("seq:1"))
+        // TS `buildIdOutput` (`identity/index.ts:142-149`), then the tracked action's
+        // `id:<actionId>_<index>` stamp (`createTrackedAction.ts:56-64`). The `seq:` tag is
+        // what `resolveCurrentKeyId` reads back to derive identity-1.
+        XCTAssertEqual(Array(tags.prefix(3)), ["type:id", "bapId:\(expectedBapId)", "seq:1"])
+        XCTAssertEqual(tags.count, 4)
+        XCTAssertTrue(tags[3].hasPrefix("id:"))
 
         let scriptHex = try XCTUnwrap(outputs[0]["lockingScript"] as? String)
         let script = try Script(hex: scriptHex, maximumByteCount: ActionScript.maximumByteCount)
