@@ -507,6 +507,8 @@ private actor OverlayStub: Bsv21ActionServices {
     func submitTransfer(tx _: [UInt8], tokenId _: String) async throws {
         transfers += 1
     }
+
+    func submitDiscovery(tx _: [UInt8]) async throws {}
 }
 
 private struct CapturedCreateAction: Sendable {

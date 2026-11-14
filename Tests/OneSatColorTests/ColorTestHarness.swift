@@ -245,7 +245,15 @@ actor MockWallet: ColorWalletStorage {
         return try WalletListOutputsResult(totalOutputs: UInt32(matching.count), beef: beef, outputs: outputs)
     }
 
+    private var internalizeFailures = 0
+    /// The next `count` internalizations throw before storage records anything.
+    func failNextInternalize(_ count: Int) { internalizeFailures = count }
+
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {
+        if internalizeFailures > 0 {
+            internalizeFailures -= 1
+            throw HarnessError("internalize down")
+        }
         internalized.append(request)
         let atomic = request.transaction
         for (id, transaction) in try OneSatColorTests.transactions(in: atomic.beef) where transactions[id] == nil {

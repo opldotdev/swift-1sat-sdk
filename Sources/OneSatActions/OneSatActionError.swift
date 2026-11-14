@@ -56,6 +56,16 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case noBapIdentity
     case signWithBapRequiresInscription
     case sigmaPlaceholderMissing
+    case deployNoTxid
+    case authAndEndMintingMutuallyExclusive
+    case mustProvideMintOrAuth
+    case mintAmountMustBePositive
+    case noAuthUtxoForToken
+    case authUtxoMissingCustomInstructions
+    /// The authority output is a P2MS (multisig) authority, which this port does not sign.
+    case multiSigAuthNotSupported
+    /// A deploy whose transaction carries no BSV-21 deploy at output 0.
+    case notABsv21Deploy
 
     /// Exact `error` strings from `@1sat/actions`.
     public var wireMessage: String {
@@ -166,6 +176,22 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "sign-with-bap-requires-inscription"
         case .sigmaPlaceholderMissing:
             return "sigma seal: no zeroed placeholder tape on the script"
+        case .deployNoTxid:
+            return "deploy-no-txid"
+        case .authAndEndMintingMutuallyExclusive:
+            return "auth-and-end-minting-are-mutually-exclusive"
+        case .mustProvideMintOrAuth:
+            return "must-provide-mint-or-auth"
+        case .mintAmountMustBePositive:
+            return "mint-amount-must-be-positive"
+        case .noAuthUtxoForToken:
+            return "no-auth-utxo-for-token"
+        case .authUtxoMissingCustomInstructions:
+            return "auth-utxo-missing-custom-instructions"
+        case .multiSigAuthNotSupported:
+            return "multisig-auth-not-supported"
+        case .notABsv21Deploy:
+            return "not-a-bsv21-deploy"
         }
     }
 }

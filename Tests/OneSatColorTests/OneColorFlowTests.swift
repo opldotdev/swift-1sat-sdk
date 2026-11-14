@@ -95,6 +95,82 @@ final class OneColorFlowTests: XCTestCase {
         XCTAssertNotNil(result.assetID)
     }
 
+    // MARK: - Resubmit a deploy
+
+    func test_resubmitFilesAnUnfiledDeployAndSubmitsIt() async throws {
+        let world = try ColorWorld()
+        await world.alice.wallet.failNextInternalize(1)
+        let deployed = await OneColorActions.deploy(world.alice.ctx, amount: 1_000, decimals: 2, symbol: "TST")
+        XCTAssertNotNil(deployed.error)
+        let txid = try XCTUnwrap(deployed.txid)
+        let tx = try XCTUnwrap(deployed.tx)
+        let instructions = try XCTUnwrap(deployed.customInstructions)
+        let unfiled = await world.alice.wallet.record("\(txid).0")
+        XCTAssertNil(unfiled?.basket)
+        let before = await world.overlay.submissions
+        XCTAssertTrue(before.isEmpty)
+
+        // Without its custody an unfiled deploy cannot be filed.
+        let bare = await OneColorActions.resubmitDeploy(world.alice.ctx, tx: tx)
+        XCTAssertNotNil(bare.error)
+        let stillUnfiled = await world.alice.wallet.record("\(txid).0")
+        XCTAssertNil(stillUnfiled?.basket)
+
+        let result = await OneColorActions.resubmitDeploy(world.alice.ctx, tx: tx, customInstructions: instructions)
+        XCTAssertNil(result.error, result.error ?? "")
+        XCTAssertEqual(result.assetID, "\(txid)_0")
+        let assetID = try ColorAssetID(try XCTUnwrap(result.assetID))
+        let filed = await world.alice.wallet.record("\(txid).0")
+        XCTAssertEqual(filed?.basket, ColorIdentifiers.basket(assetID, role: .value))
+        XCTAssertEqual(filed?.customInstructions, instructions)
+        let submissions = await world.overlay.submissions
+        XCTAssertEqual(submissions, [[ColorIdentifiers.discoveryTopic]])
+        let balance = try await OneColorActions.balance(world.alice.ctx, assetID: assetID)
+        XCTAssertEqual(balance, 1_000)
+    }
+
+    func test_resubmitOfAFiledDeployOnlySubmitsIt() async throws {
+        let world = try ColorWorld()
+        await world.overlay.failNext(OneColorConstants.submitAttempts)
+        let deployed = await OneColorActions.deploy(world.alice.ctx, amount: 0)
+        XCTAssertNotNil(deployed.error)
+        let internalizedBefore = await world.alice.wallet.internalized.count
+        XCTAssertEqual(internalizedBefore, 1)
+
+        let result = await OneColorActions.resubmitDeploy(world.alice.ctx, tx: try XCTUnwrap(deployed.tx))
+        XCTAssertNil(result.error, result.error ?? "")
+        let internalizedAfter = await world.alice.wallet.internalized.count
+        XCTAssertEqual(internalizedAfter, 1, "a filed deploy is not filed twice")
+        let submissions = await world.overlay.submissions
+        XCTAssertEqual(submissions.last, [ColorIdentifiers.discoveryTopic])
+        let assetID = try ColorAssetID(try XCTUnwrap(result.assetID))
+        let authorities = try await OneColorActions.balance(world.alice.ctx, assetID: assetID, role: .authority)
+        XCTAssertEqual(authorities, 1)
+    }
+
+    func test_resubmitReportsAnOverlayThatStillRefuses() async throws {
+        let world = try ColorWorld()
+        await world.overlay.failNext(OneColorConstants.submitAttempts)
+        let deployed = await OneColorActions.deploy(world.alice.ctx, amount: 10)
+        let tx = try XCTUnwrap(deployed.tx)
+
+        await world.overlay.failNext(OneColorConstants.submitAttempts)
+        let failed = await OneColorActions.resubmitDeploy(world.alice.ctx, tx: tx)
+        XCTAssertNotNil(failed.error)
+        XCTAssertEqual(failed.txid, deployed.txid)
+        XCTAssertEqual(failed.tx, tx)
+
+        let submitted = await world.overlay.submissions.count
+        let foreign = await OneColorActions.resubmitDeploy(
+            world.bob.ctx, tx: tx, customInstructions: try XCTUnwrap(deployed.customInstructions)
+        )
+        XCTAssertNotNil(foreign.error, "another wallet cannot read or own this custody")
+        let bobFiled = await world.bob.wallet.internalized
+        XCTAssertTrue(bobFiled.isEmpty)
+        let after = await world.overlay.submissions.count
+        XCTAssertEqual(after, submitted)
+    }
+
     // MARK: - Send and receive
 
     func test_sendTheWholeBalanceThenTheRecipientReceivesIt() async throws {
