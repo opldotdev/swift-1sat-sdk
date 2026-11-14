@@ -232,8 +232,12 @@ final class Bsv21MintTests: XCTestCase {
         let txid = try XCTUnwrap(result.txid)
         XCTAssertEqual(result.authOutpoint, "\(txid)_1")
         XCTAssertTrue(result.overlaySubmitted)
+        XCTAssertNil(result.submitError)
         let submitted = await overlay.transferTokenIds
         XCTAssertEqual(submitted, [authority.tokenId])
+        // TS `mintBsv21` gates on `getTokenDetails(tokenId, { fresh: true })`.
+        let fresh = await overlay.detailsFresh
+        XCTAssertEqual(fresh, [true])
 
         // The authority is listed as TS lists it.
         let lists = await storage.listRequests
@@ -318,6 +322,7 @@ final class Bsv21MintTests: XCTestCase {
         XCTAssertNil(result.error)
         XCTAssertNotNil(result.txid)
         XCTAssertFalse(result.overlaySubmitted)
+        XCTAssertEqual(result.submitError, "down")
     }
 
     func test_flowErrorsMatchTS() async throws {

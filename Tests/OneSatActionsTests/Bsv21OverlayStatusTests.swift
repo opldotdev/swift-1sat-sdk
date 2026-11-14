@@ -483,7 +483,7 @@ private actor OverlayStub: Bsv21ActionServices {
         self.submitError = submitError
     }
 
-    func tokenDetails(tokenId _: String) async throws -> Bsv21TokenDetails {
+    func tokenDetails(tokenId _: String, fresh _: Bool) async throws -> Bsv21TokenDetails {
         if let detailsError { throw detailsError }
         return details
     }

@@ -1,4 +1,5 @@
 import Foundation
+import OneSatTemplates
 
 /// The JSON value model of the color module's strict parser (`strictJson.ts`): objects keep
 /// their member order so a value can be written back exactly as `JSON.stringify` would.
@@ -62,29 +63,9 @@ public indirect enum StrictJSON: Equatable, Sendable {
         }
     }
 
-    /// `JSON.stringify` string quoting (ES2019 well-formed): `"`, `\`, the short escapes, other
-    /// C0 controls as lowercase `\u00xx`; everything else, `/` and DEL included, as is.
+    /// `JSON.stringify` string quoting (`JSONText.quote`).
     static func quote(_ text: String, into out: inout String) {
-        out += "\""
-        for scalar in text.unicodeScalars {
-            switch scalar {
-            case "\"": out += "\\\""
-            case "\\": out += "\\\\"
-            case "\u{08}": out += "\\b"
-            case "\u{0C}": out += "\\f"
-            case "\n": out += "\\n"
-            case "\r": out += "\\r"
-            case "\t": out += "\\t"
-            default:
-                if scalar.value < 0x20 {
-                    let hex = String(scalar.value, radix: 16)
-                    out += "\\u" + String(repeating: "0", count: 4 - hex.count) + hex
-                } else {
-                    out.unicodeScalars.append(scalar)
-                }
-            }
-        }
-        out += "\""
+        out += JSONText.quote(text)
     }
 
     // MARK: - Strict parsing

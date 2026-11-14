@@ -603,7 +603,7 @@ private actor StubBsv21: Bsv21ActionServices {
         self.state = state
     }
 
-    func tokenDetails(tokenId _: String) async throws -> Bsv21TokenDetails {
+    func tokenDetails(tokenId _: String, fresh _: Bool) async throws -> Bsv21TokenDetails {
         tokenDetailsCalls += 1
         return details
     }

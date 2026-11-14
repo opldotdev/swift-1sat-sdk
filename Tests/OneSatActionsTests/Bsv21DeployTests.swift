@@ -54,6 +54,7 @@ final class Bsv21DeployTests: XCTestCase {
         XCTAssertEqual(result.tokenId, "\(txid)_0", file: file, line: line)
         XCTAssertEqual(result.authOutpoint, isAuth ? "\(txid)_0" : nil, file: file, line: line)
         XCTAssertTrue(result.discoverySubmitted, file: file, line: line)
+        XCTAssertNil(result.submitError, file: file, line: line)
         XCTAssertNotNil(fixture.result["tokenId"], file: file, line: line)
         XCTAssertEqual(fixture.result["authOutpoint"] != nil, isAuth, file: file, line: line)
 
@@ -161,6 +162,7 @@ final class Bsv21DeployTests: XCTestCase {
         let txid = try XCTUnwrap(result.txid)
         XCTAssertEqual(result.tokenId, "\(txid)_0")
         XCTAssertFalse(result.discoverySubmitted)
+        XCTAssertEqual(result.submitError, "down")
         let tx = try XCTUnwrap(result.tx)
 
         await overlay.failDiscovery(nil)
@@ -219,6 +221,7 @@ final class Bsv21DeployTests: XCTestCase {
         XCTAssertNil(result.error)
         XCTAssertNotNil(result.txid)
         XCTAssertFalse(result.discoverySubmitted)
+        XCTAssertEqual(result.submitError, OneSatActionError.servicesRequired.wireMessage)
     }
 
     func test_anInvalidSymbolFailsBeforeStorage() async throws {

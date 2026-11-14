@@ -49,14 +49,27 @@ public enum OneColorActions {
         _ ctx: OneColorContext, amount: UInt64, decimals: Int? = nil, symbol: String? = nil,
         icon: OneColorIcon? = nil
     ) async -> Deploy1ColorResult {
+        let custody: ColorCustody
+        do {
+            custody = try ColorCustody(
+                asset: .issue, derivationPrefix: ColorExecutor.randomBase64(),
+                derivationSuffix: ColorExecutor.randomBase64(), senderIdentityKey: ctx.identityKey
+            )
+        } catch {
+            return Deploy1ColorResult(error: error.localizedDescription)
+        }
+        return await deploy(ctx, amount: amount, decimals: decimals, symbol: symbol, icon: icon, custody: custody)
+    }
+
+    /// `deploy` with the deploy output's custody given, so tests can pin its key to a TS vector.
+    static func deploy(
+        _ ctx: OneColorContext, amount: UInt64, decimals: Int?, symbol: String?, icon: OneColorIcon?,
+        custody: ColorCustody
+    ) async -> Deploy1ColorResult {
         var result = Deploy1ColorResult()
         do {
             let overlay = try ctx.requireOverlay()
             let authority = amount == 0
-            let custody = try ColorCustody(
-                asset: .issue, derivationPrefix: ColorExecutor.randomBase64(),
-                derivationSuffix: ColorExecutor.randomBase64(), senderIdentityKey: ctx.identityKey
-            )
             let key = try ColorKeys.ownPublicKey(identity: ctx.identity, custody: custody)
             let lock = OneColorLock.publicKeyHash(ColorKeys.hash160(key))
             let payload = OneColorPayload.metadata(OneColorMetadata(symbol: symbol, decimals: decimals, icon: icon))
