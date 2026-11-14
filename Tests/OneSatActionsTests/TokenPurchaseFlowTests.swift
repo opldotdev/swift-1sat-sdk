@@ -239,12 +239,12 @@ final class TokenPurchaseFlowTests: XCTestCase {
         XCTAssertEqual(envelope.methods, ["listOutputs", "createAction"])
         XCTAssertEqual(envelope.wireBeef, envelope.fixture.beefBytes)
         XCTAssertEqual(envelope.inputs.count, 2)
-        XCTAssertEqual(envelope.inputs[0]["outpoint"] as? String, Self.heldOutpoint)
+        XCTAssertEqual(storageOutpoint(envelope.inputs[0]["outpoint"]), Self.heldOutpoint)
         XCTAssertEqual(
             (envelope.inputs[0]["unlockingScriptLength"] as? NSNumber)?.uint32Value,
             OneSatConstants.p2pkhUnlockingScriptLength
         )
-        XCTAssertEqual(envelope.inputs[1]["outpoint"] as? String, envelope.fixture.outpoint.description)
+        XCTAssertEqual(storageOutpoint(envelope.inputs[1]["outpoint"]), envelope.fixture.outpoint.description)
         XCTAssertEqual(
             (envelope.inputs[1]["unlockingScriptLength"] as? NSNumber)?.intValue,
             try OrdLockV2.estimatePurchaseUnlockLength(envelope.fixture.listingScript)

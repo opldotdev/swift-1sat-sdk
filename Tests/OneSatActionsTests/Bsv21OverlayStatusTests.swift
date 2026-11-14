@@ -559,7 +559,7 @@ private actor OverlayTransport: AuthenticatedTransport {
                 labels: args["labels"] as? [String] ?? [],
                 inputCount: inputs.count,
                 inputOutpoints: inputs.compactMap { input in
-                    (input["outpoint"] as? String).map { $0.replacingOccurrences(of: ".", with: "_") }
+                    storageOutpoint(input["outpoint"]).map { $0.replacingOccurrences(of: ".", with: "_") }
                 },
                 inputBEEF: Self.bytes(args["inputBEEF"]),
                 outputs: (args["outputs"] as? [[String: Any]] ?? []).map { output in
@@ -647,7 +647,7 @@ private actor OverlayTransport: AuthenticatedTransport {
         } else {
             inputBeef = Self.bytes(args["inputBEEF"])
             inputs = requestedInputs.map { input in
-                let parts = (input["outpoint"] as? String ?? "").split(separator: ".")
+                let parts = (storageOutpoint(input["outpoint"]) ?? "").split(separator: ".")
                 return [
                     "sourceTxid": parts.isEmpty ? "" : String(parts[0]),
                     "sourceVout": parts.count > 1 ? Int(parts[1]) ?? 0 : 0,
