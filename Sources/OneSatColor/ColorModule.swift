@@ -62,12 +62,15 @@ enum ColorModule {
         }
     }
 
-    /// Admitted, unspent outputs covering `target` units, largest first; rejected outputs are
-    /// skipped and the choice retried.
+    /// TS `selectInputs`: admitted, unspent outputs of the asset's value or authority basket. For
+    /// `.value`, `target` is units, covered largest first; for `.authority` it is a count of
+    /// outputs, taken in listing order (all amounts are 0). Rejected outputs are skipped and the
+    /// choice retried.
     static func selectInputs(
-        _ ctx: OneColorContext, overlay: any ColorOverlayProvider, assetID: ColorAssetID, target: UInt64
+        _ ctx: OneColorContext, overlay: any ColorOverlayProvider, assetID: ColorAssetID,
+        role: ColorTokenRole = .value, target: UInt64
     ) async throws -> [ColorManagedInput] {
-        let candidates = try await candidates(ctx, assetID: assetID, role: .value)
+        let candidates = try await candidates(ctx, assetID: assetID, role: role)
             .enumerated().sorted { $0.element.token.amount != $1.element.token.amount
                 ? $0.element.token.amount > $1.element.token.amount : $0.offset < $1.offset }
             .map(\.element)
@@ -79,19 +82,21 @@ enum ColorModule {
                 if total >= target { break }
                 if rejected.contains(candidate.output.outpoint.description) { continue }
                 chosen.append(candidate)
-                total += candidate.token.amount
+                total += role == .value ? candidate.token.amount : 1
             }
             guard total >= target else {
-                throw ColorError.custody("insufficient spendable balance of \(assetID)")
+                throw ColorError.custody("insufficient spendable \(role == .value ? "balance" : "authority") of \(assetID)")
             }
-            if let selected = try await checkChosen(ctx, overlay: overlay, assetID: assetID, chosen: chosen, rejected: &rejected) {
+            if let selected = try await checkChosen(
+                ctx, overlay: overlay, assetID: assetID, role: role, chosen: chosen, rejected: &rejected
+            ) {
                 return selected
             }
         }
     }
 
     static func checkChosen(
-        _ ctx: OneColorContext, overlay: any ColorOverlayProvider, assetID: ColorAssetID,
+        _ ctx: OneColorContext, overlay: any ColorOverlayProvider, assetID: ColorAssetID, role: ColorTokenRole,
         chosen: [Candidate], rejected: inout Set<String>
     ) async throws -> [ColorManagedInput]? {
         var selected: [ColorManagedInput] = []
@@ -107,7 +112,7 @@ enum ColorModule {
         if unreadable { return nil }
         let admitted = try await spendable(overlay, assetID: assetID, outputs: selected.map(source))
         let unlisted = selected.filter { !admitted.contains($0.outpoint) }
-        let recovered = try await resubmitHeld(ctx, overlay: overlay, assetID: assetID, role: .value, outputs: unlisted.map(source))
+        let recovered = try await resubmitHeld(ctx, overlay: overlay, assetID: assetID, role: role, outputs: unlisted.map(source))
         let missing = unlisted.filter { !recovered.contains($0.outpoint) }
         if missing.isEmpty { return selected }
         for input in missing { rejected.insert(input.outpoint) }
@@ -307,21 +312,34 @@ enum ColorModule {
 
     // MARK: - Split
 
+    /// A new token output this wallet keeps (TS `ownedOutput`): a value output of `amount`, or an
+    /// authority output (`amount` must be 0), in the asset's basket for that role, with its custody
+    /// encrypted and one suffix tag. `custody` defaults to new random derivation for this wallet.
     static func newManagedOutput(
-        _ ctx: OneColorContext, assetID: ColorAssetID, amount: UInt64
+        _ ctx: OneColorContext, assetID: ColorAssetID, amount: UInt64, role: ColorTokenRole = .value,
+        custody given: ColorCustody? = nil, outputDescription: String = "BRC-207 token change"
     ) async throws -> (output: WalletCreateActionOutput, custody: ColorCustody, script: Script) {
-        let custody = try ColorCustody(
+        let custody = try given ?? ColorCustody(
             asset: .asset(assetID), derivationPrefix: ColorExecutor.randomBase64(),
             derivationSuffix: ColorExecutor.randomBase64(), senderIdentityKey: ctx.identityKey
         )
+        guard custody.asset == .asset(assetID) else {
+            throw ColorError.custody("an owned output remittance names another asset")
+        }
         let key = try ColorKeys.ownPublicKey(identity: ctx.identity, custody: custody)
-        let script = try OneColor.value(
-            tokenID: assetID.description, amount: amount, lock: .publicKeyHash(ColorKeys.hash160(key))
-        ).lock()
+        let lock = OneColorLock.publicKeyHash(ColorKeys.hash160(key))
+        let script: Script
+        switch role {
+        case .value:
+            script = try OneColor.value(tokenID: assetID.description, amount: amount, lock: lock).lock()
+        case .authority:
+            guard amount == 0 else { throw ColorError.invalid("authority output amount") }
+            script = try OneColor.authority(tokenID: assetID.description, lock: lock).lock()
+        }
         let output = try WalletCreateActionOutput(
             lockingScript: script.bytes, satoshis: OneColorConstants.carrierSatoshis,
-            outputDescription: "BRC-207 token change",
-            basket: ColorIdentifiers.basket(assetID, role: .value),
+            outputDescription: outputDescription,
+            basket: ColorIdentifiers.basket(assetID, role: role),
             customInstructions: try await ColorMetadata.encrypt(custody.json, identity: ctx.identity),
             tags: [custody.suffixTag]
         )
