@@ -98,6 +98,51 @@ final class IdentityFlowTests: XCTestCase {
         XCTAssertEqual(tie?.winner.id, "A")
     }
 
+    func test_pickNewestAliasReadsLowercasedAndCamelCasePublishedAtTags() throws {
+        let mixed = try Identity.pickNewestAlias([
+            aliasOutput("a", id: "a", publishedAt: 1_000),
+            aliasOutput("b", tags: ["type:alias", "id:b", "publishedat:3000"]),
+            aliasOutput("c", id: "c", publishedAt: 2_000),
+            aliasOutput("d", tags: ["type:alias", "id:d"]),
+        ])
+        XCTAssertEqual(mixed?.winner.id, "b")
+        XCTAssertEqual(mixed?.winner.publishedAt, 3_000)
+        XCTAssertEqual(mixed?.losers.map { $0.id }, ["c", "a", "d"])
+
+        let camelNewest = try Identity.pickNewestAlias([
+            aliasOutput("a", tags: ["type:alias", "id:a", "publishedat:1000"]),
+            aliasOutput("b", id: "b", publishedAt: 5_000),
+        ])
+        XCTAssertEqual(camelNewest?.winner.id, "b")
+        XCTAssertEqual(camelNewest?.losers.map { $0.publishedAt }, [1_000])
+    }
+
+    func test_getProfileFetchesTheNewestAliasWhetherItsTagIsLowercasedOrCamelCase() async throws {
+        let older = "\(String(repeating: "a", count: 64)).0"
+        let newer = "\(String(repeating: "b", count: 64)).0"
+        let transport = ScriptedTransport(listResult: [
+            "totalOutputs": 2,
+            "outputs": [
+                ["outpoint": older, "satoshis": 0, "spendable": true,
+                 "tags": ["type:alias", "id:older", "publishedAt:1000"]],
+                ["outpoint": newer, "satoshis": 0, "spendable": true,
+                 "tags": ["type:alias", "id:newer", "publishedat:2000"]],
+            ],
+        ])
+        let identity = try ActionVectors.identity()
+        _ = await Identity.getProfile(try context(identity: identity, transport: transport))
+
+        let methods = await transport.methods
+        XCTAssertEqual(Array(methods.prefix(2)), ["listOutputs", "listOutputs"])
+        let bodies = await transport.bodies
+        let envelope = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(bodies[1])) as? [String: Any]
+        )
+        let params = try XCTUnwrap(envelope["params"] as? [Any])
+        let args = try XCTUnwrap(params[1] as? [String: Any])
+        XCTAssertEqual(args["tags"] as? [String], ["type:alias", "id:newer"])
+    }
+
     func test_publishSendsOneZeroSatBapOutput() async throws {
         let transport = ScriptedTransport(listResult: ["totalOutputs": 0, "outputs": []])
         let identity = try ActionVectors.identity()
@@ -231,6 +276,10 @@ final class IdentityFlowTests: XCTestCase {
         if let publishedAt {
             tags.append("publishedAt:\(publishedAt)")
         }
+        return try aliasOutput(prefix, tags: tags)
+    }
+
+    private func aliasOutput(_ prefix: Character, tags: [String]) throws -> WalletOutput {
         let txid = String(repeating: prefix, count: 64)
         return try WalletOutput(
             satoshis: 0,

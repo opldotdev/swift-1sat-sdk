@@ -462,13 +462,12 @@ public enum Identity {
         var id: String?
         var publishedAt: Int64?
         for tag in output.tags ?? [] {
-            if tag.hasPrefix("publishedAt:") {
-                let raw = String(tag.dropFirst("publishedAt:".count))
+            if let raw = WalletTag.value(tag, prefix: "publishedAt:") {
                 if let value = Int64(raw) {
                     publishedAt = value
                 }
-            } else if tag.hasPrefix("id:") {
-                id = String(tag.dropFirst("id:".count))
+            } else if let value = WalletTag.value(tag, prefix: "id:") {
+                id = value
             }
         }
         return AliasCandidate(

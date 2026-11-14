@@ -247,22 +247,22 @@ public enum CollectionParse {
         public let standalone: [WalletOutput]
     }
 
-    /// Tag-only grouping. No MAP decode, no normalization, no network.
+    /// Tag-only grouping. No MAP decode, no normalization, no network. Tags match in any
+    /// case: storage lowercases them (`subtype:collection`), older rows keep the camelCase.
     public static func group(ordinalOutputs: [WalletOutput]) -> Grouping {
         var parents: [WalletOutput] = []
         var itemsByCollectionId: [String: [WalletOutput]] = [:]
         var standalone: [WalletOutput] = []
         for output in ordinalOutputs {
             let tags = output.tags ?? []
-            if tags.contains(parentTag) {
+            if WalletTag.contains(tags, parentTag) {
                 parents.append(output)
-            } else if tags.contains(itemTag), let (idTag, prefix) = [
+            } else if WalletTag.contains(tags, itemTag), let id = [
                 collectionTagPrefix,
                 collectionIdTagPrefix,
-            ].compactMap({ prefix in
-                tags.first(where: { $0.hasPrefix(prefix) }).map { ($0, prefix) }
+            ].lazy.compactMap({ prefix in
+                tags.lazy.compactMap { WalletTag.value($0, prefix: prefix) }.first
             }).first {
-                let id = String(idTag.dropFirst(prefix.count))
                 itemsByCollectionId[id, default: []].append(output)
             } else {
                 standalone.append(output)
