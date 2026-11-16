@@ -229,6 +229,8 @@ actor MemoryStorage: ColorWalletStorage {
     }
 
     func abortAction(_ auth: AuthID, _ request: WalletAbortActionRequest) async throws -> WalletAbortActionResult {
+        // Like real storage, a call from a cancelled task does nothing.
+        try Task.checkCancellation()
         aborted.append(request.reference.base64)
         return WalletAbortActionResult(aborted: true)
     }
@@ -266,6 +268,8 @@ actor StubSigned: AuthenticatedTransport {
     enum Answer: Sendable {
         case response(Int, String)
         case error(Error & Sendable)
+        /// The caller's task is cancelled while the POST is in flight.
+        case cancelled
     }
 
     private(set) var sent: [Sent] = []
@@ -280,6 +284,9 @@ actor StubSigned: AuthenticatedTransport {
         switch answer {
         case .response(let status, let text): return AuthenticatedResponse(statusCode: status, headers: [:], body: Array(text.utf8))
         case .error(let error): throw error
+        case .cancelled:
+            withUnsafeCurrentTask { $0?.cancel() }
+            throw CancellationError()
         }
     }
 }

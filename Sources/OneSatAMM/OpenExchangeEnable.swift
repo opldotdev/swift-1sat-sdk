@@ -67,22 +67,35 @@ extension OpenExchange {
     ///
     /// On any failure after the payment was built, the payment is aborted in the wallet
     /// (`abortAction` by its txid), so its coins are free again. Returns the enabled row.
+    ///
+    /// `expectedPriceSats` is the fee the person agreed to. When given, a different price on the
+    /// fresh read refuses before any payment is built, as the 1sat-amm `ListingStep` re-reads the
+    /// fee before paying.
     public func enablePaid(
-        _ ctx: OneColorContext, tokenId: String, deployBeef: [UInt8]? = nil
+        _ ctx: OneColorContext, tokenId: String, deployBeef: [UInt8]? = nil,
+        expectedPriceSats: Int? = nil
     ) async throws -> OpenExchangeListing {
         do {
-            return try await enablePaidUnguarded(ctx, tokenId: tokenId, deployBeef: deployBeef)
+            return try await enablePaidUnguarded(
+                ctx, tokenId: tokenId, deployBeef: deployBeef, expectedPriceSats: expectedPriceSats
+            )
         } catch {
             throw OpenExchangeError.of(error)
         }
     }
 
     private func enablePaidUnguarded(
-        _ ctx: OneColorContext, tokenId: String, deployBeef: [UInt8]?
+        _ ctx: OneColorContext, tokenId: String, deployBeef: [UInt8]?, expectedPriceSats: Int?
     ) async throws -> OpenExchangeListing {
         let canonical = try AMMTokenID.canonical(tokenId)
         guard let price = try await defaults().enablePriceSats else {
             throw OpenExchangeError.refused(code: nil, message: "paid enable is off")
+        }
+        if let expectedPriceSats, expectedPriceSats != price {
+            throw OpenExchangeError.refused(
+                code: nil,
+                message: "the listing fee changed from \(expectedPriceSats) to \(price) sats; review it before paying"
+            )
         }
         let exchange = try await exchangeIdentity()
         let deploy: [UInt8]
@@ -245,9 +258,15 @@ extension OpenExchange {
     }
 
     /// `wallet.abortAction({reference: txid})`; its failure is ignored.
+    ///
+    /// It runs in a task of its own because the caller's task may be the one that was cancelled:
+    /// a storage call made from it would throw at once and leave the coins reserved until the
+    /// BRC-177 reclaim. An unstructured task does not inherit that cancellation.
     static func abort(_ ctx: OneColorContext, txid: String) async {
         guard let reference = try? WalletBase64Data(base64: txid) else { return }
-        _ = try? await ctx.storage.abortAction(ctx.auth, WalletAbortActionRequest(reference: reference))
+        await Task {
+            _ = try? await ctx.storage.abortAction(ctx.auth, WalletAbortActionRequest(reference: reference))
+        }.value
     }
 
     static let beefLimits = WalletBEEFLimits.standard

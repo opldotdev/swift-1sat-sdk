@@ -411,6 +411,34 @@ final class OpenExchangeEnableTests: XCTestCase {
         }
     }
 
+    func testACancelledListingStillAbortsThePayment() async throws {
+        let w = try await world(answer: .cancelled)
+        do {
+            _ = try await w.exchange.enablePaid(w.ctx, tokenId: TX, deployBeef: try atomicBytes(try deployTransaction()))
+            XCTFail("cancelled")
+        } catch {}
+        let paymentTxid = try await paymentTxidOf(w.storage)
+        let aborted = await w.storage.aborted
+        XCTAssertEqual(aborted, [paymentTxid])
+    }
+
+    func testAChangedFeeIsRefusedBeforeAnyPayment() async throws {
+        let w = try await world()
+        do {
+            _ = try await w.exchange.enablePaid(
+                w.ctx, tokenId: TX, deployBeef: try atomicBytes(try deployTransaction()), expectedPriceSats: 1
+            )
+            XCTFail("fee changed")
+        } catch let error as OpenExchangeError {
+            guard case .refused(nil, let message) = error else { return XCTFail("\(error)") }
+            XCTAssertTrue(message.hasPrefix("the listing fee changed from 1 to "), message)
+        }
+        let sent = await w.signed.sent
+        let aborted = await w.storage.aborted
+        XCTAssertEqual(sent.count, 0)
+        XCTAssertEqual(aborted, [])
+    }
+
     func testAWalletWithoutBRC177IsRefusedAndNothingIsSent() async throws {
         let w = try await world()
         await w.storage.setNoSendSupported(false)
