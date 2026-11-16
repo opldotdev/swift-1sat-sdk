@@ -78,7 +78,7 @@ public struct HandleResolver: Sendable {
         guard (200..<300).contains(manifest.status) else {
             let detail = Self.failure("manifest", url: manifestURL, status: manifest.status, body: manifest.body, domain: domain)
             throw MetanetError.handle(
-                "manifest fetch failed for \(domain): \(manifest.status)\(detail.serverMessage.map { " \($0)" } ?? "")"
+                "manifest fetch failed for \(domain): \(manifest.status)\(detail.serverMessage.map { ": \($0)" } ?? "")"
             )
         }
         // A manifest that is not JSON, or has no `metanet.handles`, is a domain without handles.

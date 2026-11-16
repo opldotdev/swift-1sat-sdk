@@ -670,14 +670,14 @@ public enum Tokens {
                     tx: tx,
                     actionId: result.actionId,
                     error: OneSatActionError.fundingSubmitFailed.wireMessage,
-                    diagnostic: String(reflecting: error)
+                    diagnostic: OneSatLog.reflecting(error)
                 )
             }
         } catch let error as OneSatActionError {
             return .failure(error)
         } catch {
             OneSatLog.error(error, "BSV-21 overlay funding failed", category: "OneSatActions")
-            return FundOverlayResult(error: error.localizedDescription, diagnostic: String(reflecting: error))
+            return FundOverlayResult(error: error.localizedDescription, diagnostic: OneSatLog.reflecting(error))
         }
     }
 

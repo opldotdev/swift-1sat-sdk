@@ -1,3 +1,4 @@
+import Foundation
 import BSVCore
 import BSVKeys
 import BSVScript

@@ -149,7 +149,8 @@ public struct HTTPColorOverlay: ColorOverlayProvider {
                 method: "POST", url: url, statusCode: status, body: body
             )
             detail.log(category: "OneSatColor")
-            throw ColorError.overlay("overlay submit failed: \(detail.userMessage)")
+            // The earlier text, "overlay submit failed: <status>", with the overlay's own reason after it.
+            throw ColorError.overlay("overlay submit failed: \(status)\(detail.serverMessage.map { ": \($0)" } ?? "")")
         }
         do {
             return try Self.readSteak(body)

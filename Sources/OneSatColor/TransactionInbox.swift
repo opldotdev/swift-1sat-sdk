@@ -75,14 +75,24 @@ public enum TransactionInbox {
             return result
         }
         var acknowledged: [String] = []
+        // A skipped message stays in the box and is met again on every sync: one line per sync
+        // with the count and the first one in full, not one line per message.
+        var firstSkip: (messageID: String, error: any Error)?
         for message in messages {
             do {
                 result.received.append(try await handle(ctx, message: message, overlayFor: overlayFor))
                 acknowledged.append(message.messageID)
             } catch {
-                OneSatLog.error(error, "1Color inbox: message skipped", category: "OneSatColor")
+                if firstSkip == nil { firstSkip = (messageID: message.messageID, error: error) }
                 result.skipped.append(TransactionInboxSkip(messageID: message.messageID, reason: error.localizedDescription))
             }
+        }
+        if let firstSkip {
+            OneSatLog.error(
+                "1Color inbox: \(result.skipped.count) of \(messages.count) messages skipped and left in the box; "
+                    + "first, \(firstSkip.messageID): \(OneSatLog.describe(firstSkip.error))",
+                category: "OneSatColor"
+            )
         }
         if !acknowledged.isEmpty {
             do {

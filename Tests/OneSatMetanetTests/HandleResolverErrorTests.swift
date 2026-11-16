@@ -10,7 +10,7 @@ final class HandleResolverErrorTests: XCTestCase {
             _ = try await resolver.resolve("alice@example.com")
             XCTFail("expected a handle error")
         } catch let error as MetanetError {
-            XCTAssertEqual(error, .handle("manifest fetch failed for example.com: 503 maintenance"))
+            XCTAssertEqual(error, .handle("manifest fetch failed for example.com: 503: maintenance"))
         } catch {
             XCTFail("unexpected \(error)")
         }

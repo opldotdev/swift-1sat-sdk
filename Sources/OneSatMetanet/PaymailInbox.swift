@@ -19,16 +19,15 @@ extension RemoteWallet: PaymailPaymentWallet {}
 /// A paymail message that cannot be internalized. The message stays in the box.
 public struct PaymailInboxError: Error, Equatable, Sendable, LocalizedError, CustomDebugStringConvertible {
     public let reason: String
-    /// `String(reflecting:)` of the error behind `reason`, for the log. Not part of `==`.
+    /// The error behind `reason`, its type and reflection, for the log. Not part of `==`.
     public let underlying: String?
 
-    /// Logs `underlying` in full where the message is refused.
+    /// Not logged here: an unreadable message stays in the box and is met again on every sync,
+    /// so the caller that walks the box logs once per sync, with this error's
+    /// `debugDescription`.
     public init(_ reason: String, underlying: (any Error)? = nil) {
         self.reason = reason
-        self.underlying = underlying.map { "\(type(of: $0)): \(String(reflecting: $0))" }
-        if let detail = self.underlying {
-            OneSatLog.error("PaymailInbox: \(reason): \(detail)", category: "OneSatMetanet")
-        }
+        self.underlying = underlying.map { OneSatLog.describe($0) }
     }
 
     public var errorDescription: String? { reason }
