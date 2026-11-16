@@ -263,6 +263,10 @@ actor MockWallet: ColorWalletStorage {
     /// The next `count` internalizations throw before storage records anything.
     func failNextInternalize(_ count: Int) { internalizeFailures = count }
 
+    func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult {
+        try WalletListActionsResult(totalActions: 0, actions: [])
+    }
+
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {
         if internalizeFailures > 0 {
             internalizeFailures -= 1

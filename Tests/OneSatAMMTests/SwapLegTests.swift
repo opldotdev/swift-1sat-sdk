@@ -111,8 +111,26 @@ actor StubOverlay: ColorOverlayProvider {
         })
     }
 
+    /// What was submitted, once `admitSubmissions` is on.
+    private(set) var submitted: [(topics: [String], beef: [UInt8])] = []
+    private var admits = false
+
+    /// Submissions admit every non-deploy token output of their subject (listed unspent from then
+    /// on) and spend what it spends, as `tm_color_<asset>` does.
+    func admitSubmissions() { admits = true }
+
     func submit(topics: [String], beef: [UInt8]) async throws -> [String: ColorAdmittance] {
-        throw TestError("a swap leg submits nothing to the overlay")
+        guard admits else { throw TestError("a swap leg submits nothing to the overlay") }
+        submitted.append((topics, beef))
+        let (id, _, tx) = try ColorBEEF.open(beef)
+        var vouts: [UInt32] = []
+        for (n, output) in tx.outputs.enumerated() {
+            guard let token = try ColorTokenOutput.read(output.lockingScript, txid: id.displayHex, vout: UInt32(n)), !token.deploy else { continue }
+            vouts.append(UInt32(n))
+            try unspent(tx, vout: UInt32(n))
+        }
+        for input in tx.inputs { unspent["\(input.previousOutput.transactionID.displayHex).\(input.previousOutput.outputIndex)"] = nil }
+        return Dictionary(uniqueKeysWithValues: topics.map { ($0, ColorAdmittance(outputsToAdmit: vouts)) })
     }
 }
 
@@ -438,7 +456,7 @@ final class SwapLegTests: XCTestCase {
         let long = try await OpenExchangeSwapLeg.stageSats(
             ctx, sats: 1, sym: "A very long token symbol for the swap description test", randomKeyID: next
         )
-        XCTAssertEqual(long.sats.keyID, stage["longKeyID"] as? String)
+        XCTAssertEqual(long.sats?.keyID, stage["longKeyID"] as? String)
 
         let created = await storage.created
         let want = stage["args"] as! [[String: Any]]
@@ -468,8 +486,9 @@ final class SwapLegTests: XCTestCase {
 
         // The rows are what the basket lists, for the leg to spend.
         let rows = try await OpenExchangeSwapLeg.satsHoldings(ctx)
-        XCTAssertEqual(Set(rows.map(\.outpoint)), [staged.sats.outpoint, long.sats.outpoint])
-        XCTAssertEqual(rows.first { $0.outpoint == staged.sats.outpoint }, staged.sats)
+        let stagedRows: [String] = [staged.sats?.outpoint, long.sats?.outpoint].compactMap { $0 }
+        XCTAssertEqual(Set(rows.map(\.outpoint)), Set(stagedRows))
+        XCTAssertEqual(rows.first { $0.outpoint == staged.sats?.outpoint }, staged.sats)
         let total = try await OpenExchangeSwapLeg.swapBasketSats(ctx)
         XCTAssertEqual(total, 12_346)
         let records = await storage.basketRecords("amm-swap")

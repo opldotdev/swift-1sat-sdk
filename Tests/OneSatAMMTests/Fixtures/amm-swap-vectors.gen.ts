@@ -1,7 +1,8 @@
 // Generator of amm-swap-vectors.json: run by amm-swap-vectors.gen.sh, which lays out the TS it imports.
 // Runs skein-amm cc146be (0.55.1) web/ui/src under bun against the fake BRC-100 wallet of
 // web/ui/test/swap.test.ts (a KeyDeriver over key(31); the fixture's funds held by key(30)) and
-// writes what the Swift buy port is checked against (SwapLegTests.swift, SwapRecoveryTests.swift).
+// writes what the Swift port is checked against (SwapLegTests.swift, SwapRecoveryTests.swift, the sell's
+// SwapSellTests.swift). The sell cases come after every buy case, so the buy vectors keep their bytes.
 // Randomness is seeded: crypto.getRandomValues draws from a counter, so the staged key ids repeat.
 let seed = 0;
 (globalThis.crypto as any).getRandomValues = (a: Uint8Array) => {
@@ -22,7 +23,10 @@ import {
 } from "./src/market/swapAction.ts";
 import { parseSwapReply, swapBody, toPoolState } from "./src/market/relay.ts";
 import { relaySwap, swapIdOf } from "./src/market/swapFlow.ts";
-import { SWAP_KEY_MARK, SWAP_KEY_PREFIX, SWAP_STAGE_LABEL, moveBackSats, stage } from "./src/market/activeSwap.ts";
+import { SWAP_KEY_MARK, SWAP_KEY_PREFIX, SWAP_STAGE_LABEL, fileStagedToken, moveBack, moveBackSats, stage, swapKeyDescription, swapKeyIdOfDescription, unfiledStagedTokens } from "./src/market/activeSwap.ts";
+import { assetIdOf, submissionBeef, tokenInputsOf, type TokenInput } from "./src/market/swapAction.ts";
+import { tokenP2pkhScript } from "./src/lp/poolDeploy.ts";
+import { steakText, submitToOverlay } from "./src/lp/close.ts";
 import { legTakeInOf, ownKeyInputOf, resolveFromOverlay } from "./src/wallet/swapPayouts.ts";
 
 const TXID = "948b532f1de8f7bb148f77da824544fe47b02079e7514d5b6a42856651c5214c";
@@ -242,5 +246,221 @@ for (const c of [relayCase, ownCase]) {
 // executeSwap's leg: the commission key derived from the market identity per pool outpoint (0.49.0), the whole
 // amount in one leg (last), 5,000 sats over the need.
 out.loop = (await satsIn("the swap loop's leg", { commissionPkh: deriveCommissionPkh(v.identity, { txid: deployTxid, vout: 0 }), extra: [5_000], last: true })).out;
+
+// ---------------------------------------------------------------------------
+// The sell (tokenToBsv): token rows in the swap basket, the leg, its take-in, staging with tokens, the
+// token move back, the unfiled staged tokens, and the page's submit (submissionBeef, submitToOverlay).
+// ---------------------------------------------------------------------------
+
+let tokenKeyN = 0;
+/** An `amm-swap` token row of `amount` (what `stage` files, or a sell leg's change kept), funded from fund:1, held by the fake wallet. */
+async function stagedTokens(w: ReturnType<typeof fakeWallet>, amount: bigint, order?: string): Promise<TokenInput> {
+  const keyID = `amm-swap-t${++tokenKeyN}`;
+  const pub = w.side.publicKey({ protocolID: SWAP_PROTOCOL, keyID, counterparty: "self", forSelf: true } as any);
+  const script = tokenP2pkhScript(TOKEN_ID, amount, pub);
+  const tx = new Transaction();
+  tx.addInput({ sourceTXID: fund.id("hex"), sourceOutputIndex: 1, sourceTransaction: fund, unlockingScript: new UnlockingScript(), sequence: 0xffffffff });
+  tx.addOutput({ satoshis: 1, lockingScript: LockingScript.fromHex(script) });
+  tx.addOutput({ satoshis: fund.outputs[1]!.satoshis! - 1 - 300, lockingScript: new P2PKH().lock(taker.toAddress()) });
+  tx.inputs[0]!.unlockingScript = await new P2PKH().unlock(taker).sign(tx, 0);
+  w.held.push(tx);
+  const txid = tx.id("hex");
+  const ci = swapInstructions({ protocolID: SWAP_PROTOCOL, keyID, counterparty: "self", ...(order ? { order } : {}) });
+  const row = { outpoint: `${txid}.0`, satoshis: 1, lockingScript: script, spendable: true, customInstructions: ci, tags: [] };
+  w.rows.push(row);
+  return tokenInputsOf([row], TOKEN_ID)[0]!;
+}
+
+const sellLegFor = (pool: PoolState, amountIn: bigint): Leg => {
+  const s = computeSwap(pool, "tokenToBsv", amountIn)!;
+  return { outpoint: pool.outpoint, amountIn, liquidityFee: s.liquidityFee, validationFee: s.validationFee, commission: s.commission, amountOut: s.amountOut, newBsvReserve: s.newBsvReserve, newTokenReserve: s.newTokenReserve };
+};
+
+/** Tokens in on pool_deploy:0: the token rows `tokens`, then sats rows of the leg's need plus `extra` each. */
+async function tokensOut(name: string, o: { commissionPkh?: string | null; tokens: bigint[]; amountIn: bigint; extra?: number[]; last?: boolean; order?: string }) {
+  const w = fakeWallet();
+  const pool = stateOf(poolDeploy, v.identity);
+  const leg = sellLegFor(pool, o.amountIn);
+  const common: PlanLegInput = { wallet: w.wallet, tokenId: TOKEN_ID, meta: { sym: "TST", dec: 0 }, direction: "tokenToBsv", leg, pool, poolOutput: { beef: atomic(poolDeploy), outputIndex: 0 }, commissionPkh: o.commissionPkh === undefined ? v.commissionPkh : o.commissionPkh, satsPerKb: RATE };
+  const tokenRows: TokenInput[] = [];
+  for (const a of o.tokens) tokenRows.push(await stagedTokens(w, a));
+  const need = selectLegInputs(common, [probe], tokenRows)!.need;
+  const satsRows: SatsInput[] = [];
+  for (const extra of o.extra ?? [0]) satsRows.push(await stagedSats(w, need.need + extra));
+  const inputs = selectLegInputs(common, satsRows, tokenRows)!;
+  const prepared = await prepareSwap({ ...common, inputs, last: o.last ?? false, ...(o.order ? { order: o.order } : {}) });
+  const signed = await validatorSigns(prepared, prepared.swap.toBinary());
+  return {
+    w, prepared, signed,
+    out: {
+      name, commissionPkh: common.commissionPkh, last: o.last ?? false, order: o.order ?? null, amountIn: String(leg.amountIn),
+      leg: big(leg), pool: big(pool),
+      tokenRows: tokenRows.map((r) => ({ hex: w.held.find((t) => t.id("hex") === r.txid)!.toHex(), keyID: r.keyID, amount: String(r.amount) })),
+      satsRows: satsRows.map((r) => ({ hex: w.held.find((t) => t.id("hex") === r.txid)!.toHex(), keyID: r.keyID, satoshis: r.satoshis })),
+      need: big(need), selected: inputs.sats.map((r) => r.outpoint), selectedTokens: inputs.tokens.map((r) => r.outpoint),
+      plan: { outputs: prepared.plan.outputs.map((x) => ({ satoshis: String(x.satoshis), script: x.script })), maxCallUnlockLength: PoolTemplate.maxCallUnlockLength(prepared.plan) },
+      swap: prepared.swap.toHex(), id: swapIdOf(prepared), funding: hex(prepared.funding.atomicBeef), fee: prepared.funding.fee,
+      order: prepared.order, commission: big({ amount: prepared.commission.amount, pkh: prepared.commission.pkh, to: prepared.commission.to }),
+      takeIn: takeInOutputs(prepared), body: JSON.stringify(swapBody({ funding: prepared.funding.atomicBeef, swap: prepared.swap.toBinary(), pool: prepared.pool, validator: prepared.validator, peerId: "peer-1" })),
+      signed: signed.toHex(), signedTxid: signed.id("hex"),
+    },
+  };
+}
+
+out.sellLegs = [];
+const sellRelay = await tokensOut("sell: relay commission, the token change kept (not the last leg)", { tokens: [60_000n], amountIn: 50_000n });
+out.sellLegs.push(sellRelay.out);
+out.sellLegs.push((await tokensOut("sell, the last leg: the token change a receipt, the sats change a BRC-29 payment", { tokens: [60_000n], amountIn: 50_000n, extra: [4_000], last: true })).out);
+const sellOwn = await tokensOut("sell: own commission (a token receipt), the tokens exact, last", { commissionPkh: null, tokens: [50_000n], amountIn: 50_000n, extra: [3_000], last: true });
+out.sellLegs.push(sellOwn.out);
+out.sellLegs.push((await tokensOut("sell: token rows largest first, as many as cover amountIn", { tokens: [5_000n, 30_000n, 25_000n], amountIn: 50_000n })).out);
+out.sellLegs.push((await tokensOut("sell: a later leg of an order", { tokens: [50_000n], amountIn: 50_000n, extra: [1_000], order: `${"ab".repeat(32)}.3` })).out);
+
+// The overlay pass's take-in of a sell leg (its key input the first token input).
+out.sellTakeIn = [];
+for (const c of [sellRelay, sellOwn]) {
+  const tx = c.signed;
+  const own = ownKeyInputOf(tx);
+  out.sellTakeIn.push({ signed: tx.toHex(), ownKeyInput: own, outputs: await legTakeInOf(c.w.wallet, tx, TOKEN_ID, own!), other: await legTakeInOf(c.w.wallet, tx, TOKEN_ID, `${"ee".repeat(32)}.0`) });
+}
+
+// executeSwap's sell leg: the market's commission key, the whole amount in one leg (last), 5,000 sats over the need.
+out.sellLoop = (await tokensOut("the swap loop's sell leg", { commissionPkh: deriveCommissionPkh(v.identity, { txid: deployTxid, vout: 0 }), tokens: [50_000n], amountIn: 50_000n, extra: [5_000], last: true })).out;
+
+// `stage` with tokens: the createAction (the module transfer plan), the page's submit and the filing of the token row.
+{
+  const steak = (topic: string) => ({ steak: { [topic]: { outputsToAdmit: [0], coinsToRetain: [], coinsRemoved: [] } } });
+  const runs: any[] = [];
+  const cases: [string, number, boolean][] = [["sats and tokens", 2_000, true], ["tokens alone, the submit and the filing refused", 0, false]];
+  for (const [name, sats, ok] of cases) {
+    const w = fakeWallet();
+    const submits: any[] = [];
+    const internalized: any[] = [];
+    const wallet = { ...w.wallet, internalizeAction: async (a: any) => { internalized.push(a); if (!ok) throw new Error("the wallet is locked"); return w.side.internalizeAction(a); } };
+    seed = 0;
+    const r = await stage(wallet as any, { sats, tokens: { tokenId: TOKEN_ID, amount: 50_000n } }, {
+      sym: "TST",
+      submit: async (topic: string, beef: number[]) => { submits.push({ topic, in: hex(beef), out: hex(submissionBeef(topic, beef)) }); if (!ok) throw new Error("POST https://ex.test/submit: 500 down"); return steak(topic); },
+    });
+    runs.push({
+      name, sats, args: big(w.created), submits, internalize: internalized.map((c) => ({ description: c.description, labels: c.labels, outputs: c.outputs })),
+      result: big({ txid: r.txid, sats: r.sats ?? null, tokens: r.tokens ?? null, filed: r.filed, submitted: r.submitted, errors: r.errors }),
+    });
+  }
+  out.stageTokens = { random: hex(Array.from({ length: 32 }, (_, i) => (i * 37 + 11) & 0xff)), runs };
+  let threw = "";
+  try { await stage(fakeWallet().wallet, { sats: 0 }); } catch (e) { threw = (e as Error).message; }
+  out.stageTokens.nothing = threw;
+}
+out.keyDescriptions = [
+  ["TST for a swap", "amm-swap-0a1b"],
+  ["A very long token symbol for the swap description test for a swap", `amm-swap-${"ab".repeat(16)}`],
+].map(([readable, keyID]) => ({ readable, keyID, description: swapKeyDescription(readable!, keyID!) }));
+out.keyIdsOfDescriptions = ["TST for a swap · amm-swap 0a1b", "x · amm-swap abc", "x · amm-swap 0A1B", "no mark", `y · amm-swap ${"cd".repeat(64)}`, `y · amm-swap ${"cd".repeat(65)}`]
+  .map((d) => ({ description: d, keyID: swapKeyIdOfDescription(d) }));
+
+// `moveBack` with tokens: the module plan (the owned output 0 to a new receiving key), the rows' spends, the page's submit.
+{
+  const cases: [string, bigint[], number[]][] = [["token rows and sats rows", [30_000n, 20_000n], [4_000]], ["token rows alone", [7_000n], []]];
+  out.moveBackTokens = [];
+  for (const [name, tokens, sats] of cases) {
+    const w = fakeWallet();
+    const tokenRows: TokenInput[] = [];
+    for (const [n, a] of tokens.entries()) tokenRows.push(await stagedTokens(w, a, n === 1 ? `${"ab".repeat(32)}.3` : undefined));
+    const satsRows: SatsInput[] = [];
+    for (const s of sats) satsRows.push(await stagedSats(w, s));
+    let created: any;
+    let signed: any;
+    let built: Transaction | undefined;
+    const submits: any[] = [];
+    const wallet = {
+      ...w.wallet,
+      async createAction(args: any) {
+        created = args;
+        const tx = new Transaction();
+        for (const i of args.inputs) {
+          const [txid, vout] = i.outpoint.split(".");
+          const src = w.held.find((t) => t.id("hex") === txid)!;
+          tx.addInput({ sourceTXID: txid, sourceOutputIndex: Number(vout), sourceTransaction: src, unlockingScript: new UnlockingScript(), sequence: 0xffffffff });
+        }
+        for (const o of args.outputs) tx.addOutput({ satoshis: o.satoshis, lockingScript: LockingScript.fromHex(o.lockingScript) });
+        tx.addOutput({ satoshis: 3_000, lockingScript: new P2PKH().lock(taker.toAddress()) });
+        built = tx;
+        return { signableTransaction: { tx: atomic(tx), reference: "ref-1" } };
+      },
+      async signAction(args: any) {
+        signed = args;
+        for (const [n, s] of Object.entries(args.spends) as [string, any][]) built!.inputs[Number(n)]!.unlockingScript = UnlockingScript.fromHex(s.unlockingScript);
+        return { txid: built!.id("hex"), tx: atomic(built!) };
+      },
+    };
+    seed = 100;
+    const m = await moveBack({ wallet: wallet as any, base: "https://ex.test/amm", tokenId: TOKEN_ID, meta: { sym: "TST" }, submit: async (topic, beef) => { submits.push({ topic, in: hex(beef), out: hex(submissionBeef(topic, beef)) }); return { steak: { [topic]: { outputsToAdmit: [0], coinsToRetain: [], coinsRemoved: [] } } }; } });
+    out.moveBackTokens.push({
+      name,
+      tokenRows: tokenRows.map((r, n) => ({ hex: w.held.find((t) => t.id("hex") === r.txid)!.toHex(), keyID: r.keyID, amount: String(r.amount), order: n === 1 ? `${"ab".repeat(32)}.3` : null })),
+      satsRows: satsRows.map((r) => ({ hex: w.held.find((t) => t.id("hex") === r.txid)!.toHex(), keyID: r.keyID, satoshis: r.satoshis })),
+      args: { ...big(created), inputBEEF: undefined }, spends: Object.keys(signed.spends), submits,
+      result: big({ amount: m.amount, submitted: m.submitted, errors: m.errors }),
+    });
+  }
+  let none = "";
+  try { await moveBack({ wallet: fakeWallet().wallet, base: "https://ex.test/amm", tokenId: TOKEN_ID, meta: { sym: "TST" } }); } catch (e) { none = (e as Error).message; }
+  out.moveBackNothing = none;
+}
+
+// The staged token outputs the basket lacks (`unfiledStagedTokens`) and their filing (`fileStagedToken`).
+{
+  const w = fakeWallet();
+  const tokenScript = tokenP2pkhScript(TOKEN_ID, 50_000n, w.side.publicKey({ protocolID: SWAP_PROTOCOL, keyID: "amm-swap-0a1b", counterparty: "self", forSelf: true } as any));
+  const actions = [
+    { txid: "a1".repeat(32), outputs: [
+      { outputIndex: 0, satoshis: 1, lockingScript: tokenScript, outputDescription: swapKeyDescription("TST for a swap", "amm-swap-0a1b"), basket: "" },
+      { outputIndex: 1, satoshis: 2_000, lockingScript: "76a914" + "11".repeat(20) + "88ac", outputDescription: "Sats for a TST swap", basket: "amm-swap" },
+    ] },
+    { txid: "b2".repeat(32), outputs: [{ outputIndex: 0, satoshis: 1, lockingScript: tokenScript, outputDescription: swapKeyDescription("TST for a swap", "amm-swap-0a1b"), basket: "amm-swap" }] },
+    { txid: "c3".repeat(32), outputs: [
+      { outputIndex: 2, satoshis: 1, lockingScript: tokenScript, outputDescription: "x · amm-swap abc", basket: "" },
+      { outputIndex: 3, satoshis: 5, lockingScript: "76a914" + "11".repeat(20) + "88ac", outputDescription: "x · amm-swap 0a1b", basket: "" },
+      { outputIndex: 4, satoshis: 1, lockingScript: tokenScript, outputDescription: "TST for a swap", basket: "" },
+    ] },
+  ];
+  let asked: any;
+  const lister = { ...w.wallet, async listActions(a: any) { asked = a; return { totalActions: actions.length, actions }; } };
+  const unfiled = await unfiledStagedTokens(lister as any);
+  const filed: any[] = [];
+  const filer = { ...w.wallet, async internalizeAction(a: any) { filed.push(a); return { accepted: true }; } };
+  const ok = await fileStagedToken(filer as any, unfiled[0]!, [1, 2, 3]);
+  const refused = await unfiledStagedTokens({ ...w.wallet, async listActions() { throw new Error("no"); } } as any);
+  out.unfiled = { asked, actions, unfiled: big(unfiled), file: { accepted: ok, description: filed[0].description, labels: filed[0].labels, outputs: filed[0].outputs }, refused: big(refused) };
+}
+
+// The page's submit at the host root (`submitToOverlay`): its request and its answers; `steakText`.
+{
+  const subject = Beef.fromBinary(out.stageTokens.runs[0].submits[0].in.match(/../g).map((x: string) => parseInt(x, 16)));
+  const bytes = subject.toBinaryAtomic(subject.atomicTxid!);
+  const topic = `tm_color_${TOKEN_ID}`;
+  const answers: [number, string][] = [
+    [200, JSON.stringify({ [topic]: { outputsToAdmit: [0, 2], coinsToRetain: [], coinsRemoved: [] }, tm_other: { outputsToAdmit: [], coinsToRetain: [], coinsRemoved: [] } })],
+    [200, JSON.stringify({ [topic]: { outputsToAdmit: [], coinsToRetain: [], coinsRemoved: [] } })],
+    [503, "no steak yet"],
+    [500, "down"],
+    [200, "not json"],
+    [200, "[1]"],
+  ];
+  const runs: any[] = [];
+  for (const [status, text] of answers) {
+    let req: any;
+    let result: any;
+    try {
+      const r = await submitToOverlay("https://ex.test/@x/amm", topic, bytes, async (url: string, init: any) => { req = { url, method: init.method, headers: init.headers, body: hex(Array.from(init.body)) }; return { status, ok: status >= 200 && status < 300, text: async () => text } as any; });
+      result = { text: steakText(r) };
+    } catch (e) {
+      result = { error: (e as Error).message };
+    }
+    runs.push({ status, answer: text, request: req, ...result });
+  }
+  out.submit = { topic, bytes: hex(bytes), runs, other: { topic: "tm_other", out: hex(submissionBeef("tm_other", bytes)) } };
+}
 
 console.log(JSON.stringify(out, null, 1));

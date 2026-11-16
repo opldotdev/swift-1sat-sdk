@@ -180,6 +180,8 @@ let package = Package(
         .target(
             name: "OneSatAMM",
             dependencies: [
+                // `SignP2PKH`: a swap basket token row's spend (a P2PKH under a 1Color prefix).
+                "OneSatActions",
                 "OneSatColor",
                 "OneSatSweep",
                 "OneSatTemplates",

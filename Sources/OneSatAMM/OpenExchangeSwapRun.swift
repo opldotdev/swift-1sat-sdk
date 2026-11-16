@@ -7,7 +7,7 @@ import OneSatColor
 import OneSatTemplates
 
 // A quoted swap run with the connected wallet (skein-amm 0.55.1 client.ts `executeSwap` /
-// `runSwap`), the buy side: the overlay pass, the staging of what the swap basket lacks, then the
+// `runSwap`), a buy or a sell: the overlay pass, the staging of what the swap basket lacks, then the
 // legs ONE AT A TIME over the server's pool list read fresh before each, each leg's outcome
 // handled as the TS client does, and at the end the move back of what an early stop left.
 
@@ -74,8 +74,9 @@ public enum OpenExchangeSwapProgress: Equatable, Sendable {
 /// What happened inside a swap, in full, for the caller's log (not in the TS: its client keeps
 /// these to itself). Never needed to drive a screen: `OpenExchangeSwapProgress` does that.
 public enum OpenExchangeSwapEvent: Equatable, Sendable {
-    /// What the basket lacked was staged: the staging transaction.
-    case staged(txid: String, sats: UInt64)
+    /// What the basket lacked was staged: the staging transaction, the sats and tokens staged,
+    /// the page's submit of the tokens in words, and the submit's and the filing's failures.
+    case staged(txid: String, sats: UInt64, tokens: BigInt, submitted: String, errors: [String])
     /// A leg's relay (attempt 1, or 2 when it is sent once more after no answer) and its outcome,
     /// the host's or validator's reason with it.
     case relayed(leg: String, attempt: Int, outcome: OpenExchangeLegOutcome)
@@ -88,11 +89,11 @@ public enum OpenExchangeSwapEvent: Equatable, Sendable {
 }
 
 extension OpenExchange {
-    /// `executeSwap`: runs a quoted buy with the wallet of `ctx` (see `runSwap`). `onProgress` is
-    /// told where the swap is; `isCancelled` is asked before each leg (`cancelled`). `floor` is
-    /// the least total amount out the swap accepts (default: the quote's `minAmountOut`, as TS).
-    /// `onEvent` is told each relay, exclusion, pass and move back, for a log. A sell throws:
-    /// only the buy side is here.
+    /// `executeSwap`: runs a quoted swap, a buy or a sell, with the wallet of `ctx` (see
+    /// `runSwap`). `onProgress` is told where the swap is; `isCancelled` is asked before each leg
+    /// (`cancelled`). `floor` is the least total amount out the swap accepts (default: the
+    /// quote's `minAmountOut`, as TS). `onEvent` is told each staging, relay, exclusion, pass and
+    /// move back, for a log.
     public func executeSwap(
         _ ctx: OneColorContext, quote: OpenExchangeQuote, sym: String = "token",
         floor: BigInt? = nil,
@@ -141,8 +142,9 @@ extension OpenExchange {
         _ ctx: OneColorContext, quote: OpenExchangeQuote, sym: String, floor: BigInt, feeRate: Double, patienceMs: Int,
         isCancelled: () -> Bool, progress: (OpenExchangeSwapProgress) -> Void, event: (OpenExchangeSwapEvent) -> Void
     ) async throws -> OpenExchangeSwapResult {
-        guard quote.request.side == .buy else { throw OpenExchangeError.failed("only a buy swap is supported here") }
         let tokenId = quote.request.tokenId
+        let buy = quote.request.side == .buy
+        let direction: AMMDirection = buy ? .bsvToToken : .tokenToBsv
         let minerFee = try OpenExchangeQuotes.legMinerFeeSats(feeRate)
 
         var excluded = Set<String>()
@@ -175,15 +177,43 @@ extension OpenExchange {
         }
 
         accountResolved(await resolveSwaps(ctx))
-        // 1. Stage what the basket lacks.
-        let needSats = quote.stage.amount + quote.stage.feeSats
+        // 1. Stage what the basket lacks: a buy's amount in sats, a sell's in tokens; the fee sats.
+        let needTokens = buy ? 0 : quote.stage.amount
+        let needSats = (buy ? quote.stage.amount : 0) + quote.stage.feeSats
         let haveSats = BigInt(try await OpenExchangeSwapLeg.swapBasketSats(ctx))
+        let haveTokens = buy ? 0 : try await OpenExchangeSwapLeg.tokenHoldings(ctx, tokenId: tokenId).reduce(BigInt(0)) { $0 + $1.amount }
         let lackSats = needSats > haveSats ? needSats - haveSats : 0
-        if lackSats > 0 {
-            progress(.staging(sats: lackSats, tokens: 0))
+        let lackTokens = needTokens > haveTokens ? needTokens - haveTokens : 0
+        if lackSats > 0 || lackTokens > 0 {
+            progress(.staging(sats: lackSats, tokens: lackTokens))
             guard let sats = UInt64(exactly: lackSats) else { throw OpenExchangeError.failed("nothing to stage in the swap basket") }
-            let staged = try await OpenExchangeSwapLeg.stageSats(ctx, sats: sats, sym: sym)
-            event(.staged(txid: staged.txid, sats: sats))
+            let staged = try await OpenExchangeSwapLeg.stage(
+                ctx, sats: sats, tokens: lackTokens > 0 ? (tokenId, lackTokens) : nil, sym: sym, submit: submitter
+            )
+            event(.staged(txid: staged.txid, sats: sats, tokens: lackTokens, submitted: staged.submitted, errors: staged.errors))
+            // Not in the TS (which carries on and stops at `fees`, no leg able to spend the
+            // unfiled row): a sell whose staged token row was not filed moves the basket's sats
+            // back, as the TS does at its `fees` stop, then fails with why.
+            if lackTokens > 0, !staged.filed {
+                let prefix = "internalizeAction: "
+                let why = staged.errors.first { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+                    ?? "the wallet did not accept it"
+                var text = "the staged \(sym) \(staged.txid).0 could not be filed in the swap basket: \(why) (settleSwaps files it later)"
+                if pending.isEmpty {
+                    progress(.returning(filled: []))
+                    let returned: OpenExchangeSwapResult.Returned
+                    do {
+                        let m = try await OpenExchangeSwapLeg.moveBack(ctx, tokenId: tokenId, sym: sym, submit: submitter)
+                        returned = .moved(txid: m.txid, tokens: m.amount)
+                        text += "; the basket's sats were moved back in \(m.txid)"
+                    } catch {
+                        returned = .error(OpenExchangeError.errorText(error))
+                        text += "; moving the basket's sats back failed: \(OpenExchangeError.errorText(error))"
+                    }
+                    event(.returned(returned))
+                }
+                throw OpenExchangeError.failed(text)
+            }
         }
 
         // 2. The loop.
@@ -207,7 +237,7 @@ extension OpenExchange {
             let minOut = floor > filledOut ? floor - filledOut : 0
             let leg: AMMLeg
             switch try AMMPlanner.nextLeg(AMMNextLegRequest(
-                pools: rows.map(\.pool), direction: .bsvToToken, remaining: remaining,
+                pools: rows.map(\.pool), direction: direction, remaining: remaining,
                 fixedCost: AMMFixedCost(minerFeeSats: minerFee), minOut: minOut, maxSources: budget
             )) {
             case .stop(let stop):
@@ -227,17 +257,20 @@ extension OpenExchange {
                     try spends.map { try OpenExchangeKeys.commissionPkh(marketIdentity: identity, txid: $0.txid, vout: Int($0.vout)) }
                 }
                 let input = OpenExchangeSwapLeg.LegInput(
-                    tokenId: tokenId, leg: leg, pool: row.pool, poolBEEF: poolOutput.beef, poolOutputIndex: poolOutput.outputIndex,
-                    commissionPkh: commissionPkh, satsPerKb: feeRate
+                    tokenId: tokenId, direction: direction, leg: leg, pool: row.pool, poolBEEF: poolOutput.beef,
+                    poolOutputIndex: poolOutput.outputIndex, commissionPkh: commissionPkh, satsPerKb: feeRate
                 )
-                guard let inputs = try OpenExchangeSwapLeg.selectInputs(input, sats: try await OpenExchangeSwapLeg.satsHoldings(ctx)) else {
+                guard let inputs = try OpenExchangeSwapLeg.selectInputs(
+                    input, sats: try await OpenExchangeSwapLeg.satsHoldings(ctx),
+                    tokens: buy ? [] : try await OpenExchangeSwapLeg.tokenHoldings(ctx, tokenId: tokenId)
+                ) else {
                     why = .fees
                     break
                 }
                 let holding = try await OpenExchangeSwapLeg.basketBEEF(ctx)
                     ?? BEEF(version: .v2, merklePaths: [], transactions: [], limits: OpenExchangeSwapLeg.beefLimits)
                 let prepared = try OpenExchangeSwapLeg.prepare(
-                    ctx, input, inputs: inputs.sats, order: order, last: leg.amountIn == remaining, holdingBEEF: holding
+                    ctx, input, inputs: inputs.sats, tokens: inputs.tokens, order: order, last: leg.amountIn == remaining, holdingBEEF: holding
                 )
                 let legText = OpenExchangePrices.outpointText(leg.outpoint)
                 progress(.relaying(leg: legText, amountIn: leg.amountIn, amountOut: leg.amountOut, filled: legs))
@@ -245,7 +278,7 @@ extension OpenExchange {
                 event(.relayed(leg: legText, attempt: 1, outcome: outcome))
                 if case .unknown = outcome {
                     // (a) The overlay: what the leg spends.
-                    let spent = (try? await readSpendsAll([legText] + inputs.sats.map(\.outpoint))) ?? []
+                    let spent = (try? await readSpendsAll([legText] + inputs.sats.map(\.outpoint) + inputs.tokens.map(\.outpoint))) ?? []
                     if spent.contains(where: { $0.spentBy != nil && $0.outpoint != legText }) {
                         pending.append(Pending(prepared: prepared, leg: leg, poolId: row.poolId))
                         accountResolved(await resolveSwaps(ctx))
@@ -299,12 +332,12 @@ extension OpenExchange {
         var returned: OpenExchangeSwapResult.Returned?
         if why != .filled, pending.isEmpty {
             let rows = try await OpenExchangeSwapLeg.basketRows(ctx)
-            let left = OpenExchangeSwapLeg.satsRows(rows).count + (try OpenExchangeSwapLeg.tokenRowCount(rows, tokenId: tokenId))
+            let left = OpenExchangeSwapLeg.satsRows(rows).count + (try OpenExchangeSwapLeg.tokenRows(rows, tokenId: tokenId)).count
             if left > 0 {
                 progress(.returning(filled: legs))
                 do {
-                    let m = try await OpenExchangeSwapLeg.moveBack(ctx, tokenId: tokenId, sym: sym)
-                    returned = .moved(txid: m.txid, tokens: 0)
+                    let m = try await OpenExchangeSwapLeg.moveBack(ctx, tokenId: tokenId, sym: sym, submit: submitter)
+                    returned = .moved(txid: m.txid, tokens: m.amount)
                 } catch {
                     returned = .error(OpenExchangeError.errorText(error))
                 }
@@ -345,28 +378,6 @@ extension OpenExchangeSwapLeg {
     static func isPoolRow(_ row: WalletOutput) -> Bool {
         if row.tags?.contains(poolTag) == true { return true }
         return JSONValue.parse(Array((row.customInstructions ?? "{}").utf8))?["op"]?.string == poolTag
-    }
-
-    /// `tokenInputsOf(rows, tokenId).length`: the swap basket's token rows of `tokenId`.
-    static func tokenRowCount(_ rows: [WalletOutput], tokenId: String) throws -> Int {
-        let assetId = try OneColor.idFromString(try AMMTokenID.canonical(tokenId))
-        return rows.filter { row in
-            guard let script = row.lockingScript, !isPoolRow(row), let t = AMMPool.decodeOneColor(script),
-                  t.role == .value, t.idBytes == assetId, keyOf(row.customInstructions) != nil else { return false }
-            return true
-        }.count
-    }
-
-    /// `moveBack`, sats side: `moveBackSats` over every sats row. The module's transfer plan that
-    /// takes token rows back is not here, so a token row of `tokenId` (left by a sell on the same
-    /// seed) stays in the basket and the sats still go back; with token rows and no sats it throws.
-    static func moveBack(_ ctx: OneColorContext, tokenId: String, sym: String) async throws -> OpenExchangeMovedBack {
-        let rows = try await basketRows(ctx)
-        let tokens = try tokenRowCount(rows, tokenId: tokenId)
-        let sats = satsRows(rows)
-        if !sats.isEmpty { return try await moveBackSats(ctx, sym: sym, rows: sats) }
-        if tokens == 0 { throw fail("the swap basket holds no \(sym)") }
-        throw fail("moving \(sym) back from the swap basket is not supported here")
     }
 }
 

@@ -7,6 +7,7 @@ import BSVKeys
 import BSVScript
 import BSVTransaction
 import BSVWallet
+import OneSatActions
 import OneSatColor
 import OneSatTemplates
 import ToolboxActions
@@ -97,6 +98,23 @@ public struct OpenExchangeSatsRow: Equatable, Sendable {
     public let order: String?
 }
 
+/// `TokenInput`: a staged token row of the swap basket, a 1Color value output of the token locked
+/// to a `[2, "amm swap"]` key.
+public struct OpenExchangeTokenRow: Equatable, Sendable {
+    /// `<txid>.<vout>`.
+    public let outpoint: String
+    public let txid: String
+    public let vout: Int
+    public let satoshis: UInt64
+    public let lockingScript: [UInt8]
+    public let amount: BigInt
+    public let protocolID: WalletProtocolID
+    public let keyID: String
+    public let counterparty: String
+    /// The order whose change it is; a staged row has none.
+    public let order: String?
+}
+
 /// One leg's payout or change, as the wallet takes it in (`SwapPayout`).
 public enum OpenExchangeLegOutput: Equatable, Sendable {
     /// Tokens into the module's per-asset basket, under a receipt for self.
@@ -129,12 +147,14 @@ public struct OpenExchangeLegNeed: Equatable, Sendable {
     public let satsPerKb: Double
 }
 
-/// `PreparedSwap`: one buy leg built and signed, the validator's slot empty.
+/// `PreparedSwap`: one leg built and signed, the validator's slot empty.
 public struct OpenExchangePreparedLeg: Sendable {
     /// The pool's outpoint, `<txid>_<vout>`.
     public let pool: String
     /// The pool's validator identity key.
     public let validator: String
+    /// A buy (sats in, tokens out); false: a sell.
+    public let bsvIn: Bool
     public let plan: AMMSwapPlan
     /// The order key every payout of the order derives from.
     public let order: String
@@ -146,6 +166,8 @@ public struct OpenExchangePreparedLeg: Sendable {
     public let need: Int64
     public let swap: Transaction
     public let satsInputs: [OpenExchangeSatsRow]
+    /// A sell's token rows (none on a buy).
+    public let tokenInputs: [OpenExchangeTokenRow]
     public let payout: OpenExchangeLegOutput
     public let commissionAmount: BigInt
     /// Hash160 hex the commission goes to.
@@ -153,13 +175,15 @@ public struct OpenExchangePreparedLeg: Sendable {
     /// "relay", "own" or "none".
     public let commissionTo: String
     public let commissionPayout: OpenExchangeLegOutput?
+    /// A sell's token change, when its token rows exceed the amount in.
+    public let tokenChange: OpenExchangeLegOutput?
     public let satsChange: OpenExchangeLegOutput?
     /// The pool's source transaction (input 0's) and the swap basket's BEEF the leg was built from.
     let sources: BEEF
 
-    /// `takeInOutputs`: the payout, the own commission, the sats change.
+    /// `takeInOutputs`: the payout, the own commission, the token change, the sats change.
     public var takeIn: [OpenExchangeLegOutput] {
-        [payout] + [commissionPayout, satsChange].compactMap { $0 }
+        [payout] + [commissionPayout, tokenChange, satsChange].compactMap { $0 }
     }
 
     /// `swapIdOf`: sha256 of the swap's bytes, hex.
@@ -175,7 +199,7 @@ public struct OpenExchangeCompletedLeg: Equatable, Sendable {
     public let errors: [String]
 }
 
-/// One buy leg (market/swapAction.ts): its inputs, its transaction and its take-in.
+/// One leg, a buy or a sell (market/swapAction.ts): its inputs, its transaction and its take-in.
 public enum OpenExchangeSwapLeg {
     static let txLimits = WalletTransactionLimits.standard
     static let beefLimits = WalletBEEFLimits.standard
@@ -245,6 +269,38 @@ public enum OpenExchangeSwapLeg {
         satsRows(try await basketRows(ctx))
     }
 
+    /// `assetIdOf`: the token's 32-byte wire id (the txid's bytes reversed), hex, for a token with
+    /// a 32-byte id (`<txid>_0`).
+    public static func assetIdOf(_ tokenId: String) throws -> String {
+        guard let id = AMMTokenID.parse(tokenId), id.vout == 0 else {
+            throw fail("pools exist only for 32-byte ids (<txid>_0), not \(tokenId)")
+        }
+        guard let txid = Runar.hexBytesChecked(id.txid) else { throw fail("not a token id: \(tokenId)") }
+        return AMMPool.hex(txid.reversed())
+    }
+
+    /// `tokenInputsOf`: the rows that are 1Color value outputs of `tokenId`'s 32-byte id (a pool
+    /// row aside) whose customInstructions name their key.
+    public static func tokenRows(_ rows: [WalletOutput], tokenId: String) throws -> [OpenExchangeTokenRow] {
+        let assetId = try assetIdOf(tokenId)
+        return rows.compactMap { row in
+            guard let script = row.lockingScript, !isPoolRow(row), let t = AMMPool.decodeOneColor(script),
+                  t.role == .value, let id = t.idBytes, AMMPool.hex(id) == assetId,
+                  let key = keyOf(row.customInstructions) else { return nil }
+            let txid = row.outpoint.transactionID.displayHex
+            let vout = Int(row.outpoint.outputIndex)
+            return OpenExchangeTokenRow(
+                outpoint: "\(txid).\(vout)", txid: txid, vout: vout, satoshis: row.satoshis, lockingScript: script,
+                amount: BigInt(t.amount), protocolID: key.protocolID, keyID: key.keyID, counterparty: key.counterparty, order: key.order
+            )
+        }
+    }
+
+    /// `swapHoldings`: the swap basket's token rows of `tokenId`.
+    public static func tokenHoldings(_ ctx: OneColorContext, tokenId: String) async throws -> [OpenExchangeTokenRow] {
+        try tokenRows(try await basketRows(ctx), tokenId: tokenId)
+    }
+
     // MARK: - Sizing
 
     static func varIntSize(_ n: Int) -> Int { n < 0xfd ? 1 : n <= 0xffff ? 3 : n <= 0xffff_ffff ? 5 : 9 }
@@ -262,9 +318,11 @@ public enum OpenExchangeSwapLeg {
         return size + 4
     }
 
-    /// `legNeed` of a buy (no token inputs).
-    public static func legNeed(_ plan: AMMSwapPlan, inputs: Int, satsPerKb: Double) throws -> OpenExchangeLegNeed {
-        let outputs = Int64(plan.outputs.reduce(UInt64(0)) { $0 + $1.satoshis }) - Int64(plan.poolUtxo.satoshis)
+    /// `legNeed`: the contract's outputs less the pool's sats and the token inputs' sats, and the
+    /// fee of the swap with `inputs` taker inputs (sats and tokens), without and with the change.
+    public static func legNeed(_ plan: AMMSwapPlan, tokenInputs: [OpenExchangeTokenRow] = [], inputs: Int, satsPerKb: Double) throws -> OpenExchangeLegNeed {
+        let tokenSats = tokenInputs.reduce(Int64(0)) { $0 + Int64($1.satoshis) }
+        let outputs = Int64(plan.outputs.reduce(UInt64(0)) { $0 + $1.satoshis }) - Int64(plan.poolUtxo.satoshis) - tokenSats
         let fee = Int64((Double(try swapTxSize(plan, takerInputs: inputs)) * satsPerKb / 1000).rounded(.up))
         let feeWithChange = Int64((Double(try swapTxSize(plan, takerInputs: inputs, withChange: true)) * satsPerKb / 1000).rounded(.up))
         return OpenExchangeLegNeed(
@@ -275,10 +333,12 @@ public enum OpenExchangeSwapLeg {
 
     // MARK: - The leg
 
-    /// `PlanLegInput` of a buy: the leg, its pool (as listed and as read), the commission
+    /// `PlanLegInput`: the leg and its direction, its pool (as listed and as read), the commission
     /// destination, the fee rate.
     public struct LegInput: Sendable {
         public let tokenId: String
+        /// `.bsvToToken` a buy, `.tokenToBsv` a sell.
+        public let direction: AMMDirection
         public let leg: AMMLeg
         public let pool: AMMPoolState
         /// The pool's transaction, Atomic BEEF (`LookupOutput.beef`), and the pool's output index.
@@ -288,8 +348,12 @@ public enum OpenExchangeSwapLeg {
         public let commissionPkh: String?
         public let satsPerKb: Double
 
-        public init(tokenId: String, leg: AMMLeg, pool: AMMPoolState, poolBEEF: [UInt8], poolOutputIndex: Int, commissionPkh: String?, satsPerKb: Double) {
+        public init(
+            tokenId: String, direction: AMMDirection = .bsvToToken, leg: AMMLeg, pool: AMMPoolState, poolBEEF: [UInt8],
+            poolOutputIndex: Int, commissionPkh: String?, satsPerKb: Double
+        ) {
             self.tokenId = tokenId
+            self.direction = direction
             self.leg = leg
             self.pool = pool
             self.poolBEEF = poolBEEF
@@ -297,11 +361,13 @@ public enum OpenExchangeSwapLeg {
             self.commissionPkh = commissionPkh
             self.satsPerKb = satsPerKb
         }
+
+        var bsvIn: Bool { direction == .bsvToToken }
     }
 
     /// `poolUtxoFrom`: the pool output of the lookup's Atomic BEEF, refused unless it is the
-    /// planned leg's outpoint.
-    static func poolUtxo(_ i: LegInput) throws -> (utxo: AMMPoolUtxo, beef: BEEF) {
+    /// planned leg's outpoint (`selectLegInputs` names the outpoint priced; `prepareSwap` does not).
+    static func poolUtxo(_ i: LegInput, naming priced: Bool = true) throws -> (utxo: AMMPoolUtxo, beef: BEEF) {
         let (id, beef, tx) = try ColorBEEF.open(i.poolBEEF)
         guard tx.outputs.indices.contains(i.poolOutputIndex) else {
             throw fail("the lookup's BEEF has no output \(i.poolOutputIndex)")
@@ -309,15 +375,18 @@ public enum OpenExchangeSwapLeg {
         let out = tx.outputs[i.poolOutputIndex]
         let utxo = AMMPoolUtxo(txid: id.displayHex, vout: i.poolOutputIndex, satoshis: out.satoshis, script: out.lockingScript.bytes)
         guard "\(utxo.txid)_\(utxo.vout)" == i.leg.outpoint else {
-            throw fail("the pool moved: the read's tip is \(utxo.txid).\(utxo.vout), the plan priced \(OpenExchangePrices.outpointText(i.leg.outpoint))")
+            throw fail("the pool moved: the read's tip is \(utxo.txid).\(utxo.vout)" + (priced ? ", the plan priced \(OpenExchangePrices.outpointText(i.leg.outpoint))" : ""))
         }
         return (utxo, beef)
     }
 
     /// `legPlan`.
-    static func legPlan(_ i: LegInput, _ utxo: AMMPoolUtxo, userPkh: [UInt8], commissionPkh: [UInt8]) throws -> AMMSwapPlan {
+    static func legPlan(
+        _ i: LegInput, _ utxo: AMMPoolUtxo, userPkh: [UInt8], commissionPkh: [UInt8], tokenChange: BigInt = 0, tokenChangePkh: [UInt8] = zeroPkh
+    ) throws -> AMMSwapPlan {
         try AMMPoolCall.planSwap(
-            pool: utxo, amountIn: i.leg.amountIn, bsvIn: true, userPkh: userPkh, commissionPkh: commissionPkh,
+            pool: utxo, amountIn: i.leg.amountIn, bsvIn: i.bsvIn, userPkh: userPkh, commissionPkh: commissionPkh,
+            tokenChange: tokenChange, tokenChangePkh: tokenChangePkh,
             expect: AMMSwapExpectation(
                 bsvReserve: i.pool.bsvReserve, tokenReserve: i.pool.tokenReserve, lpFeeBps: i.pool.liquidityFeeBps,
                 validatorFeeBps: i.pool.validationFeeBps, commissionBps: i.pool.commissionBps, lpFee: i.leg.liquidityFee,
@@ -332,21 +401,45 @@ public enum OpenExchangeSwapLeg {
         return bytes
     }
 
-    /// `selectLegInputs` of a buy: the sats rows largest first (ties by outpoint), as many as
-    /// cover the leg's need; nil when they cannot.
-    public static func selectInputs(_ i: LegInput, sats: [OpenExchangeSatsRow]) throws -> (sats: [OpenExchangeSatsRow], need: OpenExchangeLegNeed)? {
+    /// `selectLegInputs`: on a sell, the token rows largest first (ties by outpoint) as many as
+    /// cover the amount in; then the sats rows largest first, as many as cover the leg's need
+    /// (each row added grows the size), the need planned with placeholder keys. Nil when the rows
+    /// cannot cover the leg. `tokens` is ignored on a buy.
+    public static func selectInputs(
+        _ i: LegInput, sats: [OpenExchangeSatsRow], tokens: [OpenExchangeTokenRow] = []
+    ) throws -> (sats: [OpenExchangeSatsRow], tokens: [OpenExchangeTokenRow], need: OpenExchangeLegNeed)? {
         let (utxo, _) = try poolUtxo(i)
-        let plan = try legPlan(i, utxo, userPkh: zeroPkh, commissionPkh: try pkhBytes(i.commissionPkh))
+        var pickedTokens: [OpenExchangeTokenRow] = []
+        if !i.bsvIn {
+            var held = BigInt(0)
+            for row in tokens.sorted(by: { a, b in a.amount != b.amount ? a.amount > b.amount : a.outpoint < b.outpoint }) {
+                if held >= i.leg.amountIn { break }
+                pickedTokens.append(row)
+                held += row.amount
+            }
+            if held < i.leg.amountIn { return nil }
+        }
+        let tokenChange = pickedTokens.reduce(BigInt(0)) { $0 + $1.amount } - (i.bsvIn ? 0 : i.leg.amountIn)
+        let plan = try legPlan(i, utxo, userPkh: zeroPkh, commissionPkh: try pkhBytes(i.commissionPkh), tokenChange: tokenChange, tokenChangePkh: zeroPkh)
         var picked: [OpenExchangeSatsRow] = []
         var held: Int64 = 0
         let ordered = sats.sorted { a, b in a.satoshis != b.satoshis ? a.satoshis > b.satoshis : a.outpoint < b.outpoint }
         for row in ordered {
             picked.append(row)
             held += Int64(row.satoshis)
-            let need = try legNeed(plan, inputs: picked.count, satsPerKb: i.satsPerKb)
-            if held >= need.need { return (picked, need) }
+            let need = try legNeed(plan, tokenInputs: pickedTokens, inputs: picked.count + pickedTokens.count, satsPerKb: i.satsPerKb)
+            if held >= need.need { return (picked, pickedTokens, need) }
         }
         return nil
+    }
+
+    /// `keyInputOf`: the leg's own key input, its first token input on a sell, its first sats
+    /// input on a buy.
+    static func keyInput(sats: [OpenExchangeSatsRow], tokens: [OpenExchangeTokenRow], bsvIn: Bool) throws -> String {
+        guard let k = bsvIn ? sats.first?.outpoint : tokens.first?.outpoint else {
+            throw fail("the leg has no staged input to key its payout by")
+        }
+        return k
     }
 
     // MARK: - Keys
@@ -384,33 +477,77 @@ public enum OpenExchangeSwapLeg {
 
     // MARK: - prepareSwap
 
-    /// `prepareSwap` of a buy: the payout keys of the order, the swap transaction (the pool,
-    /// then the sats rows; the contract's outputs, then the sats change), input 0's call with the
-    /// validator's slot empty, the rows signed, every row's spend validated, and the funding BEEF.
+    /// A swap basket row the leg spends: its outpoint and the key it is locked to.
+    struct BasketSpend {
+        let outpoint: String
+        let txid: String
+        let vout: Int
+        let protocolID: WalletProtocolID
+        let keyID: String
+        let counterparty: String
+    }
+
+    /// `prepareSwap`: the payout keys of the order, the swap transaction (the pool, then the sats
+    /// rows, then a sell's token rows; the contract's outputs, then the sats change), input 0's
+    /// call with the validator's slot empty, the rows signed, every row's spend validated, and the
+    /// funding BEEF. A buy pays out tokens (a receipt for self) and its own commission in sats
+    /// (BRC-29); a sell pays out sats (BRC-29) and its own commission in tokens; a sell's token
+    /// change is kept in the swap basket, or is the wallet's on the order's last leg.
     public static func prepare(
-        _ ctx: OneColorContext, _ i: LegInput, inputs: [OpenExchangeSatsRow], order givenOrder: String? = nil,
-        last: Bool, holdingBEEF: BEEF
+        _ ctx: OneColorContext, _ i: LegInput, inputs: [OpenExchangeSatsRow], tokens: [OpenExchangeTokenRow] = [],
+        order givenOrder: String? = nil, last: Bool, holdingBEEF: BEEF
     ) throws -> OpenExchangePreparedLeg {
-        let (utxo, poolBEEF) = try poolUtxo(i)
+        let bsvIn = i.bsvIn
+        let (utxo, poolBEEF) = try poolUtxo(i, naming: false)
+        let tokensIn = tokens.reduce(BigInt(0)) { $0 + $1.amount }
+        if bsvIn ? !tokens.isEmpty : tokensIn < i.leg.amountIn {
+            throw fail("token inputs carry \(tokensIn), the leg needs \(bsvIn ? 0 : i.leg.amountIn)")
+        }
         guard let first = inputs.first else { throw fail("the leg has no sats row") }
-        let order = givenOrder ?? first.outpoint
+        let tokenChange = tokensIn - (bsvIn ? 0 : i.leg.amountIn)
+        let order = try givenOrder ?? keyInput(sats: inputs, tokens: tokens, bsvIn: bsvIn)
         guard let decoded = AMMPool.decode(utxo.script) else { throw fail("\(OpenExchangePrices.outpointText(i.leg.outpoint)) is not a pool output") }
         let commissionAmount = (i.leg.amountIn * decoded.args.commissionBps + 9999) / 10000
         let commissionTo = commissionAmount == 0 ? "none" : i.commissionPkh != nil ? "relay" : "own"
 
+        // The payout: one derivation per order; tokens are a receipt for self, sats a BRC-29 payment.
+        typealias Derived = (derivationPrefix: String, derivationSuffix: String)
         let pay = OpenExchangeSwapNames.legDerivation(order, .payout)
-        let payToken = try receivingKey(ctx, tokenId: i.tokenId, pay)
-        let userPkh = pkh(payToken.publicKey)
-        var own: (key: PublicKey, d: (derivationPrefix: String, derivationSuffix: String))?
+        let payToken = bsvIn ? try receivingKey(ctx, tokenId: i.tokenId, pay) : nil
+        let payBRC29 = bsvIn ? nil : try brc29PublicKey(ctx, pay)
+        let userPkh = pkh(payToken?.publicKey ?? payBRC29!)
+        var own: (pkh: [UInt8], d: Derived, receipt: ColorReceipt?)?
         if commissionTo == "own" {
             let d = OpenExchangeSwapNames.legDerivation(order, .commission)
-            own = (try brc29PublicKey(ctx, d), d)
+            if bsvIn {
+                own = (pkh(try brc29PublicKey(ctx, d)), d, nil)
+            } else {
+                let k = try receivingKey(ctx, tokenId: i.tokenId, d)
+                own = (pkh(k.publicKey), d, k.receipt)
+            }
         }
-        let commissionPkh = try own.map { pkh($0.key) } ?? pkhBytes(i.commissionPkh)
-        let plan = try legPlan(i, utxo, userPkh: userPkh, commissionPkh: commissionPkh)
+        let commissionPkh = try own?.pkh ?? pkhBytes(i.commissionPkh)
 
+        // The token change: kept in amm-swap (not the last leg) or the wallet's (the last).
+        var tokenChangeKey: (pkh: [UInt8], out: (Int, [UInt8]) -> OpenExchangeLegOutput)?
+        if tokenChange > 0 {
+            if last {
+                let k = try receivingKey(ctx, tokenId: i.tokenId, OpenExchangeSwapNames.legDerivation(order, .change))
+                tokenChangeKey = (pkh(k.publicKey), { .color(outputIndex: $0, satoshis: 1, lockingScript: $1, receipt: k.receipt) })
+            } else {
+                let keyID = try OpenExchangeSwapNames.changeKeyID(tokens[0].outpoint)
+                let key = try swapKey(ctx, keyID: keyID)
+                let instructions = OpenExchangeSwapNames.swapInstructions(keyID: keyID, order: order)
+                tokenChangeKey = (pkh(key), { .basket(outputIndex: $0, satoshis: 1, lockingScript: $1, customInstructions: instructions) })
+            }
+        }
+        let plan = try legPlan(
+            i, utxo, userPkh: userPkh, commissionPkh: commissionPkh, tokenChange: tokenChange, tokenChangePkh: tokenChangeKey?.pkh ?? zeroPkh
+        )
+
+        // The sats change: the sats rows less the need with the change output counted, when ≥ 1.
         let held = inputs.reduce(Int64(0)) { $0 + Int64($1.satoshis) }
-        let need = try legNeed(plan, inputs: inputs.count, satsPerKb: i.satsPerKb)
+        let need = try legNeed(plan, tokenInputs: tokens, inputs: inputs.count + tokens.count, satsPerKb: i.satsPerKb)
         guard held >= need.need else { throw fail("the swap basket's sats rows hold \(held) sats, the leg needs \(need.need)") }
         let changeSats = held - need.needWithChange
         var change: (pkh: [UInt8], satoshis: UInt64, output: OpenExchangeLegOutput)?
@@ -432,21 +569,35 @@ public enum OpenExchangeSwapLeg {
                 ))
             }
         }
-        let payout = OpenExchangeLegOutput.color(
-            outputIndex: 1, satoshis: plan.outputs[1].satoshis, lockingScript: plan.outputs[1].script, receipt: payToken.receipt
-        )
-        var commissionPayout: OpenExchangeLegOutput?
-        if let own {
-            let at = plan.outputs.count - 1
-            commissionPayout = .brc29(
-                outputIndex: at, satoshis: plan.outputs[at].satoshis, lockingScript: plan.outputs[at].script,
-                derivationPrefix: own.d.derivationPrefix, derivationSuffix: own.d.derivationSuffix, senderIdentityKey: ctx.identityKey
+        let payout: OpenExchangeLegOutput = if let payToken {
+            .color(outputIndex: 1, satoshis: plan.outputs[1].satoshis, lockingScript: plan.outputs[1].script, receipt: payToken.receipt)
+        } else {
+            .brc29(
+                outputIndex: 1, satoshis: plan.outputs[1].satoshis, lockingScript: plan.outputs[1].script,
+                derivationPrefix: pay.derivationPrefix, derivationSuffix: pay.derivationSuffix, senderIdentityKey: ctx.identityKey
             )
         }
+        // The commission is the last fee output when there is one (Pool.runar.go Swap), before the token change.
+        var commissionPayout: OpenExchangeLegOutput?
+        if let own {
+            let at = plan.outputs.count - 1 - (tokenChange > 0 ? 1 : 0)
+            let out = plan.outputs[at]
+            commissionPayout = if let receipt = own.receipt {
+                .color(outputIndex: at, satoshis: out.satoshis, lockingScript: out.script, receipt: receipt)
+            } else {
+                .brc29(
+                    outputIndex: at, satoshis: out.satoshis, lockingScript: out.script,
+                    derivationPrefix: own.d.derivationPrefix, derivationSuffix: own.d.derivationSuffix, senderIdentityKey: ctx.identityKey
+                )
+            }
+        }
+        let tokenChangeOut = tokenChangeKey.map { $0.out(plan.outputs.count - 1, plan.outputs[plan.outputs.count - 1].script) }
 
-        var sources = holdingBEEF
+        // The inputs' source transactions: the swap basket's.
+        let rows = inputs.map { BasketSpend(outpoint: $0.outpoint, txid: $0.txid, vout: $0.vout, protocolID: $0.protocolID, keyID: $0.keyID, counterparty: $0.counterparty) }
+            + tokens.map { BasketSpend(outpoint: $0.outpoint, txid: $0.txid, vout: $0.vout, protocolID: $0.protocolID, keyID: $0.keyID, counterparty: $0.counterparty) }
         var sourceOutputs: [TransactionOutput] = []
-        for row in inputs {
+        for row in rows {
             guard let tx = try holdingBEEF.transaction(for: try TransactionID(displayHex: row.txid), limits: txLimits),
                   tx.outputs.indices.contains(row.vout) else {
                 throw fail("the wallet's BEEF lacks the swap basket output \(row.outpoint)")
@@ -455,7 +606,7 @@ public enum OpenExchangeSwapLeg {
         }
         var swap = Transaction(version: 1, lockTime: 0)
         swap.inputs = [try AMMPoolCall.poolInput(utxo)]
-        for (row, source) in zip(inputs, sourceOutputs) {
+        for (row, source) in zip(rows, sourceOutputs) {
             swap.inputs.append(TransactionInput(
                 previousOutput: Outpoint(transactionID: try TransactionID(displayHex: row.txid), outputIndex: UInt32(row.vout)),
                 unlockingScript: try AMMPoolCall.script([]), sourceOutput: source
@@ -467,11 +618,8 @@ public enum OpenExchangeSwapLeg {
         }
         let call = try AMMPoolCall.callUnlock(plan, transaction: swap, change: change.map { ($0.pkh, $0.satoshis) })
         swap.inputs[0].unlockingScript = try AMMPoolCall.script(call.unlockingScript)
-        for (n, row) in inputs.enumerated() {
-            let key = try WalletKeyDeriver(rootKey: ctx.identity).derivePrivateKey(
-                protocolID: row.protocolID, keyID: try WalletKeyID(row.keyID), counterparty: try counterparty(row.counterparty)
-            )
-            try swap.signPayToPublicKeyHashInput(at: n + 1, with: key, limits: txLimits)
+        for (n, row) in rows.enumerated() {
+            swap.inputs[n + 1].unlockingScript = try unlock(ctx, swap, n + 1, row)
         }
         for n in 1..<swap.inputs.count where !spendValid(swap, n) {
             throw fail("input \(n) of the swap does not validate")
@@ -479,18 +627,25 @@ public enum OpenExchangeSwapLeg {
 
         let assetId = decoded.args.assetId
         let funding = try fundingBEEF(
-            holdingBEEF, fundingTxid: first.txid, sources: inputs.map(\.txid), poolTxid: utxo.txid,
-            admitted: { txid, tx in
-                txid == utxo.txid || (tx?.outputs.contains { AMMPool.decode($0.lockingScript.bytes)?.args.assetId == assetId } ?? false)
-            }
+            holdingBEEF, fundingTxid: first.txid, sources: rows.map(\.txid), poolTxid: utxo.txid,
+            admitted: topicAdmitted(assetId: assetId, poolTxid: utxo.txid)
         )
-        sources = try sources.merging(poolBEEF, limits: beefLimits)
+        let sources = try holdingBEEF.merging(poolBEEF, limits: beefLimits)
         return OpenExchangePreparedLeg(
-            pool: i.leg.outpoint, validator: i.pool.validatorIdentityKey, plan: plan, order: order, last: last,
+            pool: i.leg.outpoint, validator: i.pool.validatorIdentityKey, bsvIn: bsvIn, plan: plan, order: order, last: last,
             fundingAtomicBEEF: funding, fundingTxid: first.txid, fee: change != nil ? need.feeWithChange : need.fee, need: need.need,
-            swap: swap, satsInputs: inputs, payout: payout, commissionAmount: commissionAmount,
+            swap: swap, satsInputs: inputs, tokenInputs: tokens, payout: payout, commissionAmount: commissionAmount,
             commissionPkh: AMMPool.hex(commissionPkh), commissionTo: commissionTo, commissionPayout: commissionPayout,
-            satsChange: change?.output, sources: sources
+            tokenChange: tokenChangeOut, satsChange: change?.output, sources: sources
+        )
+    }
+
+    /// `signP2pkhWithWallet`: the row's P2PKH unlock (SIGHASH_ALL|FORKID) under its swap key; a
+    /// token row's P2PKH sits under its 1Color prefix, so its whole script is the script code.
+    static func unlock(_ ctx: OneColorContext, _ tx: Transaction, _ n: Int, _ row: BasketSpend) throws -> Script {
+        try SignP2PKH.unlockingScript(
+            identity: ctx.identity, transaction: tx, inputIndex: n, protocolID: row.protocolID, keyID: row.keyID,
+            counterparty: try counterparty(row.counterparty), limits: txLimits
         )
     }
 
@@ -513,12 +668,35 @@ public enum OpenExchangeSwapLeg {
 
     // MARK: - The funding BEEF
 
-    /// `fundingBeef` / `topicBeef`: an Atomic envelope whose subject is the first sats row's
-    /// transaction, around a V2 BEEF of every row's transaction and its unproven ancestry down to
-    /// a proven or topic-admitted transaction (txid-only), the pool's transaction txid-only.
+    /// `topicAdmitted`: whether the token's topic admitted `tx` as far as the page knows: the pool
+    /// output's transaction, or any transaction carrying a pool output of this token.
+    static func topicAdmitted(assetId: String, poolTxid: String) -> (String, Transaction?) -> Bool {
+        { txid, tx in
+            if txid == poolTxid { return true }
+            guard let tx else { return false }
+            return tx.outputs.contains { AMMPool.decode($0.lockingScript.bytes)?.args.assetId == assetId }
+        }
+    }
+
+    /// `fundingBeef`: an Atomic envelope whose subject is the first sats row's transaction, around
+    /// a V2 BEEF of every row's transaction and its unproven ancestry down to a proven or
+    /// topic-admitted transaction (txid-only), the pool's transaction txid-only.
     static func fundingBEEF(
         _ beef: BEEF, fundingTxid: String, sources: [String], poolTxid: String,
         admitted: (String, Transaction?) -> Bool
+    ) throws -> [UInt8] {
+        try topicBEEF(beef, subjects: [], admitted: admitted, sources: [fundingTxid] + sources, extraTxidOnly: poolTxid, atomic: fundingTxid)
+    }
+
+    /// `topicBeef`: "raw outside the token's topic, txid-only inside" over `beef`. Each subject is
+    /// raw (never txid-only; else "the BEEF does not carry its subject <txid> raw"), its ancestry
+    /// walked; each of `sources` walked as an ancestor. Walking a transaction: absent, txid-only
+    /// already, or admitted → a txid-only entry, its ancestry dropped; proven → raw with its BUMP;
+    /// any other → raw, its inputs walked. `extraTxidOnly` is added by txid when the walk did not
+    /// reach it. `atomic`: the V2 BEEF in an Atomic envelope of that txid.
+    static func topicBEEF(
+        _ beef: BEEF, subjects: [String], admitted: (String, Transaction?) -> Bool,
+        sources: [String] = [], extraTxidOnly: String? = nil, atomic: String? = nil
     ) throws -> [UInt8] {
         // `out.toBinary()` sorts as @bsv/sdk's `sortTxs` does a walk's output: the txid-only
         // entries, then the proven, then the rest, each in the order the walk merged them.
@@ -527,11 +705,12 @@ public enum OpenExchangeSwapLeg {
         var entries: [BEEFTransaction] = []
         var paths: [MerklePath] = []
         var done = Set<String>()
-        func visit(_ txid: String) throws {
+        func visit(_ txid: String, subject: Bool) throws {
             guard done.insert(txid).inserted else { return }
             let id = try TransactionID(displayHex: txid)
             let entry = try beef.entry(for: id, limits: txLimits)
-            guard let tx = entry?.transaction, !admitted(txid, tx) else {
+            guard let tx = entry?.transaction, subject || !admitted(txid, tx) else {
+                if subject { throw fail("the BEEF does not carry its subject \(txid) raw") }
                 txidOnly.append(.transactionID(id))
                 return
             }
@@ -541,16 +720,21 @@ public enum OpenExchangeSwapLeg {
                 proven.append(.rawWithMerklePath(transaction: tx, merklePathIndex: at))
                 return
             }
-            for input in tx.inputs { try visit(input.previousOutput.transactionID.displayHex) }
+            for input in tx.inputs { try visit(input.previousOutput.transactionID.displayHex, subject: false) }
             entries.append(.raw(tx))
         }
+        var seenSubjects = Set<String>()
+        for txid in subjects where seenSubjects.insert(txid).inserted { try visit(txid, subject: true) }
         var seen = Set<String>()
-        for txid in [fundingTxid] + sources where seen.insert(txid).inserted { try visit(txid) }
-        if !done.contains(poolTxid) {
-            txidOnly.append(.transactionID(try TransactionID(displayHex: poolTxid)))
+        for txid in sources where seen.insert(txid).inserted { try visit(txid, subject: false) }
+        if let extra = extraTxidOnly, !done.contains(extra) {
+            done.insert(extra)
+            txidOnly.append(.transactionID(try TransactionID(displayHex: extra)))
         }
         let out = try BEEF(version: .v2, merklePaths: paths, transactions: txidOnly + proven + entries, limits: beefLimits)
-        return [0x01, 0x01, 0x01, 0x01] + (try TransactionID(displayHex: fundingTxid)).wireBytes + (try out.serialized(limits: beefLimits))
+        let body = try out.serialized(limits: beefLimits)
+        guard let atomic else { return body }
+        return [0x01, 0x01, 0x01, 0x01] + (try TransactionID(displayHex: atomic)).wireBytes + body
     }
 
     // MARK: - The validator's transaction
@@ -580,8 +764,9 @@ public enum OpenExchangeSwapLeg {
         return tx
     }
 
-    /// `completeSwap`: ONE internalizeAction of the leg's take-in outputs, "AMM swap tokens"
-    /// (a buy's payout is tokens), labelled `amm-swap`; a wallet error is reported, not thrown.
+    /// `completeSwap`: ONE internalizeAction of the leg's take-in outputs, "AMM swap tokens" (a
+    /// buy's payout is tokens) or "AMM swap payout" (a sell's is sats), labelled `amm-swap`; a
+    /// wallet error is reported, not thrown.
     public static func complete(_ ctx: OneColorContext, _ p: OpenExchangePreparedLeg, raw: [UInt8], txid: String?) async throws -> OpenExchangeCompletedLeg {
         let final = try finalSwap(p, raw: raw, txid: txid)
         let finalID = try final.transactionID(limits: txLimits)
