@@ -887,8 +887,9 @@ final class SwapSellTests: XCTestCase {
         XCTAssertEqual(posts, 0)
     }
 
-    /// The staged token row was not filed in the swap basket: the sell fails with the filing's
-    /// error (the TS carries on and stops at `fees`), the staging reported first.
+    /// The staged token row was not filed in the swap basket: the basket's sats are moved back,
+    /// as the TS does at its `fees` stop, then the sell fails with the filing's error and the
+    /// move back.
     func testASellWhoseStagedTokensWereNotFiledFailsWithTheFilingError() async throws {
         let h = try await Host(SellFixture.loop)
         _ = try await SellFixture.holdColor(h.w.ctx, h.w.storage, h.w.overlay, amount: 10_000)
@@ -902,12 +903,18 @@ final class SwapSellTests: XCTestCase {
             guard case let .staged(txid, _, tokens, _, errors) = events.notable.first else { return XCTFail("nothing staged: \(events.notable)") }
             XCTAssertEqual(tokens, 10_000)
             XCTAssertEqual(errors, ["internalizeAction: the wallet is locked"])
-            XCTAssertEqual(
-                OpenExchangeError.errorText(error),
-                "the staged TST \(txid).0 could not be filed in the swap basket: the wallet is locked (settleSwaps files it later)"
-            )
+            let filing = "the staged TST \(txid).0 could not be filed in the swap basket: the wallet is locked (settleSwaps files it later)"
+            guard case let .returned(returned) = events.notable.last else { return XCTFail("nothing moved back: \(events.notable)") }
+            switch returned {
+            case let .moved(backTxid, _):
+                XCTAssertEqual(OpenExchangeError.errorText(error), filing + "; the basket's sats were moved back in \(backTxid)")
+                let left = try await OpenExchangeSwapLeg.basketRows(h.w.ctx)
+                XCTAssertEqual(OpenExchangeSwapLeg.satsRows(left).count, 0, "sats left in the basket")
+            case let .error(text):
+                XCTAssertEqual(OpenExchangeError.errorText(error), filing + "; moving the basket's sats back failed: \(text)")
+            }
         }
-        XCTAssertEqual(log.phases, ["staging", "failed"])
+        XCTAssertEqual(log.phases, ["staging", "returning", "failed"])
         let posts = await h.posts
         XCTAssertEqual(posts, 0)
     }

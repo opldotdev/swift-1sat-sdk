@@ -192,14 +192,27 @@ extension OpenExchange {
             )
             event(.staged(txid: staged.txid, sats: sats, tokens: lackTokens, submitted: staged.submitted, errors: staged.errors))
             // Not in the TS (which carries on and stops at `fees`, no leg able to spend the
-            // unfiled row): a sell whose staged token row was not filed fails with why.
+            // unfiled row): a sell whose staged token row was not filed moves the basket's sats
+            // back, as the TS does at its `fees` stop, then fails with why.
             if lackTokens > 0, !staged.filed {
                 let prefix = "internalizeAction: "
                 let why = staged.errors.first { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
                     ?? "the wallet did not accept it"
-                throw OpenExchangeError.failed(
-                    "the staged \(sym) \(staged.txid).0 could not be filed in the swap basket: \(why) (settleSwaps files it later)"
-                )
+                var text = "the staged \(sym) \(staged.txid).0 could not be filed in the swap basket: \(why) (settleSwaps files it later)"
+                if pending.isEmpty {
+                    progress(.returning(filled: []))
+                    let returned: OpenExchangeSwapResult.Returned
+                    do {
+                        let m = try await OpenExchangeSwapLeg.moveBack(ctx, tokenId: tokenId, sym: sym, submit: submitter)
+                        returned = .moved(txid: m.txid, tokens: m.amount)
+                        text += "; the basket's sats were moved back in \(m.txid)"
+                    } catch {
+                        returned = .error(OpenExchangeError.errorText(error))
+                        text += "; moving the basket's sats back failed: \(OpenExchangeError.errorText(error))"
+                    }
+                    event(.returned(returned))
+                }
+                throw OpenExchangeError.failed(text)
             }
         }
 
