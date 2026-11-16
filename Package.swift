@@ -46,6 +46,9 @@ let package = Package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
             revision: "a6e9da4e216caa39bb946a841b3fe864a982398a"
         ),
+        // Open Exchange's engine works in exact integers as the TS does in `bigint`. The version
+        // swift-sdk pins (exact 5.7.0); SwiftPM resolves the two to the same checkout.
+        .package(url: "https://github.com/attaswift/BigInt.git", from: "5.7.0"),
     ],
     targets: [
         .target(
@@ -167,14 +170,16 @@ let package = Package(
             ]
         ),
 
-        // Open Exchange (the 1Color AMM): a native port of `@dcasegr/amm-client`, starting with
-        // the paid token listing. Reads over plain HTTP, the listing over BRC-104, the payment a
-        // BRC-177 protected noSend from the same wallet the 1Color actions use.
+        // Open Exchange (the 1Color AMM): a native port of `@dcasegr/amm-client` and
+        // `@dcasegr/amm-engine`: the paid token listing, the market reads and prices. Reads over
+        // plain HTTP, the listing over BRC-104, the payment a BRC-177 protected noSend from the
+        // same wallet the 1Color actions use.
         .target(
             name: "OneSatAMM",
             dependencies: [
                 "OneSatColor",
                 "OneSatTemplates",
+                .product(name: "BigInt", package: "BigInt"),
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
                 .product(name: "BSVTransaction", package: "swift-sdk"),
@@ -267,7 +272,9 @@ let package = Package(
                 "OneSatAMM",
                 "OneSatColor",
                 "OneSatTemplates",
+                .product(name: "BigInt", package: "BigInt"),
                 .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVCrypto", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
                 .product(name: "BSVScript", package: "swift-sdk"),
                 .product(name: "BSVTransaction", package: "swift-sdk"),
@@ -276,7 +283,8 @@ let package = Package(
                 .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
-            ]
+            ],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "OneSatCBORTests",
