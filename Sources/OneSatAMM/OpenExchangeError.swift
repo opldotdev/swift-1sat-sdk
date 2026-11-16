@@ -15,12 +15,16 @@ public enum OpenExchangeError: Error, Equatable, Sendable, LocalizedError {
     case network(String)
     /// `user_rejected`: the user declined in the wallet.
     case userRejected(String)
+    /// `below_minimum`: no pool here takes a swap this small (a quote under every validator's
+    /// minimum leg).
+    case belowMinimum(String)
     /// A failure of no named kind (a malformed answer, a bad token id).
     case failed(String)
 
     public var message: String {
         switch self {
-        case .refused(_, let message), .network(let message), .userRejected(let message), .failed(let message):
+        case .refused(_, let message), .network(let message), .userRejected(let message), .belowMinimum(let message),
+             .failed(let message):
             message
         }
     }
