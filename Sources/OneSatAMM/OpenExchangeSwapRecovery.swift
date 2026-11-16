@@ -10,6 +10,7 @@ import BSVTransaction
 import BSVWallet
 import OneSatColor
 import OneSatTemplates
+import OneSatSweep
 
 // The overlay pass and the move back of the swap basket (skein-amm 0.55.1 wallet/swapPayouts.ts,
 // market/activeSwap.ts `moveBackSats`, lib/overlay.ts `readSpendsAll` / `readTx`): the overlay is
@@ -71,11 +72,17 @@ public struct OpenExchangeSwapReads: Sendable {
     }
 }
 
-/// `MovedBack` of the sats alone: the plain action that took the rows into the wallet's change.
+/// `MovedBack`: the action that took the swap basket's rows back to the wallet.
 public struct OpenExchangeMovedBack: Equatable, Sendable {
     public let txid: String
     /// The transaction, Atomic BEEF.
     public let atomicBEEF: [UInt8]
+    /// The tokens moved back (0: the sats alone).
+    public let amount: BigInt
+    /// The page's submit to the token's topic, in words (`steakText`).
+    public let submitted: String
+    /// The submit's failure.
+    public let errors: [String]
 }
 
 extension OpenExchangeSwapLeg {
@@ -291,7 +298,7 @@ extension OpenExchangeSwapLeg {
             }
             return spends
         }
-        return OpenExchangeMovedBack(txid: done.txid, atomicBEEF: done.atomicBEEF)
+        return OpenExchangeMovedBack(txid: done.txid, atomicBEEF: done.atomicBEEF, amount: 0, submitted: "not submitted (no token moved)", errors: [])
     }
 }
 
@@ -342,8 +349,28 @@ extension OpenExchange {
         await OpenExchangeSwapLeg.resolveFromOverlay(ctx, reads: swapReads)
     }
 
-    /// `settleSwaps` (client.ts:1716): the pass on load; the txids taken in. Never throws.
+    /// `settleSwaps` (client.ts:1716): on load, each labelled staged token output the swap basket
+    /// lacks filed from its action's description (its BEEF `GET /@<token>/amm/tx?id=`), then the
+    /// overlay pass; the txids taken in. Never throws: a read or a filing that fails is logged and
+    /// left for the next load, as the TS leaves it.
     public func settleSwaps(_ ctx: OneColorContext) async -> [String] {
-        await resolveSwaps(ctx).taken.map(\.txid)
+        for u in await OpenExchangeSwapLeg.unfiledStagedTokens(ctx) {
+            let beef: [UInt8]?
+            do {
+                beef = try await readTx(tokenId: u.tokenId, txid: u.txid)
+            } catch {
+                OneSatLog.error(error, "Open Exchange: the staged token \(u.txid).\(u.vout) could not be read to file it", category: Self.logCategory)
+                continue
+            }
+            guard let beef else { continue }
+            do {
+                if !(try await OpenExchangeSwapLeg.fileStagedToken(ctx, u, beef: beef)) {
+                    OneSatLog.error("Open Exchange: the wallet did not accept the filing of the staged token \(u.txid).\(u.vout)", category: Self.logCategory)
+                }
+            } catch {
+                OneSatLog.error(error, "Open Exchange: the staged token \(u.txid).\(u.vout) could not be filed", category: Self.logCategory)
+            }
+        }
+        return await resolveSwaps(ctx).taken.map(\.txid)
     }
 }

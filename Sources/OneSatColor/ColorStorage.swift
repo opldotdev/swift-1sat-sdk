@@ -13,6 +13,8 @@ public protocol ColorWalletStorage: NoSendExpiryStorage {
     func colorCreateAction(_ auth: AuthID, _ request: WalletCreateActionRequest) async throws -> StorageCreateActionResult
     func colorListOutputs(_ auth: AuthID, _ request: WalletListOutputsRequest) async throws -> WalletListOutputsResult
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult
+    /// The wallet's actions (`listActions`): an AMM swap reads its labelled staging actions back.
+    func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult
 }
 
 extension StorageClient: ColorWalletStorage {
@@ -26,6 +28,10 @@ extension StorageClient: ColorWalletStorage {
 
     public func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {
         try await internalizeAction(auth, request)
+    }
+
+    public func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult {
+        try await listActions(auth, request)
     }
 }
 

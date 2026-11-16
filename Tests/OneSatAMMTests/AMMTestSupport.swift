@@ -74,6 +74,7 @@ actor MemoryStorage: ColorWalletStorage {
         var fundingSuffix: String?
         var reserved = false
         var customInstructions: String?
+        var tags: [String] = []
     }
 
     struct Pending {
@@ -102,7 +103,16 @@ actor MemoryStorage: ColorWalletStorage {
     /// internalizeActions, as asked; each answers `internalizeAccepts`.
     private(set) var internalized: [WalletInternalizeActionRequest] = []
     var internalizeAccepts = true
+    /// Thrown by internalizeAction instead of an answer.
+    var internalizeError: String?
+    /// An accepted internalizeAction files its basket insertions and marks the rows its
+    /// transaction spends spent, as wallet-toolbox does (off: the call is only recorded).
+    var filesInternalized = false
     var noSendSupported = true
+    /// What listActions answers, and what it was asked.
+    var actions: [WalletAction] = []
+    var actionsError: String?
+    private(set) var listedActions: [WalletListActionsRequest] = []
 
     init(identity: PrivateKey) throws {
         self.identity = identity
@@ -125,6 +135,22 @@ actor MemoryStorage: ColorWalletStorage {
 
     func setNoSendSupported(_ value: Bool) { noSendSupported = value }
     func setInternalizeAccepts(_ value: Bool) { internalizeAccepts = value }
+    func setInternalizeError(_ value: String?) { internalizeError = value }
+    func setFilesInternalized(_ value: Bool) { filesInternalized = value }
+    func setActions(_ value: [WalletAction], error: String? = nil) {
+        actions = value
+        actionsError = error
+    }
+
+    /// Holds output `vout` of `transaction` as a `p color` value row of the module's: its custody
+    /// encrypted to the wallet, with a derivation-suffix tag.
+    func holdColor(_ transaction: Transaction, vout: UInt32, assetID: ColorAssetID, custody: ColorCustody, sources: [Transaction] = []) async throws {
+        for source in sources { transactions[try source.transactionID(limits: txLimits)] = source }
+        try hold(transaction, vout: vout, basket: ColorIdentifiers.basket(assetID, role: .value))
+        let stored = try await ColorMetadata.encrypt(custody.json, identity: identity)
+        records[records.count - 1].customInstructions = stored
+        records[records.count - 1].tags = [ColorIdentifiers.derivationSuffixTag()]
+    }
 
     /// Holds output `vout` of `transaction` in `basket` with `customInstructions`, its source
     /// transactions with it.
@@ -220,23 +246,57 @@ actor MemoryStorage: ColorWalletStorage {
 
     func colorListOutputs(_ auth: AuthID, _ request: WalletListOutputsRequest) async throws -> WalletListOutputsResult {
         listed.append(request)
-        let page = records.filter { $0.basket == request.basket && !$0.reserved }
+        let matching = records.filter { record in
+            guard record.basket == request.basket, !record.reserved else { return false }
+            if request.tags.isEmpty { return true }
+            return request.tagQueryMode == .any
+                ? request.tags.contains { record.tags.contains($0) }
+                : request.tags.allSatisfy { record.tags.contains($0) }
+        }
+        let offset = Int(request.pagination.effectiveOffset)
+        let page = Array(matching.dropFirst(offset).prefix(Int(request.pagination.effectiveLimit)))
         let outputs = try page.map {
             try WalletOutput(
                 satoshis: $0.satoshis, lockingScript: request.include == .lockingScripts ? $0.script : nil, spendable: true,
                 customInstructions: request.includeCustomInstructions == true ? $0.customInstructions : nil,
-                tags: request.includeTags == true ? [] : nil, outpoint: $0.outpoint
+                tags: request.includeTags == true ? $0.tags : nil, outpoint: $0.outpoint
             )
         }
         var beef: BEEF?
         if request.include == .entireTransactions, !page.isEmpty {
             beef = try boundedGraph(ancestry(page.map(\.outpoint.transactionID), pool: transactions))
         }
-        return try WalletListOutputsResult(totalOutputs: UInt32(page.count), beef: beef, outputs: outputs)
+        return try WalletListOutputsResult(totalOutputs: UInt32(matching.count), beef: beef, outputs: outputs)
+    }
+
+    func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult {
+        listedActions.append(request)
+        if let actionsError { throw TestError(actionsError) }
+        return try WalletListActionsResult(totalActions: UInt32(actions.count), actions: actions)
     }
 
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {
         internalized.append(request)
+        if let internalizeError { throw TestError(internalizeError) }
+        if internalizeAccepts, filesInternalized {
+            let atomic = request.transaction
+            for entry in atomic.beef.transactions {
+                if let tx = entry.transaction { transactions[try tx.transactionID(limits: txLimits)] = tx }
+            }
+            guard let subject = try atomic.beef.transaction(for: atomic.subjectTransactionID, limits: txLimits) else {
+                throw TestError("the BEEF lacks its subject")
+            }
+            let spent = Set(subject.inputs.map(\.previousOutput.description))
+            records.removeAll { spent.contains($0.outpoint.description) }
+            for output in request.outputs {
+                guard case .basketInsertion(let r) = output.remittance else { continue }
+                let out = subject.outputs[Int(output.outputIndex)]
+                let outpoint = Outpoint(transactionID: atomic.subjectTransactionID, outputIndex: output.outputIndex)
+                guard !records.contains(where: { $0.outpoint == outpoint }) else { continue }
+                records.append(Record(outpoint: outpoint, satoshis: out.satoshis, script: out.lockingScript.bytes, basket: r.basket,
+                                      customInstructions: r.customInstructions, tags: r.tags))
+            }
+        }
         return WalletInternalizeActionResult(accepted: internalizeAccepts)
     }
 
@@ -308,7 +368,8 @@ actor MemoryStorage: ColorWalletStorage {
         for (index, output) in action.requested.enumerated() {
             guard let basket = output.basket else { continue }
             records.append(Record(outpoint: Outpoint(transactionID: id, outputIndex: UInt32(index)), satoshis: output.satoshis,
-                                  script: output.lockingScript, basket: basket, customInstructions: output.customInstructions))
+                                  script: output.lockingScript, basket: basket, customInstructions: output.customInstructions,
+                                  tags: output.tags))
         }
         for output in action.funded.outputs where output.isChange && output.vout != action.anchorVout {
             let actual = transaction.outputs[Int(output.vout)]

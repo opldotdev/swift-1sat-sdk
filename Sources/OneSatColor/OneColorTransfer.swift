@@ -34,18 +34,22 @@ extension OneColorActions {
     /// `outputs` are passed as given, in order. A BRC-162 value output of the asset is a
     /// destination and may not name a basket; any other non-token output passes through but may
     /// not enter a `p color` basket. `labels` are added after the plan labels and may not carry
-    /// `p color` or BRC-177 labels: a handoff goes through `send`.
+    /// `p color` or BRC-177 labels: a handoff goes through `send`. `acceptDelayedBroadcast` is the
+    /// caller's option, kept as the module keeps the caller's options (`...args`).
     package static func transfer(
         _ ctx: OneColorContext, assetID: ColorAssetID, outputs: [WalletCreateActionOutput],
-        description: String, labels: [String] = []
+        description: String, labels: [String] = [], acceptDelayedBroadcast: Bool? = nil
     ) async -> Transfer1ColorResult {
-        await transfer(ctx, assetID: assetID, outputs: outputs, description: description, labels: labels, changeCustody: nil)
+        await transfer(
+            ctx, assetID: assetID, outputs: outputs, description: description, labels: labels, changeCustody: nil,
+            acceptDelayedBroadcast: acceptDelayedBroadcast
+        )
     }
 
     /// `transfer` with the change custody given, so tests can pin its key to a TS vector.
     static func transfer(
         _ ctx: OneColorContext, assetID: ColorAssetID, outputs requested: [WalletCreateActionOutput],
-        description: String, labels: [String], changeCustody: ColorCustody?
+        description: String, labels: [String], changeCustody: ColorCustody?, acceptDelayedBroadcast: Bool? = nil
     ) async -> Transfer1ColorResult {
         var result = Transfer1ColorResult()
         do {
@@ -81,7 +85,9 @@ extension OneColorActions {
                 inputs: try ColorExecutor.tokenInputs(selected),
                 outputs: all,
                 labels: try plan.labels() + labels,
-                options: try ColorExecutor.options()
+                options: acceptDelayedBroadcast == nil
+                    ? try ColorExecutor.options()
+                    : try WalletCreateActionOptions(signAndProcess: false, acceptDelayedBroadcast: acceptDelayedBroadcast, randomizeOutputs: false)
             )
 
             // signBound: every token input must still be admitted and unspent.

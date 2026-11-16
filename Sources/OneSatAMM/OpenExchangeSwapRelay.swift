@@ -189,14 +189,23 @@ extension OpenExchange {
     }
 }
 
-// MARK: - Staging (market/activeSwap.ts `stage`, sats only)
+// MARK: - Staging (market/activeSwap.ts `stage`; with tokens, OpenExchangeSwapStage.swift)
 
-/// What `stage` put in the swap basket.
+/// `Staged`: what `stage` put in the swap basket.
 public struct OpenExchangeStaged: Equatable, Sendable {
     public let txid: String
     /// The staging transaction, Atomic BEEF.
     public let atomicBEEF: [UInt8]
-    public let sats: OpenExchangeSatsRow
+    /// The sats row; nil: tokens staged with no sats lacking.
+    public let sats: OpenExchangeSatsRow?
+    /// The token row (a sell's).
+    public let tokens: OpenExchangeTokenRow?
+    /// The token row filed in `amm-swap`.
+    public let filed: Bool
+    /// The page's submit to the token's topic, in words (`steakText`).
+    public let submitted: String
+    /// The submit's and the filing's failures.
+    public let errors: [String]
 }
 
 extension OpenExchangeSwapLeg {
@@ -215,7 +224,7 @@ extension OpenExchangeSwapLeg {
         return OpenExchangeStaged(txid: done.txid, atomicBEEF: done.atomicBEEF, sats: OpenExchangeSatsRow(
             outpoint: "\(done.txid).0", txid: done.txid, vout: 0, satoshis: sats, lockingScript: script,
             protocolID: try OpenExchangeSwapNames.swapProtocol(), keyID: keyID, counterparty: "self", order: nil
-        ))
+        ), tokens: nil, filed: false, submitted: "not submitted (no token moved)", errors: [])
     }
 
     /// The staging createAction, as `stage` sends it.
