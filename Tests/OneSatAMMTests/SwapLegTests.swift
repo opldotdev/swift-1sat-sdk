@@ -260,6 +260,59 @@ final class SwapLegTests: XCTestCase {
         XCTAssertThrowsError(try OpenExchangeSwapLeg.prepare(w.ctx, w.input, inputs: short, last: false, holdingBEEF: w.holding))
     }
 
+    /// Rows a few sats short of the leg: the shortfall is the need with one more row less what
+    /// they hold, given only within the allowance; rows that cover the leg lack nothing.
+    func testAFeeShortfallIsTheNeedWithOneMoreRowLessTheRows() async throws {
+        let c = SwapFixture.legs[0]
+        let w = try await LegWorld(c)
+        let short = w.rows.map {
+            OpenExchangeSatsRow(outpoint: $0.outpoint, txid: $0.txid, vout: $0.vout, satoshis: $0.satoshis - 20,
+                                lockingScript: $0.lockingScript, protocolID: $0.protocolID, keyID: $0.keyID,
+                                counterparty: $0.counterparty, order: $0.order)
+        }
+        XCTAssertNil(try OpenExchangeSwapLeg.selectInputs(w.input, sats: short))
+        let utxo = try OpenExchangeSwapLeg.poolUtxo(w.input).utxo
+        let plan = try OpenExchangeSwapLeg.legPlan(
+            w.input, utxo, userPkh: OpenExchangeSwapLeg.zeroPkh, commissionPkh: try OpenExchangeSwapLeg.pkhBytes(w.input.commissionPkh)
+        )
+        let need = try OpenExchangeSwapLeg.legNeed(plan, inputs: short.count + 1, satsPerKb: 100).need
+        let held = short.reduce(Int64(0)) { $0 + Int64($1.satoshis) }
+        let lack = try XCTUnwrap(try OpenExchangeSwapLeg.feeShortfall(w.input, sats: short, allowance: 1_301))
+        XCTAssertEqual(Int64(lack), need - held)
+        // One more row of exactly that covers the leg.
+        let topUp = OpenExchangeSatsRow(
+            outpoint: String(repeating: "ee", count: 32) + ".0", txid: String(repeating: "ee", count: 32), vout: 0, satoshis: lack,
+            lockingScript: short[0].lockingScript, protocolID: short[0].protocolID, keyID: short[0].keyID,
+            counterparty: short[0].counterparty, order: nil
+        )
+        XCTAssertNotNil(try OpenExchangeSwapLeg.selectInputs(w.input, sats: short + [topUp]))
+        // Beyond the allowance it is no shortfall to stage.
+        XCTAssertNil(try OpenExchangeSwapLeg.feeShortfall(w.input, sats: short, allowance: BigInt(lack) - 1))
+    }
+
+    /// A proven funding ancestor can meet the walk ahead of its parent (mined together, or its
+    /// parent's proof not yet in storage): the funding BEEF lists the parent first, others as walked.
+    func testProvenFundingEntriesListAParentBeforeItsChild() throws {
+        func tx(spending parent: Transaction?, tag: UInt32) throws -> Transaction {
+            var t = Transaction(version: 1, lockTime: tag)
+            let previous = try parent.map { Outpoint(transactionID: try $0.transactionID(limits: OpenExchangeSwapLeg.txLimits), outputIndex: 0) }
+                ?? Outpoint(transactionID: try TransactionID(displayHex: String(repeating: "11", count: 32)), outputIndex: tag)
+            t.inputs = [TransactionInput(previousOutput: previous, unlockingScript: try AMMPoolCall.script([]))]
+            t.outputs = [TransactionOutput(satoshis: 1_000, lockingScript: try AMMPoolCall.script(AMMPoolCall.p2pkh(OpenExchangeSwapLeg.zeroPkh)))]
+            return t
+        }
+        let parent = try tx(spending: nil, tag: 1)
+        let child = try tx(spending: parent, tag: 2)
+        let other = try tx(spending: nil, tag: 3)
+        func ids(_ entries: [BEEFTransaction]) throws -> [String] {
+            try entries.map { try $0.transaction!.transactionID(limits: OpenExchangeSwapLeg.txLimits).displayHex }
+        }
+        let ordered = try OpenExchangeSwapLeg.parentsFirst([.raw(child), .raw(other), .raw(parent)])
+        XCTAssertEqual(try ids(ordered), try ids([.raw(other), .raw(parent), .raw(child)]))
+        let kept = try OpenExchangeSwapLeg.parentsFirst([.raw(other), .raw(parent), .raw(child)])
+        XCTAssertEqual(try ids(kept), try ids([.raw(other), .raw(parent), .raw(child)]))
+    }
+
     func testALegPricedOnAnotherOutpointIsRefused() async throws {
         let c = SwapFixture.legs[0]
         let w = try await LegWorld(c)

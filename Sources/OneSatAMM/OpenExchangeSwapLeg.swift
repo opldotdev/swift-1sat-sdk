@@ -349,6 +349,18 @@ public enum OpenExchangeSwapLeg {
         return nil
     }
 
+    /// What `sats` lack of the leg's need with one more row (the staged shortfall), when that lack
+    /// is no more than `allowance` (the quote's per-leg miner fee estimate); nil otherwise. Not in
+    /// the TS. `runSwap` asks it only once `selectInputs` has found the rows short of the leg.
+    static func feeShortfall(_ i: LegInput, sats: [OpenExchangeSatsRow], allowance: BigInt) throws -> UInt64? {
+        let (utxo, _) = try poolUtxo(i)
+        let plan = try legPlan(i, utxo, userPkh: zeroPkh, commissionPkh: try pkhBytes(i.commissionPkh))
+        let held = sats.reduce(BigInt(0)) { $0 + BigInt($1.satoshis) }
+        let lack = BigInt(try legNeed(plan, inputs: sats.count + 1, satsPerKb: i.satsPerKb).need) - held
+        guard lack > 0, lack <= allowance else { return nil }
+        return UInt64(lack)
+    }
+
     // MARK: - Keys
 
     static func brc29PublicKey(_ ctx: OneColorContext, _ d: (derivationPrefix: String, derivationSuffix: String)) throws -> PublicKey {
@@ -549,8 +561,35 @@ public enum OpenExchangeSwapLeg {
         if !done.contains(poolTxid) {
             txidOnly.append(.transactionID(try TransactionID(displayHex: poolTxid)))
         }
-        let out = try BEEF(version: .v2, merklePaths: paths, transactions: txidOnly + proven + entries, limits: beefLimits)
+        let out = try BEEF(version: .v2, merklePaths: paths, transactions: txidOnly + parentsFirst(proven + entries), limits: beefLimits)
         return [0x01, 0x01, 0x01, 0x01] + (try TransactionID(displayHex: fundingTxid)).wireBytes + (try out.serialized(limits: beefLimits))
+    }
+
+    /// The walk's raw entries (the proven, then the rest) in that order, except that one spending
+    /// another listed entry comes after it. The walk stops at a proven transaction without visiting
+    /// its inputs, and the wallet's storage can hold a transaction's proof before its parent's, so
+    /// a proven child can meet the walk ahead of its parent (a stage and the move back that spent
+    /// it, mined together; or a proven stage whose parent storage still holds unproven). @bsv/sdk
+    /// writes that order as it is; a BEEF that lists a child before its parent does not serialize
+    /// here (`parentAfterChild`). Entries already parents-first keep the walk's order exactly.
+    static func parentsFirst(_ entries: [BEEFTransaction]) throws -> [BEEFTransaction] {
+        var pending: [(id: String, entry: BEEFTransaction, parents: Set<String>)] = []
+        for entry in entries {
+            guard let tx = entry.transaction else { pending.append(("", entry, [])); continue }
+            pending.append((try tx.transactionID(limits: txLimits).displayHex, entry, Set(tx.inputs.map { $0.previousOutput.transactionID.displayHex })))
+        }
+        let ids = Set(pending.map(\.id))
+        var placed = Set<String>()
+        var out: [BEEFTransaction] = []
+        while !pending.isEmpty {
+            guard let next = pending.firstIndex(where: { $0.parents.intersection(ids).isSubset(of: placed) }) else {
+                throw fail("the funding BEEF's transactions spend each other in a cycle")
+            }
+            let item = pending.remove(at: next)
+            placed.insert(item.id)
+            out.append(item.entry)
+        }
+        return out
     }
 
     // MARK: - The validator's transaction

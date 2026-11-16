@@ -61,6 +61,8 @@ public struct OpenExchangeSwapResult: Equatable, Sendable {
 
 /// `SwapProgress`: where a swap is.
 public enum OpenExchangeSwapProgress: Equatable, Sendable {
+    /// Sats going into the swap basket: what it lacks before the first leg, or (not in the TS) a
+    /// leg's fee shortfall, which comes after `.relaying` when an earlier leg was sent.
     case staging(sats: BigInt, tokens: BigInt)
     case relaying(leg: String, amountIn: BigInt, amountOut: BigInt, filled: [OpenExchangeLegResult])
     case repricing(leg: String, amountIn: BigInt, amountOut: BigInt, filled: [OpenExchangeLegResult])
@@ -76,6 +78,9 @@ public enum OpenExchangeSwapProgress: Equatable, Sendable {
 public enum OpenExchangeSwapEvent: Equatable, Sendable {
     /// What the basket lacked was staged: the staging transaction.
     case staged(txid: String, sats: UInt64)
+    /// A leg's fee shortfall could not be staged: the sats asked for and the wallet's error, in
+    /// full. The swap stops `fees` and moves its rows back.
+    case stageFailed(sats: UInt64, error: String)
     /// A leg's relay (attempt 1, or 2 when it is sent once more after no answer) and its outcome,
     /// the host's or validator's reason with it.
     case relayed(leg: String, attempt: Int, outcome: OpenExchangeLegOutcome)
@@ -91,7 +96,9 @@ extension OpenExchange {
     /// `executeSwap`: runs a quoted buy with the wallet of `ctx` (see `runSwap`). `onProgress` is
     /// told where the swap is; `isCancelled` is asked before each leg (`cancelled`). `floor` is
     /// the least total amount out the swap accepts (default: the quote's `minAmountOut`, as TS).
-    /// `onEvent` is told each relay, exclusion, pass and move back, for a log. A sell throws:
+    /// `onEvent` is told each stage, relay, exclusion, pass and move back, for a log. The sats spent
+    /// can exceed `quote.stage.amount + feeSats` by up to `legMinerFeeSats` for each leg attempted
+    /// (see `OpenExchangeQuote.stage`). A sell throws:
     /// only the buy side is here.
     public func executeSwap(
         _ ctx: OneColorContext, quote: OpenExchangeQuote, sym: String = "token",
@@ -110,6 +117,12 @@ extension OpenExchange {
             throw OpenExchangeError.failed("A swap is already running: one at a time")
         }
         defer { OpenExchangeSwapGate.shared.leave(gateKey) }
+        // Addition to TS (whose wallet always carries the color module): the payout is taken in
+        // through the 1Color overlay; without one the leg would spend the staged sats and its
+        // tokens could not be filed, so nothing is staged or sent.
+        guard ctx.overlay != nil else {
+            throw OpenExchangeError.failed("a swap needs the wallet's 1Color overlay to take its tokens in")
+        }
         let floor = floor ?? quote.minAmountOut
         // Addition to TS (which always uses the quote's minimum): a caller's floor may only be stricter.
         guard floor >= quote.minAmountOut else {
@@ -230,7 +243,30 @@ extension OpenExchange {
                     tokenId: tokenId, leg: leg, pool: row.pool, poolBEEF: poolOutput.beef, poolOutputIndex: poolOutput.outputIndex,
                     commissionPkh: commissionPkh, satsPerKb: feeRate
                 )
-                guard let inputs = try OpenExchangeSwapLeg.selectInputs(input, sats: try await OpenExchangeSwapLeg.satsHoldings(ctx)) else {
+                var holdings = try await OpenExchangeSwapLeg.satsHoldings(ctx)
+                var selected = try OpenExchangeSwapLeg.selectInputs(input, sats: holdings)
+                // Addition to TS: the quote stages one leg's miner fee as a ~13 kB estimate, and a
+                // leg over a pool that pays its LP fee out (0.55) is ~13.3 kB, so a one-leg buy can
+                // lack a few dozen sats and stop `fees` with nothing sent. A shortfall no larger than
+                // that estimate is staged and the leg goes on; a larger one still stops `fees`.
+                // A wallet that cannot fund it (a spend-everything buy) stops `fees` like a larger
+                // shortfall, so the rows go back and the legs filled so far are in the result.
+                if selected == nil, let lack = try OpenExchangeSwapLeg.feeShortfall(input, sats: holdings, allowance: minerFee) {
+                    progress(.staging(sats: BigInt(lack), tokens: 0))
+                    let staged: OpenExchangeStaged?
+                    do {
+                        staged = try await OpenExchangeSwapLeg.stageSats(ctx, sats: lack, sym: sym)
+                    } catch {
+                        staged = nil
+                        event(.stageFailed(sats: lack, error: OpenExchangeError.errorText(error)))
+                    }
+                    if let staged {
+                        event(.staged(txid: staged.txid, sats: lack))
+                        holdings = try await OpenExchangeSwapLeg.satsHoldings(ctx)
+                        selected = try OpenExchangeSwapLeg.selectInputs(input, sats: holdings)
+                    }
+                }
+                guard let inputs = selected else {
                     why = .fees
                     break
                 }

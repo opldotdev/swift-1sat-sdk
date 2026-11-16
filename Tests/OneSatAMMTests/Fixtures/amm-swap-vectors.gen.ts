@@ -243,4 +243,18 @@ for (const c of [relayCase, ownCase]) {
 // amount in one leg (last), 5,000 sats over the need.
 out.loop = (await satsIn("the swap loop's leg", { commissionPkh: deriveCommissionPkh(v.identity, { txid: deployTxid, vout: 0 }), extra: [5_000], last: true })).out;
 
+// executeSwap's split buy (the Swift fee top-up test): 80,000 sats over pool_deploy and a smaller pool, whose
+// first leg is 53,333 into pool_deploy (not the last), its row exactly that leg's need, and a second row 30
+// sats short of what the next leg (the other 26,667 into pool_deploy) needs with that row alone.
+{
+  const commissionPkh = deriveCommissionPkh(v.identity, { txid: deployTxid, vout: 0 });
+  const pool = stateOf(poolDeploy, v.identity);
+  const needOf = (leg: Leg) => selectLegInputs({ wallet: fakeWallet().wallet, tokenId: TOKEN_ID, meta: { sym: "TST", dec: 0 }, direction: "bsvToToken", leg, pool, poolOutput: { beef: atomic(poolDeploy), outputIndex: 0 }, commissionPkh, satsPerKb: RATE }, [probe], [])!.need;
+  const second = legFor(pool, 26_667n);
+  const need1 = needOf(legFor(pool, 53_333n));
+  const need2 = needOf(second);
+  const first = await satsIn("a split buy's first leg", { commissionPkh, amountIn: 53_333n, extra: [0, need2.need - 30 - need1.need] });
+  out.topUp = { ...first.out, second: big(second), secondNeed: big(need2) };
+}
+
 console.log(JSON.stringify(out, null, 1));

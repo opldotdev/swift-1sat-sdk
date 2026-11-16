@@ -103,6 +103,10 @@ actor MemoryStorage: ColorWalletStorage {
     private(set) var internalized: [WalletInternalizeActionRequest] = []
     var internalizeAccepts = true
     var noSendSupported = true
+    /// When set, a createAction with this description throws (a wallet that cannot fund it).
+    var refusedDescription: String?
+    /// When true, an accepted internalizeAction spends the wallet outputs its transaction consumes.
+    var internalizeSpends = false
 
     init(identity: PrivateKey) throws {
         self.identity = identity
@@ -125,6 +129,8 @@ actor MemoryStorage: ColorWalletStorage {
 
     func setNoSendSupported(_ value: Bool) { noSendSupported = value }
     func setInternalizeAccepts(_ value: Bool) { internalizeAccepts = value }
+    func refuse(description: String?) { refusedDescription = description }
+    func setInternalizeSpends(_ value: Bool) { internalizeSpends = value }
 
     /// Holds output `vout` of `transaction` in `basket` with `customInstructions`, its source
     /// transactions with it.
@@ -169,6 +175,9 @@ actor MemoryStorage: ColorWalletStorage {
     /// outputs and the fee, and a change output.
     func colorCreateAction(_ auth: AuthID, _ request: WalletCreateActionRequest) async throws -> StorageCreateActionResult {
         created.append(request)
+        if let refused = refusedDescription, request.description == refused {
+            throw TestError("insufficient funds: 1 sats short")
+        }
         var inputs: [StorageActionInput] = []
         var reserved: [String] = []
         var held: UInt64 = 0
@@ -237,6 +246,12 @@ actor MemoryStorage: ColorWalletStorage {
 
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {
         internalized.append(request)
+        // With `internalizeSpends`, an accepted transaction spends what it consumes of the
+        // wallet's (a leg's rows), as a real wallet does; off, the rows stay listed (the TS fake).
+        if internalizeAccepts, internalizeSpends, let tx = try request.transaction.beef.transaction(for: request.transaction.subjectTransactionID, limits: txLimits) {
+            let spent = Set(tx.inputs.map(\.previousOutput))
+            records.removeAll { spent.contains($0.outpoint) }
+        }
         return WalletInternalizeActionResult(accepted: internalizeAccepts)
     }
 
