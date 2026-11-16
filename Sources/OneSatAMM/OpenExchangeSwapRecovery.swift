@@ -58,6 +58,22 @@ public struct OpenExchangeResolved: Equatable, Sendable {
     public let stuck: [OpenExchangeStuckRow]
 }
 
+/// What `settleSwaps` did on one load.
+public struct OpenExchangeSettled: Equatable, Sendable {
+    /// The staged token outputs filed in the swap basket on this load: each one's outpoint, token
+    /// id and amount.
+    public let filed: [OpenExchangeUnfiledStaged]
+    /// The overlay pass that followed (`resolveSwaps`).
+    public let resolved: OpenExchangeResolved
+    /// The txids taken in: the TS's return value.
+    public var taken: [String] { resolved.taken.map(\.txid) }
+
+    public init(filed: [OpenExchangeUnfiledStaged], resolved: OpenExchangeResolved) {
+        self.filed = filed
+        self.resolved = resolved
+    }
+}
+
 /// The pass's two reads: H9 `/spends` over outpoints, P9 `/tx` of a spender (nil: not held).
 public struct OpenExchangeSwapReads: Sendable {
     public let spendsAll: @Sendable ([String]) async throws -> [OpenExchangeSpend]
@@ -351,9 +367,12 @@ extension OpenExchange {
 
     /// `settleSwaps` (client.ts:1716): on load, each labelled staged token output the swap basket
     /// lacks filed from its action's description (its BEEF `GET /@<token>/amm/tx?id=`), then the
-    /// overlay pass; the txids taken in. Never throws: a read or a filing that fails is left for
-    /// the next load, as the TS leaves it, and logged and told to `onEvent` (the TS drops it).
-    public func settleSwaps(_ ctx: OneColorContext, onEvent: (@Sendable (OpenExchangeSettleEvent) -> Void)? = nil) async -> [String] {
+    /// overlay pass. Never throws: a read or a filing that fails is left for the next load, as the
+    /// TS leaves it, and logged and told to `onEvent` (the TS drops it). Returns the txids taken
+    /// in (the TS's return), and beside them what was filed and the pass itself (the TS keeps only
+    /// whether anything was filed, for its `emit`), so a caller need not file or pass again.
+    public func settleSwaps(_ ctx: OneColorContext, onEvent: (@Sendable (OpenExchangeSettleEvent) -> Void)? = nil) async -> OpenExchangeSettled {
+        var filed: [OpenExchangeUnfiledStaged] = []
         for u in await OpenExchangeSwapLeg.unfiledStagedTokens(ctx, onEvent: onEvent) {
             let outpoint = "\(u.txid).\(u.vout)"
             let beef: [UInt8]?
@@ -371,6 +390,7 @@ extension OpenExchange {
             }
             do {
                 if try await OpenExchangeSwapLeg.fileStagedToken(ctx, u, beef: beef) {
+                    filed.append(u)
                     onEvent?(.filed(outpoint: outpoint))
                 } else {
                     OneSatLog.error("Open Exchange: the wallet did not accept the filing of the staged token \(outpoint)", category: Self.logCategory)
@@ -381,6 +401,6 @@ extension OpenExchange {
                 onEvent?(.notFiled(outpoint: outpoint, error: OpenExchangeError.errorText(error)))
             }
         }
-        return await resolveSwaps(ctx).taken.map(\.txid)
+        return OpenExchangeSettled(filed: filed, resolved: await resolveSwaps(ctx))
     }
 }

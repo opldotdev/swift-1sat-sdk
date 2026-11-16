@@ -671,8 +671,13 @@ final class SwapSellTests: XCTestCase {
         await http.json("\(tokenBase)/tx?id=\(unreadID)", "down", status: 500)
         await http.json("\(tokenBase)/tx?id=\(unservedID)", "not found", status: 404)
         let events = SettleLog()
-        let taken = await exchange.settleSwaps(ctx, onEvent: { events.add($0) })
-        XCTAssertEqual(taken, [])
+        let settled = await exchange.settleSwaps(ctx, onEvent: { events.add($0) })
+        XCTAssertEqual(settled.taken, [])
+        XCTAssertEqual(settled.resolved.stuck, [])
+        // What was filed is returned, with its token id and amount; the two left unfiled are not.
+        XCTAssertEqual(settled.filed, [
+            OpenExchangeUnfiledStaged(txid: txid, vout: 0, tokenId: SwapFixture.tokenId, amount: 50_000, keyID: "amm-swap-0a1b"),
+        ])
         // Each staged output's fate is told, the read that failed and the one not served included.
         XCTAssertEqual(events.all.count, 3)
         XCTAssertEqual(events.all.first, .filed(outpoint: "\(txid).0"))
@@ -688,6 +693,26 @@ final class SwapSellTests: XCTestCase {
         XCTAssertEqual(Array(urls.prefix(3)), ["\(tokenBase)/tx?id=\(txid)", "\(tokenBase)/tx?id=\(unreadID)", "\(tokenBase)/tx?id=\(unservedID)"])
         // The pass ran over the basket after the filing.
         XCTAssertTrue(urls.contains("\(exchange.base)/spends?outpoint=\(txid).0"))
+    }
+
+    /// A load with nothing staged outside the basket files nothing, reads no `/tx`, and still
+    /// returns the pass.
+    func testSettlingWithNothingUnfiledReturnsThePassAlone() async throws {
+        let storage = try MemoryStorage(identity: SwapFixture.walletRoot)
+        await storage.setActions([])
+        let ctx = SellFixture.context(storage, try StubOverlay())
+        let http = StubHTTP()
+        let exchange = try OpenExchange(origin: "https://ex.test", http: http)
+        let events = SettleLog()
+        let settled = await exchange.settleSwaps(ctx, onEvent: { events.add($0) })
+        XCTAssertEqual(settled.filed, [])
+        XCTAssertEqual(settled.resolved, OpenExchangeResolved(taken: [], stuck: []))
+        XCTAssertEqual(settled.taken, [])
+        XCTAssertEqual(events.all, [])
+        let urls = await http.urls
+        XCTAssertFalse(urls.contains { $0.contains("/tx?id=") }, "\(urls)")
+        let internalized = await storage.internalized
+        XCTAssertTrue(internalized.isEmpty)
     }
 
     // MARK: - The page's submit
