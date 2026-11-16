@@ -232,7 +232,7 @@ actor MemoryStorage: ColorWalletStorage {
         if request.include == .entireTransactions, !page.isEmpty {
             beef = try boundedGraph(ancestry(page.map(\.outpoint.transactionID), pool: transactions))
         }
-        return try WalletListOutputsResult(totalOutputs: UInt32(page.count), beef: beef, outputs: outputs)
+        return try WalletListOutputsResult(totalOutputs: UInt64(page.count), beef: beef, outputs: outputs)
     }
 
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {

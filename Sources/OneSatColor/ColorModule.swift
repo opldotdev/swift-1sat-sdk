@@ -345,7 +345,7 @@ enum ColorModule {
         var sources = try BEEF(merklePaths: [], transactions: [], limits: beefLimits)
         var offset: UInt32 = 0
         var limit = min(UInt32(selected.count), OneColorConstants.listPageLimit)
-        var total: UInt32?
+        var total: UInt64?
         while true {
             let page = try await ctx.storage.colorListOutputs(ctx.auth, try WalletListOutputsRequest(
                 basket: basket, tags: selected.map(\.suffixTag), tagQueryMode: .any, include: .entireTransactions,
@@ -370,7 +370,8 @@ enum ColorModule {
             guard !page.outputs.isEmpty, let total, offset < total else {
                 throw ColorError.custody("the wallet returned other outputs than the selected token inputs")
             }
-            limit = min(OneColorConstants.listPageLimit, total - offset)
+            // `offset < total`, and the page limit fits a UInt32, so the narrowing cannot trap.
+            limit = UInt32(min(UInt64(OneColorConstants.listPageLimit), total - UInt64(offset)))
         }
     }
 
