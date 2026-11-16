@@ -3,6 +3,7 @@ import BSVKeys
 import BSVCore
 import ToolboxAuth
 import OneSatTemplates
+import OneSatSweep
 
 /// `SwapTerms` (market/relay.ts): the relay's terms for a swap on one token.
 public struct OpenExchangeSwapTerms: Equatable, Sendable {
@@ -56,7 +57,7 @@ extension OpenExchange {
                 method: "POST", path: path, query: nil, headers: ["content-type": "application/json"], body: body
             )
             (status, answer) = (response.statusCode, response.body)
-        } catch AuthTransportError.unauthenticatedReply(let replyStatus, let replyBody) {
+        } catch AuthTransportError.unauthenticatedReply(let replyStatus, let replyBody, _) {
             // An answer from in front of the instance's auth: its status and body, unsigned.
             (status, answer) = (replyStatus, replyBody)
         }
@@ -79,6 +80,7 @@ extension OpenExchange {
                 throw OpenExchangeError.failed("TypeError: the answer is not an object: \(Self.preview(answer))")
             }
         }
+        Self.logHTTP("callApp \(fn)", method: "POST", url: callURL, status: status, body: answer)
         let error = value?["error"]
         let code = error?["code"]?.string
         let message = error?["message"]?.string ?? JS.prefix(text, 200)

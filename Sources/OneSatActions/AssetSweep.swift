@@ -6,6 +6,7 @@ import BSVTransaction
 import BSVWallet
 import OneSatTemplates
 import ToolboxActions
+import OneSatSweep
 
 /// Moves legacy WIF-held ordinals and tokens onto P1SAT-derived outputs.
 ///
@@ -288,6 +289,7 @@ public enum AssetSweep {
                     outpoints: inputs.map(\.outpoint)
                 )
             } catch {
+                OneSatLog.error(error, "BSV-21 sweep: overlay output status for \(tokenID)", category: "OneSatActions")
                 return .failure(.overlayValidationFailed)
             }
             let valid = Set(statuses.filter { $0.state == .valid }.map(\.outpoint))

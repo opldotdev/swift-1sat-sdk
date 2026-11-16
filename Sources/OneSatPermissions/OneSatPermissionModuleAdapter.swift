@@ -6,6 +6,7 @@ import BSVWallet
 import Foundation
 import OneSatTemplates
 import ToolboxPermissions
+import OneSatSweep
 
 /// Asset storage remains on the standard plain baskets. The deployed TypeScript module routes
 /// actions with `p 1sat …` and also defines the asset-specific `bsv21` scheme. BRC-123's published
@@ -135,6 +136,7 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
         do {
             decoded = try codec.decodeRequest(route: route, from: [UInt8](request.argumentsJSON))
         } catch {
+            OneSatLog.error(error, "permission review: denied \(request.method), its arguments do not decode", category: "OneSatPermissions")
             return .init(decision: .deny)
         }
         guard decoded.call.jsonMethodName == request.method,
@@ -394,6 +396,7 @@ public struct OneSatPermissionModuleAdapter: PermissionModuleHandling, Sendable 
                     panels.append(panel(for: leg, network: network))
                 }
             } catch {
+                OneSatLog.error(error, "permission review: input assets not resolved", category: "OneSatPermissions")
                 unresolvedInputs = true
                 panels.append(contentsOf: inputOutpointPanels(requestedInputs))
             }

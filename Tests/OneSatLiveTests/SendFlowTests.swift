@@ -27,6 +27,8 @@ final class SendFlowTests: LiveTestCase {
         XCTAssertTrue((0...1_000).contains(sweepB), "B's balance went \(b0) -> \(b1) after receiving \(Self.amount)")
 
         // B -> A: everything but the reserve.
+        // corelibs XCTest ignores continueAfterFailure, so a precondition for arithmetic throws.
+        guard b1 > Self.reserve else { throw LiveSetupError("B holds \(b1), not more than the \(Self.reserve) reserve") }
         let back = UInt64(b1 - Self.reserve)
         let ret = try await Funding.pay(from: b, to: try a.receiveAddress(), satoshis: back, description: "QA send B to A")
         assertTxid(ret, "B to A")

@@ -287,6 +287,8 @@ interface CallRecord {
 	status: number
 	signed: boolean
 	resBytes: number
+	/** The longest JSON array in the reply: bytes sent as number arrays show up here. */
+	resLongestArray: number
 	errorBody?: string
 }
 const calls: CallRecord[] = []
@@ -341,6 +343,20 @@ async function proxy(req: IncomingMessage, res: ServerResponse, url: URL): Promi
 		body: req.method === 'GET' || req.method === 'HEAD' ? undefined : body,
 	})
 	const out = Buffer.from(await up.arrayBuffer())
+	let resLongestArray = 0
+	if (out.length > 0) {
+		try {
+			const walkOut = (v: unknown) => {
+				if (Array.isArray(v)) {
+					if (v.length > resLongestArray) resLongestArray = v.length
+					for (const x of v) walkOut(x)
+				} else if (v && typeof v === 'object') for (const x of Object.values(v)) walkOut(x)
+			}
+			walkOut(JSON.parse(out.toString('utf8')))
+		} catch {
+			// not JSON: nothing to measure
+		}
+	}
 	const record: CallRecord = {
 		at: new Date().toISOString(),
 		identityKey: header(req, 'x-bsv-auth-identity-key'),
@@ -356,10 +372,11 @@ async function proxy(req: IncomingMessage, res: ServerResponse, url: URL): Promi
 		status: up.status,
 		signed: up.headers.get('x-bsv-auth-signature') != null,
 		resBytes: out.length,
+		resLongestArray,
 	}
 	if (up.status >= 400) record.errorBody = out.toString('utf8').slice(0, 2000)
 	calls.push(record)
-	const line = `${record.at} ${record.httpMethod} ${record.path} rpc=${rpc} reqBytes=${body.length} jsonNodes=${jsonNodes} longestArray=${longestArray} binReq=${record.binaryRequestEncoding ?? '-'} -> ${up.status} signed=${record.signed} resBytes=${out.length}${record.errorBody ? ` body=${record.errorBody}` : ''}`
+	const line = `${record.at} ${record.httpMethod} ${record.path} rpc=${rpc} reqBytes=${body.length} jsonNodes=${jsonNodes} longestArray=${longestArray} binReq=${record.binaryRequestEncoding ?? '-'} -> ${up.status} signed=${record.signed} resBytes=${out.length} resLongestArray=${resLongestArray}${record.errorBody ? ` body=${record.errorBody}` : ''}`
 	console.log(line)
 	appendFileSync(callsLog, `${line}\n`)
 	const h: Record<string, string> = {}
@@ -434,6 +451,6 @@ createServer((req, res) => {
 		if (!res.headersSent) send(res, 500, { error: String(e?.message ?? e) })
 		else res.end()
 	})
-}).listen(PORT, '0.0.0.0', () => {
+}).listen(PORT, '127.0.0.1', () => {
 	console.log(`local stack (${chain}) on http://127.0.0.1:${PORT} -> storage :${STORAGE_PORT}, data in ${dir}`)
 })

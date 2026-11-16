@@ -1,3 +1,6 @@
+import Foundation
+import OneSatSweep
+
 public enum OneSatActionError: Error, Equatable, Sendable {
     case noTransfers
     case mustProvideCounterpartyOrAddress
@@ -211,10 +214,10 @@ public struct ActionResult: Equatable, Sendable {
     public let actionId: String?
     public let error: String?
     public let noSendChange: [String]?
-    /// For a log, not for display: `String(reflecting:)` of the error behind `error` when that
-    /// error was not a `OneSatActionError`, so a typed failure such as a `BEEFError` keeps its
-    /// case and transaction IDs after `error` has become a plain sentence. It is not part of the
-    /// result's value and is ignored by `==`.
+    /// For a log, not for display: `OneSatLog.reflecting(_:)` of the error behind `error` (its
+    /// reflection, with no URL query string) when that error was not a `OneSatActionError`, so a
+    /// typed failure such as a `BEEFError` keeps its case and transaction IDs after `error` has
+    /// become a plain sentence. It is not part of the result's value and is ignored by `==`.
     public let diagnostic: String?
     /// Set when the action succeeded but the overlay that indexes it was not told: why the submit
     /// failed, or "no transaction to submit" when the action's Atomic BEEF could not be built.
@@ -273,16 +276,26 @@ public struct ActionResult: Equatable, Sendable {
         ActionResult(actionId: actionId, error: error.wireMessage)
     }
 
+    /// `error`'s wire message, as `@1sat/actions` returns it, keeping the failure behind it as
+    /// the ``diagnostic`` and in the log (an overlay's HTTP 500 is not a missing token).
+    public static func failure(
+        _ error: OneSatActionError, underlying: any Error, actionId: String? = nil
+    ) -> ActionResult {
+        OneSatLog.error(underlying, "action failed as \(error.wireMessage)", category: "OneSatActions")
+        return ActionResult(actionId: actionId, error: error.wireMessage, diagnostic: OneSatLog.reflecting(underlying))
+    }
+
     public static func failure(_ message: String, actionId: String? = nil) -> ActionResult {
         ActionResult(actionId: actionId, error: message)
     }
 
-    /// A failure shown as `error`'s plain description, keeping `String(reflecting: error)` as
-    /// the ``diagnostic``.
+    /// A failure shown as `error`'s plain description, keeping its URL-free reflection as the
+    /// ``diagnostic``.
     public static func failure(describing error: any Error, actionId: String? = nil) -> ActionResult {
-        ActionResult(
-            actionId: actionId, error: error.localizedDescription,
-            diagnostic: String(reflecting: error)
+        OneSatLog.error(error, "action failed", category: "OneSatActions")
+        return ActionResult(
+            actionId: actionId, error: OneSatLog.localizedMessage(error),
+            diagnostic: OneSatLog.reflecting(error)
         )
     }
 }

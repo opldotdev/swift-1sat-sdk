@@ -1,4 +1,5 @@
 import Foundation
+import OneSatSweep
 import BSVCore
 import BSVKeys
 import BSVTransaction
@@ -16,10 +17,27 @@ public protocol PaymailPaymentWallet: Sendable {
 extension RemoteWallet: PaymailPaymentWallet {}
 
 /// A paymail message that cannot be internalized. The message stays in the box.
-public struct PaymailInboxError: Error, Equatable, Sendable, LocalizedError {
+public struct PaymailInboxError: Error, Equatable, Sendable, LocalizedError, CustomDebugStringConvertible {
     public let reason: String
-    public init(_ reason: String) { self.reason = reason }
+    /// The error behind `reason`, its type and reflection, for the log. Not part of `==`.
+    public let underlying: String?
+
+    /// Not logged here: an unreadable message stays in the box and is met again on every sync.
+    /// The SDK has no sync loop of its own; the wallet app's `IncomingPaymentsService` collects
+    /// these errors and logs one line per sync with each one's full `debugDescription`.
+    /// `underlying` is ``OneSatLog/describe(_:)``, so no URL query or secret value reaches it.
+    public init(_ reason: String, underlying: (any Error)? = nil) {
+        self.reason = reason
+        self.underlying = underlying.map { OneSatLog.describe($0) }
+    }
+
     public var errorDescription: String? { reason }
+
+    public var debugDescription: String {
+        "PaymailInboxError(\(reason))" + (underlying.map { ": \($0)" } ?? "")
+    }
+
+    public static func == (lhs: PaymailInboxError, rhs: PaymailInboxError) -> Bool { lhs.reason == rhs.reason }
 }
 
 /// 1Sat paymail payments in the `payment_inbox` message box, as `@1sat/actions`
@@ -131,13 +149,13 @@ public enum PaymailInbox {
                 wire = try decoder.decode(Wire.self, from: Data(body.utf8))
             }
         } catch {
-            throw PaymailInboxError("not a paymail payment message")
+            throw PaymailInboxError("not a paymail payment message", underlying: error)
         }
         let beef: [UInt8]
         do {
             beef = try Hex.decode(wire.beef, maximumDecodedByteCount: beefLimits.maximumByteCount)
         } catch {
-            throw PaymailInboxError("paymail beef is not hex")
+            throw PaymailInboxError("paymail beef is not hex", underlying: error)
         }
         return Message(
             beef: beef, outputIndex: wire.outputIndex, derivationPrefix: wire.derivationPrefix,
@@ -155,7 +173,7 @@ public enum PaymailInbox {
         do {
             return try BEEF(bytes: nested, limits: beefLimits, transactionOrder: .any)
         } catch {
-            throw PaymailInboxError("paymail beef is not valid BEEF")
+            throw PaymailInboxError("paymail beef is not valid BEEF", underlying: error)
         }
     }
 
@@ -190,7 +208,7 @@ public enum PaymailInbox {
                 senderIdentityKey: sender
             )
         } catch {
-            throw PaymailInboxError("malformed paymail payment remittance")
+            throw PaymailInboxError("malformed paymail payment remittance", underlying: error)
         }
         return try WalletInternalizeActionRequest(
             transaction: try MetanetBEEF.atomic(subject, in: beef),

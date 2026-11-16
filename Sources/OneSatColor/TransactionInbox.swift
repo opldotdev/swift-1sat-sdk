@@ -7,6 +7,7 @@ import BSVWallet
 import ToolboxActions
 import OneSatCBOR
 import OneSatMetanet
+import OneSatSweep
 
 /// A message internalized and acknowledged.
 public struct TransactionInboxReceipt: Equatable, Sendable {
@@ -69,23 +70,36 @@ public enum TransactionInbox {
         do {
             messages = try await ctx.relay.list(host: host, messageBox: OneColorConstants.transactionDeliveryBox)
         } catch {
-            result.error = error.localizedDescription
+            OneSatLog.error(error, "1Color inbox sync failed", category: "OneSatColor")
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
         var acknowledged: [String] = []
+        // A skipped message stays in the box and is met again on every sync: one line per sync
+        // with the count and the first one in full, not one line per message.
+        var firstSkip: (messageID: String, error: any Error)?
         for message in messages {
             do {
                 result.received.append(try await handle(ctx, message: message, overlayFor: overlayFor))
                 acknowledged.append(message.messageID)
             } catch {
-                result.skipped.append(TransactionInboxSkip(messageID: message.messageID, reason: error.localizedDescription))
+                if firstSkip == nil { firstSkip = (messageID: message.messageID, error: error) }
+                result.skipped.append(TransactionInboxSkip(messageID: message.messageID, reason: OneSatLog.localizedMessage(error)))
             }
+        }
+        if let firstSkip {
+            OneSatLog.error(
+                "1Color inbox: \(result.skipped.count) of \(messages.count) messages skipped and left in the box; "
+                    + "first, \(firstSkip.messageID): \(OneSatLog.describe(firstSkip.error))",
+                category: "OneSatColor"
+            )
         }
         if !acknowledged.isEmpty {
             do {
                 try await ctx.relay.acknowledge(host: host, messageIDs: acknowledged)
             } catch {
-                result.error = "acknowledge-failed: \(error.localizedDescription)"
+                OneSatLog.error(error, "1Color inbox: acknowledge failed", category: "OneSatColor")
+                result.error = "acknowledge-failed: \(OneSatLog.localizedMessage(error))"
             }
         }
         return result
@@ -260,7 +274,7 @@ public enum TransactionInbox {
                         resolved = ctx.overlay
                     }
                 } catch {
-                    throw Skip(reason: error.localizedDescription)
+                    throw Skip(reason: OneSatLog.localizedMessage(error))
                 }
                 guard let resolved else { throw Skip(reason: "overlay-required") }
                 targets.append((assetID, resolved, indexes))

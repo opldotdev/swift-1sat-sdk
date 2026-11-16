@@ -1,5 +1,7 @@
 import Foundation
+import BSVCrypto
 import BSVWallet
+import OneSatSweep
 
 /// Best-effort plaintext view of WalletPermissionsManager-encrypted custom instructions.
 public enum WalletMetadataCI {
@@ -47,6 +49,17 @@ public enum WalletMetadataCI {
                     )
                 )
             } catch {
+                // Plaintext that happens to read as base64 fails here on every listing, and that is
+                // its normal path: it is read as it is, silently. Bytes long enough to be a WPM
+                // envelope (nonce and tag) that still fail were encrypted for another key or are
+                // damaged: said once per process, not once per output.
+                if data.count >= SymmetricKey.minimumEnvelopeByteCount {
+                    OneSatLog.noticeOnce(
+                        "WalletMetadataCI.decrypt",
+                        "encrypted custom instructions did not decrypt and are read as they are: \(OneSatLog.describe(error))",
+                        category: "OneSatActions"
+                    )
+                }
                 return rawFields(current)
             }
             guard result.plaintext.count <= limits.maximumPayloadByteCount else {

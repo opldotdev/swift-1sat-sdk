@@ -1,5 +1,6 @@
 import Foundation
 import OneSatCBOR
+import OneSatSweep
 
 /// BRC-232 transaction delivery: a DAG-CBOR body behind a two-header MIME entity, ported from
 /// `actions/src/metanet/delivery.ts`. Parsing is strict in the same places: exact members,
@@ -131,7 +132,7 @@ public struct TransactionDelivery: Equatable, Sendable {
                 body, options: .init(strictUTF8: true, requireCanonicalMapOrder: true)
             )
         } catch {
-            throw MetanetError.delivery("BRC-232: the body is not canonical DAG-CBOR (\(error))")
+            throw MetanetError.delivery("BRC-232: the body is not canonical DAG-CBOR (\(OneSatLog.message(error)))")
         }
         return try parse(value)
     }
