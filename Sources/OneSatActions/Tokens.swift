@@ -639,11 +639,19 @@ public enum Tokens {
             if let error = result.error {
                 return FundOverlayResult(actionId: result.actionId, error: error)
             }
-            guard let txid = result.txid, let tx = result.tx else {
+            guard let txid = result.txid else {
                 return .failure(.noTxidReturned, actionId: result.actionId)
             }
             // The payment is broadcast either way; if the overlay misses this submission
-            // it still finds the payment on its next fee-address check.
+            // it still finds the payment on its next fee-address check. That covers a payment
+            // whose Atomic BEEF could not be built, which is reported as a failed submission.
+            guard let tx = result.tx else {
+                return FundOverlayResult(
+                    txid: txid,
+                    actionId: result.actionId,
+                    error: OneSatActionError.fundingSubmitFailed.wireMessage
+                )
+            }
             do {
                 let status = try await bsv21.submitFunding(tokenId: tokenId, beef: tx)
                 return FundOverlayResult(txid: txid, tx: tx, actionId: result.actionId, status: status)

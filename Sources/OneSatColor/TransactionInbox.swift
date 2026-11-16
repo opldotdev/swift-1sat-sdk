@@ -161,6 +161,10 @@ public enum TransactionInbox {
             beef = atomic.beef
             txid = atomic.subjectTransactionID
         } else {
+            // Read in any order and reordered parents-first, so `last` is a transaction nothing
+            // else in the payment spends. TS `Transaction.fromBEEF` takes the record last on the
+            // wire instead; the two differ when the sender's writer put a parent last. This keeps
+            // the reordered choice.
             beef = try BEEF(bytes: beefBytes, limits: beefLimits, transactionOrder: .any)
             guard let last = beef.transactions.last else { throw Skip(reason: "payment beef has no transaction") }
             txid = try last.transactionID(limits: beefLimits.transactionLimits)

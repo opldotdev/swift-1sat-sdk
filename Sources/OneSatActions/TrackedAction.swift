@@ -222,6 +222,10 @@ public enum TrackedAction {
             )
 
             let signed = try SignedAction(funded: funded, transaction: transaction)
+            // A noSend action is held for a later one to spend, and its Atomic BEEF is how that
+            // action reaches it, so one whose funded graph cannot prove it stops here, before
+            // storage is asked to hold it, with the BEEF error as the reason.
+            let heldBEEF = options.noSend ? try signed.atomicBEEF() : nil
             // TS completeSignedAction: signAction runs with acceptDelayedBroadcast false and
             // noSend carried over from createAction, so a noSend action is held for its batch.
             let processed: StorageProcessActionResult
@@ -245,9 +249,13 @@ public enum TrackedAction {
             } else {
                 changeOutpoints = nil
             }
+            // A sent action is processed and may be broadcast by now. TS returns its Atomic BEEF
+            // without checking it; here a graph that cannot prove the transaction leaves `tx`
+            // nil rather than aborting an action storage already holds. Callers that hand the
+            // BEEF on check for it.
             return ActionResult(
                 txid: signed.transactionID.displayHex,
-                tx: try signed.atomicBEEF(),
+                tx: heldBEEF ?? (try? signed.atomicBEEF()),
                 actionId: actionID,
                 noSendChange: changeOutpoints
             )

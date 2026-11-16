@@ -72,10 +72,18 @@ actor PublishTransport: AuthenticatedTransport {
     /// The `createAction` calls, counted from 0, that answer with an error instead.
     private let failingCreates: Set<Int>
 
-    init(sendWithStatus: String = "unproven", actionBatch: ActionBatch? = nil, failingCreates: Set<Int> = []) {
+    /// Leaves each fresh funding source out of the `inputBEEF` it returns, as storage that has
+    /// lost a proof would, so the funded graph cannot prove the signed transaction.
+    private let omitsFundingSource: Bool
+
+    init(
+        sendWithStatus: String = "unproven", actionBatch: ActionBatch? = nil, failingCreates: Set<Int> = [],
+        omitsFundingSource: Bool = false
+    ) {
         self.sendWithStatus = sendWithStatus
         self.actionBatch = actionBatch
         self.failingCreates = failingCreates
+        self.omitsFundingSource = omitsFundingSource
     }
 
     func send(
@@ -272,7 +280,7 @@ actor PublishTransport: AuthenticatedTransport {
                 : try BEEF(bytes: inputBeef, limits: WalletBEEFLimits.standard)
             inputBeef = try BEEF(
                 merklePaths: graph.merklePaths,
-                transactions: graph.transactions + [.raw(source)],
+                transactions: graph.transactions + (omitsFundingSource ? [] : [.raw(source)]),
                 limits: WalletBEEFLimits.standard
             ).serialized(limits: WalletBEEFLimits.standard)
             inputs.append([
