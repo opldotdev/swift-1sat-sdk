@@ -113,7 +113,7 @@ enum SigmaPublish {
         )
         if let error = anchor.error {
             await batch.abort(ctx.auth)
-            return ActionResult(error: error)
+            return ActionResult(error: error, diagnostic: anchor.diagnostic)
         }
         // Storage without an action batch took the anchor through processAction and holds it as
         // nosend. If the publish never sends it, abort it so its change is not left locked.

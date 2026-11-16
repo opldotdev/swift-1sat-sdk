@@ -123,7 +123,7 @@ public enum AssetSweep {
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {
-            return ActionResult.failure(error.localizedDescription)
+            return ActionResult.failure(describing: error)
         }
     }
 
@@ -227,7 +227,7 @@ public enum AssetSweep {
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {
-            return ActionResult.failure(error.localizedDescription)
+            return ActionResult.failure(describing: error)
         }
     }
 

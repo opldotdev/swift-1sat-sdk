@@ -400,6 +400,8 @@ final class SigmaPublishTests: XCTestCase {
             "The transaction data is incomplete: a transaction it depends on is missing."
         )
         XCTAssertNil(result.txid)
+        // The log keeps the case and the transaction IDs the sentence leaves out.
+        XCTAssertEqual(result.diagnostic?.hasPrefix("BEEFError.missingAncestor(transaction: "), true)
         let processed = await transport.processed
         XCTAssertTrue(processed.isEmpty)
     }

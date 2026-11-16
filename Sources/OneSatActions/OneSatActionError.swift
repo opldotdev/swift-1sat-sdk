@@ -211,19 +211,31 @@ public struct ActionResult: Equatable, Sendable {
     public let actionId: String?
     public let error: String?
     public let noSendChange: [String]?
+    /// For a log, not for display: `String(reflecting:)` of the error behind `error` when that
+    /// error was not a `OneSatActionError`, so a typed failure such as a `BEEFError` keeps its
+    /// case and transaction IDs after `error` has become a plain sentence. It is not part of the
+    /// result's value and is ignored by `==`.
+    public let diagnostic: String?
 
     public init(
         txid: String? = nil,
         tx: [UInt8]? = nil,
         actionId: String? = nil,
         error: String? = nil,
-        noSendChange: [String]? = nil
+        noSendChange: [String]? = nil,
+        diagnostic: String? = nil
     ) {
         self.txid = txid
         self.tx = tx
         self.actionId = actionId
         self.error = error
         self.noSendChange = noSendChange
+        self.diagnostic = diagnostic
+    }
+
+    public static func == (lhs: ActionResult, rhs: ActionResult) -> Bool {
+        lhs.txid == rhs.txid && lhs.tx == rhs.tx && lhs.actionId == rhs.actionId
+            && lhs.error == rhs.error && lhs.noSendChange == rhs.noSendChange
     }
 
     public static func failure(_ error: OneSatActionError, actionId: String? = nil) -> ActionResult {
@@ -232,5 +244,14 @@ public struct ActionResult: Equatable, Sendable {
 
     public static func failure(_ message: String, actionId: String? = nil) -> ActionResult {
         ActionResult(actionId: actionId, error: message)
+    }
+
+    /// A failure shown as `error`'s plain description, keeping `String(reflecting: error)` as
+    /// the ``diagnostic``.
+    public static func failure(describing error: any Error, actionId: String? = nil) -> ActionResult {
+        ActionResult(
+            actionId: actionId, error: error.localizedDescription,
+            diagnostic: String(reflecting: error)
+        )
     }
 }

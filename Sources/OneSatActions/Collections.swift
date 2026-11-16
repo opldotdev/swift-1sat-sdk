@@ -267,7 +267,7 @@ public enum Collections {
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {
-            return ActionResult.failure(error.localizedDescription)
+            return ActionResult.failure(describing: error)
         }
     }
 

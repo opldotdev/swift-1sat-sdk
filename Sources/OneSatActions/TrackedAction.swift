@@ -193,7 +193,7 @@ public enum TrackedAction {
                 funded = try await ctx.storage.createAction(ctx.auth, createRequest)
             }
         } catch {
-            return ActionResult.failure(error.localizedDescription, actionId: actionID)
+            return ActionResult.failure(describing: error, actionId: actionID)
         }
 
         do {
@@ -272,7 +272,7 @@ public enum TrackedAction {
             if let actionError = error as? OneSatActionError {
                 return ActionResult.failure(actionError, actionId: actionID)
             }
-            return ActionResult.failure(error.localizedDescription, actionId: actionID)
+            return ActionResult.failure(describing: error, actionId: actionID)
         }
     }
 
