@@ -40,6 +40,7 @@ OrdLock listing create is off for now. Buying and cancelling existing v2 listing
 |---|---|
 | `OneSatActions` | The `@1sat/actions` families: ordinals, tokens, inscriptions, OpNS, locks, identity, ORDFS deploy |
 | `OneSatColor` | 1Color actions and BRC-207 custody |
+| `OneSatAMM` | Open Exchange: token listing and paid enable on the 1Color AMM host |
 | `OneSatMetanet` | Handles, envelopes, transaction delivery, relay, paymail inbox |
 | `OneSatTemplates` | Locking scripts: inscription, OrdLock v2, BSV-20/21, 1Color, Cosign, TimeLock, BAP, MAP, B |
 | `OneSatClient` | Read clients for ordinals, BSV-21, OpNS, ORDFS and MNEE |
@@ -47,7 +48,7 @@ OrdLock listing create is off for now. Buying and cancelling existing v2 listing
 | `OneSatAddresses` | P1SAT deposit addresses |
 | `OneSatCBOR` | Strict DAG-CBOR, matching `@ipld/dag-cbor` |
 | `OneSatSweep` | Sweep plain BSV from a legacy key and report the assets left behind |
-| `OneSat` | Umbrella that re-exports every module except `OneSatColor` and `OneSatMetanet` |
+| `OneSat` | Umbrella that re-exports every module except `OneSatColor`, `OneSatAMM` and `OneSatMetanet` |
 
 ## Install
 
