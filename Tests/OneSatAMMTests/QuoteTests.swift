@@ -561,6 +561,35 @@ final class OpenExchangeQuoteSheetTests: XCTestCase {
         XCTAssertEqual(q.legs.map(\.poolId), [o])
     }
 
+    func testACopyWithSomeOfAReadsRowsQuotesAsAReadOfThoseRows() throws {
+        // A drained pool (no sats) makes the whole quote throw; a copy without it built with the
+        // public initializers is the same answer as a read of the other rows, and quotes the same.
+        let validators = #"[{"identity":"02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","peerId":"p","minLegSats":"1000"}]"#
+        let full = try held("[\(row("1")),\(row("2", bsv: 0)),\(row("3", bsv: 2_000_000, tokens: 9_000_000, comm: 7))]", validators: validators)
+        let req = OpenExchangeQuoteRequest(tokenId: T, side: .buy, amountIn: 100_000, maxSlippageBps: 50, maxSources: 5)
+        XCTAssertThrowsError(try OpenExchangeQuotes.quoteSwap(req, held: full, sym: "TST", dec: 2))
+
+        let kept = full.pools.filter { $0.pool.bsvReserve > 0 && $0.pool.tokenReserve > 0 }
+        let copy = OpenExchangePools(
+            market: OpenExchangePools.Market(identityKey: full.market.identityKey, minCommissionBps: full.market.minCommissionBps),
+            pools: kept.map {
+                OpenExchangePoolRow(
+                    pool: $0.pool, poolId: $0.poolId, lpPubKey: $0.lpPubKey, swaps: $0.swaps,
+                    validatorPeerId: $0.validatorPeerId, tokenId: $0.tokenId
+                )
+            },
+            validators: full.validators.map {
+                OpenExchangePools.Validator(identity: $0.identity, peerId: $0.peerId, minLegSats: $0.minLegSats)
+            }
+        )
+        let direct = try held("[\(row("1")),\(row("3", bsv: 2_000_000, tokens: 9_000_000, comm: 7))]", validators: validators)
+        XCTAssertEqual(copy, direct)
+        XCTAssertEqual(
+            try OpenExchangeQuotes.quoteSwap(req, held: copy, sym: "TST", dec: 2),
+            try OpenExchangeQuotes.quoteSwap(req, held: direct, sym: "TST", dec: 2)
+        )
+    }
+
     func testTheSmallestMaxSourcesDoesNotTrap() throws {
         // TS `Math.max(0, maxSources - legs)` is 0 here; Swift's subtraction must not overflow.
         let q = try OpenExchangeQuotes.quoteSwap(
