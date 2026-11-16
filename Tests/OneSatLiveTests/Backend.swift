@@ -72,21 +72,9 @@ struct Backend: Sendable {
         }
     }
 
-    /// Hosts that serve mainnet. A testnet run must contact none of them.
-    static func isMainnetHost(_ host: String) -> Bool {
-        let host = host.lowercased()
-        if host == "1sat.app" || host == "bananablocks.com" || host == "www.bananablocks.com" {
-            return true
-        }
-        if host.hasSuffix(".1sat.app") { return !host.hasPrefix("testnet.") }
-        let mainnetOnly: Set<String> = [
-            "api.whatsonchain.com",
-            "arc.taal.com",
-            "arc.gorillapool.io",
-            "ordinals.gorillapool.io",
-            "messagebox.bsvblockchain.tech",
-        ]
-        return mainnetOnly.contains(host)
+    /// The only hosts a run may contact: storage and the 1Sat API.
+    var allowedHosts: Set<String> {
+        Set([storage.host, services.host].compactMap { $0?.lowercased() })
     }
 }
 

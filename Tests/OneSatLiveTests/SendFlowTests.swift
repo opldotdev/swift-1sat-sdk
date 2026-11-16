@@ -27,6 +27,7 @@ final class SendFlowTests: LiveTestCase {
         XCTAssertTrue((0...1_000).contains(sweepB), "B's balance went \(b0) -> \(b1) after receiving \(Self.amount)")
 
         // B -> A: everything but the reserve.
+        XCTAssertGreaterThan(b1, Self.reserve, "B holds \(b1), not more than the \(Self.reserve) reserve")
         let back = UInt64(b1 - Self.reserve)
         let ret = try await Funding.pay(from: b, to: try a.receiveAddress(), satoshis: back, description: "QA send B to A")
         assertTxid(ret, "B to A")

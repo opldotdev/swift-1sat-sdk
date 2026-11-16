@@ -51,7 +51,7 @@ enum QAWallets {
         guard let set = WalletSet(rawValue: setText) else {
             throw LiveSetupError(
                 "\(setKey) must be one of \(WalletSet.allCases.map(\.rawValue).joined(separator: ", "))"
-                    + (setText.isEmpty ? " (it is unset)" : " (it is \(setText))"))
+                    + (setText.isEmpty ? " (it is unset)" : " (it is set to something else)"))
         }
         switch backend.kind {
         case .local:
@@ -164,6 +164,10 @@ actor QASuite {
         let key = try QAWallets.key(root: root, set: set, role: role)
         let wallet = try await LiveWallet.connect(name: "\(set.rawValue)/\(role.rawValue)", key: key, backend: backend)
         try wallet.describe()
+        // Each process starts with an empty processed-tx store, so the first sync would sweep
+        // anything an earlier run left unswept. Do it now, before any test reads a baseline.
+        let swept = try await Funding.sync(wallet)
+        print("SYNCED \(wallet.name) on connect: processed \(swept.processed), failed \(swept.failed)")
         wallets[role] = wallet
         return wallet
     }

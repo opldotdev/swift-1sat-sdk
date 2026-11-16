@@ -8,7 +8,7 @@ import FoundationNetworking
 #endif
 
 /// The base of every live flow: skips without `ONESAT_LIVE`, installs the host guard, runs the
-/// preflight once, and after each test checks that a testnet run touched no mainnet host.
+/// preflight once, and after each test checks that the run touched only the backend's hosts.
 class LiveTestCase: XCTestCase {
     private(set) var backend: Backend!
     /// When the test began, for reading the local stack's call log from here on.
@@ -18,7 +18,7 @@ class LiveTestCase: XCTestCase {
         try await super.setUp()
         continueAfterFailure = false
         let backend = try Backend.current()
-        HostGuard.install(refuseMainnet: backend.kind == .testnet)
+        HostGuard.install(allowedHosts: backend.allowedHosts)
         _ = try await Preflight.shared.check(backend)
         self.backend = backend
         startedAt = Date()
@@ -26,12 +26,14 @@ class LiveTestCase: XCTestCase {
 
     override func tearDown() async throws {
         if let backend {
-            let mainnet = HostGuard.mainnetRequests
+            let refused = HostGuard.refusedRequests
             XCTAssertTrue(
-                mainnet.isEmpty,
-                "a \(backend.kind.rawValue) run contacted mainnet hosts: \(mainnet)"
+                refused.isEmpty,
+                "a \(backend.kind.rawValue) run contacted hosts outside \(backend.allowedHosts.sorted()): \(refused)"
             )
             let seen = HostGuard.hostsSeen
+            let strays = Set(seen.keys).subtracting(backend.allowedHosts)
+            XCTAssertTrue(strays.isEmpty, "requests went to hosts outside the allowlist: \(strays.sorted())")
             // The guard must actually see this process's traffic, or its silence proves nothing. A
             // test that failed before reaching storage has already said why.
             if testRun?.hasSucceeded == true {
@@ -128,6 +130,7 @@ struct StackCall: Decodable, Sendable {
     let status: Int
     let signed: Bool
     let resBytes: Int
+    let resLongestArray: Int
     let errorBody: String?
 }
 
@@ -159,6 +162,45 @@ extension LiveWallet {
             all += page.outputs
             offset += UInt32(page.outputs.count)
             if page.outputs.isEmpty || offset >= page.totalOutputs { return all }
+        }
+    }
+
+    /// The output of `txid` in `basket`, with its locking script. Lists the basket without scripts
+    /// to find it, then reads that one output with its script, so the reply stays one output's
+    /// size however large the basket grows.
+    func output(of txid: String, in basket: String) async throws -> WalletOutput {
+        let listed = try await outputs(in: basket)
+        guard let index = listed.firstIndex(where: { $0.outpoint.transactionID.displayHex == txid }) else {
+            throw LiveSetupError("no output of \(txid) in \(name)'s \(basket) basket (\(listed.count) outputs)")
+        }
+        let page = try await wallet.listOutputs(try WalletListOutputsRequest(
+            basket: basket,
+            include: .lockingScripts,
+            includeTags: true,
+            pagination: try WalletPagination(limit: 1, offset: UInt32(index))
+        ))
+        guard let output = page.outputs.first, output.outpoint == listed[index].outpoint else {
+            throw LiveSetupError("\(basket) basket changed order between reads: expected \(listed[index].outpoint) at \(index), got \(page.outputs.map(\.outpoint))")
+        }
+        return output
+    }
+
+    /// The outpoints `txid` spends, as storage lists its inputs.
+    func inputs(of txid: String) async throws -> [Outpoint] {
+        var offset: UInt32 = 0
+        while true {
+            let page = try await wallet.listActions(try WalletListActionsRequest(
+                labels: [],
+                includeInputs: true,
+                pagination: try WalletPagination(limit: 1_000, offset: offset)
+            ))
+            if let action = page.actions.first(where: { $0.transactionID.displayHex == txid }) {
+                return (action.inputs ?? []).map(\.sourceOutpoint)
+            }
+            offset += UInt32(page.actions.count)
+            if page.actions.isEmpty || offset >= page.totalActions {
+                throw LiveSetupError("storage lists no action \(txid) for \(name)")
+            }
         }
     }
 

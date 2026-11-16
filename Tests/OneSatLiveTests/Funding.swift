@@ -72,16 +72,20 @@ enum Funding {
         )
     }
 
-    /// Syncs `wallet` until `txid` has been internalized and swept, or fails with what the last
-    /// sync said.
+    /// Syncs `wallet` until `txid` has been internalized and swept, or fails at the deadline with
+    /// what the last sync said. A failed internalize is not final: owner sync can list an outpoint
+    /// before the BEEF is served or storage accepts it, and `SyncAddresses` retries a failed txid on
+    /// the next pass.
     static func receive(_ wallet: LiveWallet, txid: String) async throws {
         let deadline = Date().addingTimeInterval(wallet.backend.kind == .local ? 10 : depositTimeout)
         var last: SyncAddresses.Result?
+        var lastFailure: String?
         while true {
             let result = try await sync(wallet)
             last = result
             if let failure = result.failures.first(where: { $0.txid == txid }) {
-                throw LiveSetupError("\(wallet.name) could not internalize \(txid): \(failure.message)")
+                lastFailure = failure.message
+                print("RETRY \(wallet.name) could not internalize \(txid) yet: \(failure.message)")
             }
             if try await wallet.processed.has(txid) {
                 if let sweepError = result.sweepError {
@@ -95,14 +99,21 @@ enum Funding {
         }
         throw LiveSetupError(
             "\(wallet.name) never saw \(txid) at \(try wallet.receiveAddress()) through owner sync at "
-                + "\(wallet.backend.services.absoluteString); last sync: \(String(describing: last))")
+                + "\(wallet.backend.services.absoluteString)"
+                + (lastFailure.map { "; last internalize failure: \($0)" } ?? "")
+                + "; last sync: \(String(describing: last))")
     }
 
     // MARK: Topping up
 
     /// Makes sure A holds at least `floor`, paying from T. Returns A's balance afterwards.
+    ///
+    /// A sync runs first, so a deposit an earlier top-up left unswept counts before any new
+    /// payment. T tops A up at most once per process (`TopUpBudget`): a second attempt in the same
+    /// run fails rather than paying again.
     @discardableResult
     static func ensureFunded(_ a: LiveWallet, treasury t: LiveWallet) async throws -> Int64 {
+        _ = try await sync(a)
         let balanceA = try await a.balance()
         print("BALANCE \(a.name) \(balanceA)")
         guard balanceA < floor else { return balanceA }
@@ -121,6 +132,7 @@ enum Funding {
                         + "Fund \(try t.receiveAddress()) at https://faucet.bananablocks.com (a CAPTCHA page, one claim per address a day) and run again.")
             }
         }
+        try await TopUpBudget.shared.spend(topUp, to: a.name)
         let txid = try await pay(from: t, to: try a.receiveAddress(), satoshis: topUp, description: "QA top-up")
         try await receive(a, txid: txid)
         let after = try await a.balance()
@@ -145,6 +157,27 @@ enum Funding {
         }
         print("FAUCET \(satoshis) sats -> \(address): \(txid)")
         return txid
+    }
+}
+
+/// What T may pay A in one process: one top-up, at most `2 × Funding.floor`.
+actor TopUpBudget {
+    static let shared = TopUpBudget()
+    static let maximumTopUps = 1
+    static let maximumSatoshis = UInt64(2 * Funding.floor)
+
+    private var topUps = 0
+    private var satoshis: UInt64 = 0
+
+    func spend(_ amount: UInt64, to name: String) throws {
+        guard topUps < Self.maximumTopUps, satoshis + amount <= Self.maximumSatoshis else {
+            throw LiveSetupError(
+                "\(name) needs another top-up of \(amount) sats after \(topUps) this run (\(satoshis) sats); "
+                    + "the run allows \(Self.maximumTopUps) of at most \(Self.maximumSatoshis). An earlier top-up "
+                    + "may not have arrived; see its RECEIVED or RETRY lines.")
+        }
+        topUps += 1
+        satoshis += amount
     }
 }
 
