@@ -374,6 +374,7 @@ private struct RejectTransport: AuthenticatedTransport {
         headers: [String: String],
         body: [UInt8]?
     ) async throws -> AuthenticatedResponse {
+        if let reply = ActiveStorageReply.reply(to: body) { return reply }
         throw AuthTransportError.notImplemented("offline")
     }
 }
@@ -394,6 +395,7 @@ private actor ScriptedTransport: AuthenticatedTransport {
         headers: [String: String],
         body: [UInt8]?
     ) async throws -> AuthenticatedResponse {
+        if let reply = ActiveStorageReply.reply(to: body) { return reply }
         let object = try JSONSerialization.jsonObject(with: Data(body ?? [])) as? [String: Any]
         let rpcMethod = object?["method"] as? String ?? ""
         methods.append(rpcMethod)

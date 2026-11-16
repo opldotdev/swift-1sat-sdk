@@ -39,11 +39,11 @@ let package = Package(
         // generic wallet a 1Sat action executes against.
         .package(
             url: "https://github.com/opldotdev/swift-sdk.git",
-            revision: "9839bf525996cd045600e7b85da8a7940818389c"
+            revision: "5777efd59c39437db41ced4ea9290c79ac72172d"
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "4da28439f53b6c23f7eec8771f7db50c5ee90ea8"
+            revision: "1d173850e0ba45982a523db70affccf78b0551c2"
         ),
     ],
     targets: [

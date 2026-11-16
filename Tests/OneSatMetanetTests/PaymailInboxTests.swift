@@ -66,6 +66,7 @@ final class PaymailInboxTests: XCTestCase {
         func send(
             method: String, path: String, query: String?, headers: [String: String], body: [UInt8]?
         ) async throws -> AuthenticatedResponse {
+            if let reply = ActiveStorageReply.reply(to: body) { return reply }
             bodies.append(body ?? [])
             let call = try JSONSerialization.jsonObject(with: Data(body ?? [])) as? [String: Any]
             let reply: [String: Any] = ["jsonrpc": "2.0", "id": call?["id"] ?? NSNull(), "result": ["accepted": true]]

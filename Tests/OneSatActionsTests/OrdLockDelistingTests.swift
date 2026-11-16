@@ -201,6 +201,7 @@ private actor CapturingTransport: AuthenticatedTransport {
         headers: [String: String],
         body: [UInt8]?
     ) async throws -> AuthenticatedResponse {
+        if let reply = ActiveStorageReply.reply(to: body) { return reply }
         bodies.append(body ?? [])
         throw AuthTransportError.notImplemented("offline")
     }
