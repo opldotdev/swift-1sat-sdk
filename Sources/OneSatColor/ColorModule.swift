@@ -345,7 +345,7 @@ enum ColorModule {
         var sources = try BEEF(merklePaths: [], transactions: [], limits: beefLimits)
         var offset: UInt32 = 0
         var limit = min(UInt32(selected.count), OneColorConstants.listPageLimit)
-        var total: UInt32?
+        var total: UInt64?
         while true {
             let page = try await ctx.storage.colorListOutputs(ctx.auth, try WalletListOutputsRequest(
                 basket: basket, tags: selected.map(\.suffixTag), tagQueryMode: .any, include: .entireTransactions,
@@ -356,7 +356,9 @@ enum ColorModule {
             }
             total = page.totalOutputs
             // `offset` never passes the count: the loop continues only while `offset < total`.
-            if page.outputs.count > Int(limit) || page.outputs.count > Int(page.totalOutputs) - Int(offset) {
+            // UInt64 throughout: `totalOutputs` is UInt64 and a hostile count must not trap.
+            let returned = UInt64(page.outputs.count)
+            if returned > UInt64(limit) || returned > page.totalOutputs - UInt64(offset) {
                 throw ColorError.custody("the listing exceeded its bounds")
             }
             for output in page.outputs {
@@ -370,7 +372,7 @@ enum ColorModule {
             guard !page.outputs.isEmpty, let total, offset < total else {
                 throw ColorError.custody("the wallet returned other outputs than the selected token inputs")
             }
-            limit = min(OneColorConstants.listPageLimit, total - offset)
+            limit = UInt32(min(UInt64(OneColorConstants.listPageLimit), total - UInt64(offset)))
         }
     }
 

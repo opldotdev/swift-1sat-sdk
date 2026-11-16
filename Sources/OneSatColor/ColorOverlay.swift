@@ -3,6 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 import BSVCore
+import BSVOverlay
 import BSVScript
 import BSVTransaction
 import BSVWallet
@@ -12,12 +13,16 @@ import OneSatSweep
 /// One BRC-24 `output-list` answer: each item a BEEF and the index of the listed output in its
 /// subject transaction.
 public struct ColorOutputList: Equatable, Sendable {
+    /// One output, in the `@bsv/sdk` `LookupAnswer` output shape. `transactionID` is the
+    /// optional `txid` that names which transaction in `beef` holds the output.
     public struct Item: Equatable, Sendable {
         public let beef: [UInt8]
         public let outputIndex: UInt32
-        public init(beef: [UInt8], outputIndex: UInt32) {
+        public let transactionID: TransactionID?
+        public init(beef: [UInt8], outputIndex: UInt32, transactionID: TransactionID? = nil) {
             self.beef = beef
             self.outputIndex = outputIndex
+            self.transactionID = transactionID
         }
     }
 
@@ -79,8 +84,11 @@ public enum ColorOverlay {
             let transaction: Transaction
             let txid: String
             do {
-                let beef = try BEEF(bytes: item.beef, limits: beefLimits, transactionOrder: .any)
-                transaction = try ColorBEEF.subject(of: beef)
+                // TS `Transaction.fromBEEF(item.beef, item.txid)`: Atomic or standard BEEF, the
+                // named transaction when a txid is given, with BEEF decoding bounded.
+                transaction = try OutputListItem(
+                    beef: item.beef, outputIndex: item.outputIndex, transactionID: item.transactionID
+                ).transaction(beefLimits: beefLimits)
                 txid = try transaction.transactionID(limits: beefLimits.transactionLimits).displayHex
             } catch {
                 OneSatLog.error(error, "1Color overlay answer: invalid BEEF", category: "OneSatColor")

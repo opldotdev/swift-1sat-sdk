@@ -109,6 +109,36 @@ final class ColorUnitTests: XCTestCase {
         ))
     }
 
+    /// TS `Transaction.fromBEEF(item.beef, item.txid)`: an Atomic BEEF answer reads its subject,
+    /// and a named txid picks that transaction from a standard BEEF even when it is not last.
+    func test_readOutputListReadsAtomicBEEFAndHonoursANamedTxid() throws {
+        let (first, firstTxid) = try tokenTransaction(amount: 5)
+        let (second, secondTxid) = try tokenTransaction(amount: 6)
+        let atomic = try AtomicBEEF(
+            subjectTransactionID: TransactionID(displayHex: firstTxid), beef: graph([first]),
+            limits: harnessBEEFLimits
+        ).serialized(limits: harnessBEEFLimits)
+        let fromAtomic = try ColorOverlay.readOutputList(
+            ColorOutputList(outputs: [.init(beef: atomic, outputIndex: 0)]), queried: ["\(firstTxid).0"]
+        )
+        XCTAssertEqual(fromAtomic["\(firstTxid).0"]?.satoshis, 1)
+
+        let both = try graph([first, second]).serialized(limits: harnessBEEFLimits)
+        let named = try ColorOverlay.readOutputList(ColorOutputList(outputs: [
+            .init(beef: both, outputIndex: 0, transactionID: TransactionID(displayHex: firstTxid)),
+        ]), queried: ["\(firstTxid).0"])
+        XCTAssertNotNil(named["\(firstTxid).0"])
+        // Unnamed, the answer is the BEEF's last transaction, as before.
+        XCTAssertNotNil(try ColorOverlay.readOutputList(
+            ColorOutputList(outputs: [.init(beef: both, outputIndex: 0)]), queried: ["\(secondTxid).0"]
+        )["\(secondTxid).0"])
+        // A txid the BEEF does not hold invalidates the answer.
+        XCTAssertThrowsError(try ColorOverlay.readOutputList(ColorOutputList(outputs: [
+            .init(beef: graph([second]).serialized(limits: harnessBEEFLimits), outputIndex: 0,
+                  transactionID: TransactionID(displayHex: firstTxid)),
+        ]), queried: ["\(firstTxid).0"]))
+    }
+
     func test_httpOverlaySubmitsBEEFWithTopicsAndReadsTheSteak() async throws {
         actor Seen { var request: URLRequest?; func set(_ r: URLRequest) { request = r } }
         let seen = Seen()
