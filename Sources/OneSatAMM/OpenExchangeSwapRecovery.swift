@@ -10,6 +10,7 @@ import BSVTransaction
 import BSVWallet
 import OneSatColor
 import OneSatTemplates
+import OneSatSweep
 
 // The overlay pass and the move back of the swap basket (skein-amm 0.55.1 wallet/swapPayouts.ts,
 // market/activeSwap.ts `moveBackSats`, lib/overlay.ts `readSpendsAll` / `readTx`): the overlay is
@@ -57,6 +58,22 @@ public struct OpenExchangeResolved: Equatable, Sendable {
     public let stuck: [OpenExchangeStuckRow]
 }
 
+/// What `settleSwaps` did on one load.
+public struct OpenExchangeSettled: Equatable, Sendable {
+    /// The staged token outputs filed in the swap basket on this load: each one's outpoint, token
+    /// id and amount.
+    public let filed: [OpenExchangeUnfiledStaged]
+    /// The overlay pass that followed (`resolveSwaps`).
+    public let resolved: OpenExchangeResolved
+    /// The txids taken in: the TS's return value.
+    public var taken: [String] { resolved.taken.map(\.txid) }
+
+    public init(filed: [OpenExchangeUnfiledStaged], resolved: OpenExchangeResolved) {
+        self.filed = filed
+        self.resolved = resolved
+    }
+}
+
 /// The pass's two reads: H9 `/spends` over outpoints, P9 `/tx` of a spender (nil: not held).
 public struct OpenExchangeSwapReads: Sendable {
     public let spendsAll: @Sendable ([String]) async throws -> [OpenExchangeSpend]
@@ -71,11 +88,17 @@ public struct OpenExchangeSwapReads: Sendable {
     }
 }
 
-/// `MovedBack` of the sats alone: the plain action that took the rows into the wallet's change.
+/// `MovedBack`: the action that took the swap basket's rows back to the wallet.
 public struct OpenExchangeMovedBack: Equatable, Sendable {
     public let txid: String
     /// The transaction, Atomic BEEF.
     public let atomicBEEF: [UInt8]
+    /// The tokens moved back (0: the sats alone).
+    public let amount: BigInt
+    /// The page's submit to the token's topic, in words (`steakText`).
+    public let submitted: String
+    /// The submit's failure.
+    public let errors: [String]
 }
 
 extension OpenExchangeSwapLeg {
@@ -291,7 +314,7 @@ extension OpenExchangeSwapLeg {
             }
             return spends
         }
-        return OpenExchangeMovedBack(txid: done.txid, atomicBEEF: done.atomicBEEF)
+        return OpenExchangeMovedBack(txid: done.txid, atomicBEEF: done.atomicBEEF, amount: 0, submitted: "not submitted (no token moved)", errors: [])
     }
 }
 
@@ -342,8 +365,42 @@ extension OpenExchange {
         await OpenExchangeSwapLeg.resolveFromOverlay(ctx, reads: swapReads)
     }
 
-    /// `settleSwaps` (client.ts:1716): the pass on load; the txids taken in. Never throws.
-    public func settleSwaps(_ ctx: OneColorContext) async -> [String] {
-        await resolveSwaps(ctx).taken.map(\.txid)
+    /// `settleSwaps` (client.ts:1716): on load, each labelled staged token output the swap basket
+    /// lacks filed from its action's description (its BEEF `GET /@<token>/amm/tx?id=`), then the
+    /// overlay pass. Never throws: a read or a filing that fails is left for the next load, as the
+    /// TS leaves it, and logged and told to `onEvent` (the TS drops it). Returns the txids taken
+    /// in (the TS's return), and beside them what was filed and the pass itself (the TS keeps only
+    /// whether anything was filed, for its `emit`), so a caller need not file or pass again.
+    public func settleSwaps(_ ctx: OneColorContext, onEvent: (@Sendable (OpenExchangeSettleEvent) -> Void)? = nil) async -> OpenExchangeSettled {
+        var filed: [OpenExchangeUnfiledStaged] = []
+        for u in await OpenExchangeSwapLeg.unfiledStagedTokens(ctx, onEvent: onEvent) {
+            let outpoint = "\(u.txid).\(u.vout)"
+            let beef: [UInt8]?
+            do {
+                beef = try await readTx(tokenId: u.tokenId, txid: u.txid)
+            } catch {
+                OneSatLog.error(error, "Open Exchange: the staged token \(outpoint) could not be read to file it", category: Self.logCategory)
+                onEvent?(.unread(outpoint: outpoint, error: OpenExchangeError.errorText(error)))
+                continue
+            }
+            guard let beef else {
+                OneSatLog.error("Open Exchange: the host served no transaction for the staged token \(outpoint): not filed", category: Self.logCategory)
+                onEvent?(.notServed(outpoint: outpoint))
+                continue
+            }
+            do {
+                if try await OpenExchangeSwapLeg.fileStagedToken(ctx, u, beef: beef) {
+                    filed.append(u)
+                    onEvent?(.filed(outpoint: outpoint))
+                } else {
+                    OneSatLog.error("Open Exchange: the wallet did not accept the filing of the staged token \(outpoint)", category: Self.logCategory)
+                    onEvent?(.notAccepted(outpoint: outpoint))
+                }
+            } catch {
+                OneSatLog.error(error, "Open Exchange: the staged token \(outpoint) could not be filed", category: Self.logCategory)
+                onEvent?(.notFiled(outpoint: outpoint, error: OpenExchangeError.errorText(error)))
+            }
+        }
+        return OpenExchangeSettled(filed: filed, resolved: await resolveSwaps(ctx))
     }
 }

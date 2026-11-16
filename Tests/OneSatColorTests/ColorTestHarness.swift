@@ -256,12 +256,16 @@ actor MockWallet: ColorWalletStorage {
             for record in page where !roots.contains(record.outpoint.transactionID) { roots.append(record.outpoint.transactionID) }
             beef = try graph(try ancestry(roots, pool: transactions))
         }
-        return try WalletListOutputsResult(totalOutputs: UInt32(matching.count), beef: beef, outputs: outputs)
+        return try WalletListOutputsResult(totalOutputs: UInt64(matching.count), beef: beef, outputs: outputs)
     }
 
     private var internalizeFailures = 0
     /// The next `count` internalizations throw before storage records anything.
     func failNextInternalize(_ count: Int) { internalizeFailures = count }
+
+    func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult {
+        try WalletListActionsResult(totalActions: 0, actions: [])
+    }
 
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {
         if internalizeFailures > 0 {

@@ -13,6 +13,36 @@ public protocol ColorWalletStorage: NoSendExpiryStorage {
     func colorCreateAction(_ auth: AuthID, _ request: WalletCreateActionRequest) async throws -> StorageCreateActionResult
     func colorListOutputs(_ auth: AuthID, _ request: WalletListOutputsRequest) async throws -> WalletListOutputsResult
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult
+    /// The wallet's actions (`listActions`): an AMM swap reads its labelled staging actions back.
+    /// Real storage implements it (`StorageClient` does); the default throws
+    /// `ColorStorageCallUnimplemented`, so a conformer that predates it (a test stand-in) still
+    /// compiles and fails loudly if it is ever called.
+    func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult
+}
+
+/// A `ColorWalletStorage` call the conformer does not implement.
+public struct ColorStorageCallUnimplemented: Error, Equatable, Sendable, LocalizedError {
+    /// The conformer's type.
+    public let storage: String
+    /// The requirement it lacks.
+    public let call: String
+
+    public init(storage: String, call: String) {
+        self.storage = storage
+        self.call = call
+    }
+
+    public var errorDescription: String? {
+        "\(storage) does not implement ColorWalletStorage.\(call): real wallet storage must implement it"
+    }
+}
+
+extension ColorWalletStorage {
+    /// Not implemented by this conformer: throws, never answers an empty list (an empty answer
+    /// would read as "no staged tokens" and hide them).
+    public func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult {
+        throw ColorStorageCallUnimplemented(storage: String(describing: Self.self), call: "colorListActions")
+    }
 }
 
 extension StorageClient: ColorWalletStorage {
@@ -27,19 +57,15 @@ extension StorageClient: ColorWalletStorage {
     public func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {
         try await internalizeAction(auth, request)
     }
+
+    public func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult {
+        try await listActions(auth, request)
+    }
 }
 
 /// BEEF graph helpers the module's `Beef` class provides in TypeScript.
 public enum ColorBEEF {
     static let limits = WalletBEEFLimits.standard
-
-    /// The last transaction of a BEEF, which is the subject of an overlay answer.
-    static func subject(of beef: BEEF) throws -> Transaction {
-        guard let transaction = beef.transactions.last?.transaction else {
-            throw ColorError.overlay("BEEF has no transaction")
-        }
-        return transaction
-    }
 
     /// `toBinaryAtomic(txid)`: the subject with exactly its ancestry, down to proven or
     /// transaction-ID-only records, and the BUMPs those use.

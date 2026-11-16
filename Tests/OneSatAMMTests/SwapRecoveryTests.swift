@@ -631,8 +631,8 @@ final class SwapRecoveryTests: XCTestCase {
         let lack = try XCTUnwrap(try OpenExchangeSwapLeg.feeShortfall(secondInput, sats: [secondRow], allowance: quote.legMinerFeeSats))
         try await h.w.overlay.unspent(try h.w.signed, vout: 1)
         try await h.accepts()
-        // The leg taken in spends its row, as a real wallet's take-in does.
-        await h.w.storage.setInternalizeSpends(true)
+        // The leg taken in spends its row and files what it inserts, as wallet-toolbox does.
+        await h.w.storage.setFilesInternalized(true)
         let stage = "AMM swap: sats into the swap basket"
         await h.w.storage.refuse(description: stage)
 
@@ -742,19 +742,6 @@ final class SwapRecoveryTests: XCTestCase {
         OpenExchangeSwapGate.shared.leave(key)
     }
 
-    /// A token row in the basket (a sell's, from another wallet on the same seed) does not hold
-    /// back the sats of an early stop: they go back, the token row stays.
-    func testAnEarlyStopMovesTheSatsBackPastATokenRow() async throws {
-        let h = try await Host(SwapFixture.legs[0])
-        let signed = try h.w.signed
-        try await h.w.storage.hold(signed, vout: 1, basket: "amm-swap", customInstructions: OpenExchangeSwapNames.swapInstructions(keyID: "amm-swap-t"), sources: [])
-        let result = try await h.run(ProgressLog(), cancelled: true, quote: try h.quote(25_000))
-        guard case .moved? = result.returned else { return XCTFail("the sats did not go back: \(String(describing: result.returned))") }
-        let totals = try await OpenExchangeSwapLeg.swapBasketTotals(h.w.ctx)
-        XCTAssertEqual(totals.sats, 0)
-        XCTAssertEqual(totals.tokens[SwapFixture.tokenId]?.outputs, 1)
-    }
-
     // MARK: - The basket's totals
 
     func testTheBasketTotalsAreItsSatsAndEachTokensRows() async throws {
@@ -779,25 +766,5 @@ final class SwapRecoveryTests: XCTestCase {
         XCTAssertEqual(try OpenExchangeSwapLeg.tokenIdOfWire(txid), "\(display)_0")
         XCTAssertEqual(try OpenExchangeSwapLeg.tokenIdOfWire(txid + [5, 1, 0, 0]), "\(display)_261")
         XCTAssertThrowsError(try OpenExchangeSwapLeg.tokenIdOfWire([1, 2]))
-    }
-
-    func testASellIsNotRun() async throws {
-        let h = try await Host(Self.loop)
-        var q = try h.quote()
-        q = OpenExchangeQuote(
-            request: OpenExchangeQuoteRequest(tokenId: SwapFixture.tokenId, side: .sell, amountIn: 5, maxSlippageBps: 100, maxSources: 1),
-            legs: q.legs, amountOut: q.amountOut, minAmountOut: q.minAmountOut, effectivePrice: q.effectivePrice,
-            marginalPrice: q.marginalPrice, impactBps: q.impactBps, stage: q.stage, legMinerFeeSats: q.legMinerFeeSats, plan: q.plan, view: q.view
-        )
-        let log = ProgressLog()
-        do {
-            _ = try await h.run(log, quote: q)
-            XCTFail("a sell ran")
-        } catch {
-            XCTAssertEqual(OpenExchangeError.errorText(error), "only a buy swap is supported here")
-        }
-        XCTAssertEqual(log.phases, ["failed"])
-        let requests = await h.http.requests
-        XCTAssertTrue(requests.isEmpty)
     }
 }

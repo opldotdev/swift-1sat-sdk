@@ -111,8 +111,26 @@ actor StubOverlay: ColorOverlayProvider {
         })
     }
 
+    /// What was submitted, once `admitSubmissions` is on.
+    private(set) var submitted: [(topics: [String], beef: [UInt8])] = []
+    private var admits = false
+
+    /// Submissions admit every non-deploy token output of their subject (listed unspent from then
+    /// on) and spend what it spends, as `tm_color_<asset>` does.
+    func admitSubmissions() { admits = true }
+
     func submit(topics: [String], beef: [UInt8]) async throws -> [String: ColorAdmittance] {
-        throw TestError("a swap leg submits nothing to the overlay")
+        guard admits else { throw TestError("a swap leg submits nothing to the overlay") }
+        submitted.append((topics, beef))
+        let (id, _, tx) = try ColorBEEF.open(beef)
+        var vouts: [UInt32] = []
+        for (n, output) in tx.outputs.enumerated() {
+            guard let token = try ColorTokenOutput.read(output.lockingScript, txid: id.displayHex, vout: UInt32(n)), !token.deploy else { continue }
+            vouts.append(UInt32(n))
+            try unspent(tx, vout: UInt32(n))
+        }
+        for input in tx.inputs { unspent["\(input.previousOutput.transactionID.displayHex).\(input.previousOutput.outputIndex)"] = nil }
+        return Dictionary(uniqueKeysWithValues: topics.map { ($0, ColorAdmittance(outputsToAdmit: vouts)) })
     }
 }
 
@@ -288,6 +306,42 @@ final class SwapLegTests: XCTestCase {
         XCTAssertNotNil(try OpenExchangeSwapLeg.selectInputs(w.input, sats: short + [topUp]))
         // Beyond the allowance it is no shortfall to stage.
         XCTAssertNil(try OpenExchangeSwapLeg.feeShortfall(w.input, sats: short, allowance: BigInt(lack) - 1))
+    }
+
+    /// A sell's leg spends token rows and sats, and the top-up only stages sats: its shortfall is
+    /// the leg's sats need (the outputs and fee less the token rows' sats, sized with the token
+    /// inputs), never its token amount; token rows short of the amount are no shortfall at all.
+    func testASellsFeeShortfallIsItsSatsNeedWithTheTokenInputs() async throws {
+        let w = try await SellWorld(SellFixture.legs[0])
+        XCTAssertNotNil(try OpenExchangeSwapLeg.selectInputs(w.input, sats: w.sats, tokens: w.tokens))
+        let short = w.sats.map {
+            OpenExchangeSatsRow(outpoint: $0.outpoint, txid: $0.txid, vout: $0.vout, satoshis: $0.satoshis - 20,
+                                lockingScript: $0.lockingScript, protocolID: $0.protocolID, keyID: $0.keyID,
+                                counterparty: $0.counterparty, order: $0.order)
+        }
+        XCTAssertNil(try OpenExchangeSwapLeg.selectInputs(w.input, sats: short, tokens: w.tokens))
+        let picked = try XCTUnwrap(OpenExchangeSwapLeg.legTokens(w.input, w.tokens))
+        let plan = try OpenExchangeSwapLeg.tokenLegPlan(w.input, try OpenExchangeSwapLeg.poolUtxo(w.input).utxo, picked)
+        let need = try OpenExchangeSwapLeg.legNeed(plan, tokenInputs: picked, inputs: short.count + 1 + picked.count, satsPerKb: 100).need
+        let held = short.reduce(Int64(0)) { $0 + Int64($1.satoshis) }
+        let lack = try XCTUnwrap(try OpenExchangeSwapLeg.feeShortfall(w.input, sats: short, tokens: w.tokens, allowance: 1_301))
+        XCTAssertEqual(Int64(lack), need - held)
+        XCTAssertLessThan(BigInt(lack), w.input.leg.amountIn, "the sats lack, not the tokens in")
+        // One more sats row of exactly that covers the leg.
+        let topUp = OpenExchangeSatsRow(
+            outpoint: String(repeating: "ee", count: 32) + ".0", txid: String(repeating: "ee", count: 32), vout: 0, satoshis: lack,
+            lockingScript: short[0].lockingScript, protocolID: short[0].protocolID, keyID: short[0].keyID,
+            counterparty: short[0].counterparty, order: nil
+        )
+        XCTAssertNotNil(try OpenExchangeSwapLeg.selectInputs(w.input, sats: short + [topUp], tokens: w.tokens))
+        // Token rows short of the amount in: no sats top-up covers that.
+        let one = w.tokens[0]
+        let fewer = [OpenExchangeTokenRow(
+            outpoint: one.outpoint, txid: one.txid, vout: one.vout, satoshis: one.satoshis, lockingScript: one.lockingScript,
+            amount: w.input.leg.amountIn - 1, protocolID: one.protocolID, keyID: one.keyID, counterparty: one.counterparty, order: one.order
+        )]
+        XCTAssertNil(try OpenExchangeSwapLeg.feeShortfall(w.input, sats: short, tokens: fewer, allowance: 1_301))
+        XCTAssertNil(try OpenExchangeSwapLeg.feeShortfall(w.input, sats: short, tokens: [], allowance: 1_301))
     }
 
     /// A proven funding ancestor can meet the walk ahead of its parent (mined together, or its
@@ -491,7 +545,7 @@ final class SwapLegTests: XCTestCase {
         let long = try await OpenExchangeSwapLeg.stageSats(
             ctx, sats: 1, sym: "A very long token symbol for the swap description test", randomKeyID: next
         )
-        XCTAssertEqual(long.sats.keyID, stage["longKeyID"] as? String)
+        XCTAssertEqual(long.sats?.keyID, stage["longKeyID"] as? String)
 
         let created = await storage.created
         let want = stage["args"] as! [[String: Any]]
@@ -521,8 +575,9 @@ final class SwapLegTests: XCTestCase {
 
         // The rows are what the basket lists, for the leg to spend.
         let rows = try await OpenExchangeSwapLeg.satsHoldings(ctx)
-        XCTAssertEqual(Set(rows.map(\.outpoint)), [staged.sats.outpoint, long.sats.outpoint])
-        XCTAssertEqual(rows.first { $0.outpoint == staged.sats.outpoint }, staged.sats)
+        let stagedRows: [String] = [staged.sats?.outpoint, long.sats?.outpoint].compactMap { $0 }
+        XCTAssertEqual(Set(rows.map(\.outpoint)), Set(stagedRows))
+        XCTAssertEqual(rows.first { $0.outpoint == staged.sats?.outpoint }, staged.sats)
         let total = try await OpenExchangeSwapLeg.swapBasketSats(ctx)
         XCTAssertEqual(total, 12_346)
         let records = await storage.basketRecords("amm-swap")
