@@ -114,6 +114,35 @@ public enum OneSatLog {
         #endif
     }
 
+    /// A note, not a failure: something the SDK worked around.
+    public static func notice(_ message: String, category: String) {
+        #if canImport(os)
+        Logger(subsystem: subsystem, category: category).notice("\(message, privacy: .public)")
+        #endif
+    }
+
+    /// ``notice(_:category:)`` the first time `key` is met in this process, and never again: for
+    /// a condition met on every item of a listing.
+    public static func noticeOnce(_ key: String, _ message: @autoclosure () -> String, category: String) {
+        guard noticed.insert(key) else { return }
+        notice(message(), category: category)
+    }
+
+    private static let noticed = KeySet()
+
+    /// The keys ``noticeOnce(_:_:category:)`` has logged, behind a lock.
+    final class KeySet: @unchecked Sendable {
+        private let lock = NSLock()
+        private var keys: Set<String> = []
+
+        /// True the first time `key` is inserted.
+        func insert(_ key: String) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return keys.insert(key).inserted
+        }
+    }
+
     /// Logs `error` in full (its type and reflection, URL-free) with what the SDK was doing.
     public static func error(_ error: any Error, _ context: String, category: String) {
         Self.error("\(context): \(describe(error))", category: category)
@@ -124,39 +153,82 @@ public enum OneSatLog {
         "\(type(of: error)): \(reflecting(error))"
     }
 
-    /// `String(reflecting: error)` without any URL's query string, for a log or a diagnostic.
+    /// `String(reflecting: error)` without any URL's query string or secret value, for a log or a
+    /// diagnostic.
     ///
-    /// A URL loading error (an `NSError` in `NSURLErrorDomain`, or one that names its failing
-    /// URL) is described only by its domain, code, description and the failing host and path,
-    /// and so is each error under it: its user info carries the full URL, and some services take
-    /// an API key in the query (MNEE's `auth_token`). Anything else is reflected with every
-    /// URL's query string removed.
+    /// A URL loading error (in `NSURLErrorDomain`, or one that names its failing URL or the error
+    /// under it) is described only by its domain, code, description and the failing host and
+    /// path, and so is each error under it: its user info carries the full URL, and some services
+    /// take an API key in the query (MNEE's `auth_token`). Anything else is reflected and passed
+    /// through ``redactingQueries(_:)``.
     public static func reflecting(_ error: any Error) -> String {
-        let ns = error as NSError
-        guard isURLLoading(ns) else { return redactingQueries(String(reflecting: error)) }
-        return urlLoadingText(ns, depth: 0)
+        if let foundation = FoundationError(error), foundation.isURLLoading {
+            return urlLoadingText(foundation, depth: 0)
+        }
+        return redactingQueries(String(reflecting: error))
     }
 
-    /// `text` with the query string (and fragment) of every `scheme://` URL removed, and the
-    /// value of any `auth_token`, `access_token`, `api_key`, `apikey` or `token` parameter left
-    /// elsewhere replaced by `<redacted>`.
+    /// `String(describing: error)`, cleaned the same way as ``reflecting(_:)``: for the text of a
+    /// thrown error or a result, where the error's own words are kept.
+    public static func message(_ error: any Error) -> String {
+        if let foundation = FoundationError(error), foundation.isURLLoading {
+            return urlLoadingText(foundation, depth: 0)
+        }
+        return redactingQueries(String(describing: error))
+    }
+
+    /// `text` with the query string (and fragment) of every `scheme://` URL removed, and every
+    /// secret value left elsewhere replaced by `<redacted>`: a parameter, JSON member or reflected
+    /// property named `key`, or ending in `token`, `password`, `passwd`, `secret`, `wif`,
+    /// `authorization` or `api_key` / `apiKey` (so `mnee_token=` and `"auth_token":"…"` too),
+    /// an `Authorization:` header, and a bare `Bearer` credential.
     public static func redactingQueries(_ text: String) -> String {
         var result = text
-        // Both patterns are fixed and valid, so neither `try?` can fail.
-        if let urls = try? NSRegularExpression(pattern: ##"([A-Za-z][A-Za-z0-9+.-]*://[^\s?#"'<>]*)[?#][^\s"'<>,;)]*"##) {
-            result = urls.stringByReplacingMatches(
-                in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "$1"
-            )
-        }
-        if let params = try? NSRegularExpression(
-            pattern: ##"(?i)\b(auth_token|access_token|api_key|apikey|token)=[^&\s"'<>,;)]*"##
-        ) {
-            result = params.stringByReplacingMatches(
-                in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "$1=<redacted>"
+        for redaction in redactions {
+            result = redaction.pattern.stringByReplacingMatches(
+                in: result, range: NSRange(result.startIndex..., in: result), withTemplate: redaction.template
             )
         }
         return result
     }
+
+    /// One compiled pattern and its replacement. `NSRegularExpression` is immutable and safe to
+    /// share across threads, which the SDK does not declare on every platform.
+    struct Redaction: @unchecked Sendable {
+        let pattern: NSRegularExpression
+        let template: String
+    }
+
+    /// A parameter or member name whose value is a secret.
+    private static let secretName =
+        #"(?:[A-Za-z0-9_.-]*(?:token|password|passwd|secret|wif|authorization|(?:api|access|secret|priv|private)[_-]?key)|key)"#
+    /// Not part of a longer name: `monkey=` and `xkey=` are not `key=`.
+    private static let nameStart = #"(?<![A-Za-z0-9_.-])"#
+
+    /// The redactions as pattern and template, applied in order.
+    private static let redactionSources: [(pattern: String, template: String)] = [
+        // A URL's query and fragment, whatever its values hold (`,`, `;` and `)` included).
+        (##"([A-Za-z][A-Za-z0-9+.-]*://[^\s?#"'<>]*)[?#][^\s"'<>]*"##, "$1"),
+        // A quoted value: JSON (`"auth_token":"…"`, escaped or not), a reflected property
+        // (`apiKey: "…"`, `token: Optional("…")`), or a quoted assignment (`password='…'`).
+        (#"(?i)\#(nameStart)(\#(secretName))(\\?["']?\s*[:=]\s*(?:Optional\()?)(\\?["'])(?:\\.|[^\\])*?\3"#, "$1$2$3<redacted>$3"),
+        // An authorization header, with or without its scheme.
+        (#"(?i)\#(nameStart)((?:proxy-)?authorization\s*[:=]\s*)(?:(?:bearer|basic|token)\s+)?[^\s"'<>]+"#, "$1<redacted>"),
+        // A query or form parameter (`key=`, `mnee_token=`), up to the next `&` or space.
+        (#"(?i)\#(nameStart)(\#(secretName))=[^&\s"'<>]+"#, "$1=<redacted>"),
+        // A bare bearer credential.
+        (#"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}"#, "$1 <redacted>"),
+    ]
+
+    /// The redactions, compiled once. Every pattern is fixed; a test checks that all of them
+    /// compile.
+    static let redactions: [Redaction] = redactionSources.compactMap { source in
+        guard let pattern = try? NSRegularExpression(pattern: source.pattern) else { return nil }
+        return Redaction(pattern: pattern, template: source.template)
+    }
+
+    /// How many redactions there are to compile.
+    static var redactionCount: Int { redactionSources.count }
 
     /// `url` without its query string, user, password or fragment; nil when no such URL can be
     /// built, so a caller never falls back to the URL with its query.
@@ -169,24 +241,69 @@ public enum OneSatLog {
         return components.url
     }
 
-    static let failingURLKey = "NSErrorFailingURLKey"
-    static let failingURLStringKey = "NSErrorFailingURLStringKey"
+    public static let failingURLKey = "NSErrorFailingURLKey"
+    public static let failingURLStringKey = "NSErrorFailingURLStringKey"
 
-    private static func isURLLoading(_ ns: NSError) -> Bool {
-        ns.domain == "NSURLErrorDomain" || ns.userInfo[failingURLKey] != nil || ns.userInfo[failingURLStringKey] != nil
+    /// An `NSError` instance or a `CustomNSError` value such as `URLError`, read the same way on
+    /// every platform. `error as NSError` does not compile for `any Error` on Linux
+    /// (swift-corelibs-foundation), and there an `NSError` instance does not cast to `URLError`.
+    /// A plain Swift error has no user info of its own and is not one.
+    public struct FoundationError {
+        public let domain: String
+        public let code: Int
+        public let localizedDescription: String
+        public let userInfo: [String: Any]
+
+        public init?(_ error: any Error) {
+            if type(of: error) is NSError.Type, let nsError = (error as Any) as? NSError {
+                domain = nsError.domain
+                code = nsError.code
+                userInfo = nsError.userInfo
+            } else if let custom = error as? any CustomNSError {
+                domain = type(of: custom).errorDomain
+                code = custom.errorCode
+                userInfo = custom.errorUserInfo
+            } else {
+                return nil
+            }
+            localizedDescription = error.localizedDescription
+        }
+
+        /// The failing URL, from either user-info key.
+        public var failingURL: URL? {
+            (userInfo[OneSatLog.failingURLKey] as? URL)
+                ?? (userInfo[OneSatLog.failingURLStringKey] as? String).flatMap { URL(string: $0) }
+        }
+
+        /// The error under this one.
+        public var underlying: (any Error)? {
+            userInfo[NSUnderlyingErrorKey] as? any Error
+        }
+
+        /// In the URL domain, or carrying a failing URL or an error under it, either of which can
+        /// hold a full URL.
+        var isURLLoading: Bool {
+            domain == "NSURLErrorDomain"
+                || userInfo[OneSatLog.failingURLKey] != nil || userInfo[OneSatLog.failingURLStringKey] != nil
+                || userInfo[NSUnderlyingErrorKey] != nil
+        }
     }
 
-    private static func urlLoadingText(_ ns: NSError, depth: Int) -> String {
-        var text = "\(ns.domain) \(ns.code): \(redactingQueries(ns.localizedDescription))"
-        let failing = (ns.userInfo[failingURLKey] as? URL)
-            ?? (ns.userInfo[failingURLStringKey] as? String).flatMap { URL(string: $0) }
-        if let failing {
+    private static func urlLoadingText(_ error: FoundationError, depth: Int) -> String {
+        var text = "\(error.domain) \(error.code): \(redactingQueries(error.localizedDescription))"
+        if let failing = error.failingURL {
             text += " (\(failing.host ?? "")\(failing.path))"
         }
         // Each error under it is described the same way, never reflected: its user info may hold
         // the URL under a key not named here.
-        if depth < 4, let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
-            text += "; underlying: \(urlLoadingText(underlying, depth: depth + 1))"
+        if let underlying = error.underlying {
+            let inner: String
+            if let foundation = FoundationError(underlying) {
+                inner = depth < 4 ? urlLoadingText(foundation, depth: depth + 1) : "\(foundation.domain) \(foundation.code)"
+            } else {
+                inner = redactingQueries(String(reflecting: underlying))
+            }
+            text += "; underlying: \(inner)"
         }
         return text
     }

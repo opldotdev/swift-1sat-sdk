@@ -28,7 +28,7 @@ final class URLSessionOneSatTransportTests: XCTestCase {
         let clean = URLSessionOneSatTransport.urlFree(raw)
         XCTAssertEqual(clean.code, .notConnectedToInternet)
         XCTAssertEqual(clean.localizedDescription, "The Internet connection appears to be offline.")
-        let info = (clean as NSError).userInfo
+        let info = clean.errorUserInfo
         XCTAssertEqual(info["NSErrorFailingURLStringKey"] as? String, "https://proxy-api.mnee.net/v1/tx/abc")
         XCTAssertFalse(String(reflecting: clean).contains("SECRET"), String(reflecting: clean))
         XCTAssertFalse(String(describing: info).contains("SECRET"))

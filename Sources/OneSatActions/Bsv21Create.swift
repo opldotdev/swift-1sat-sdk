@@ -358,7 +358,7 @@ extension Tokens {
         OneSatLog.error(error, "overlay submit failed after the action succeeded", category: "OneSatActions")
         if let error = error as? OneSatActionError { return error.wireMessage }
         if let error = error as? LocalizedError, let description = error.errorDescription { return description }
-        return String(describing: error)
+        return OneSatLog.message(error)
     }
 
     /// `executeBsv21Deploy` plus the caller's discovery submit.

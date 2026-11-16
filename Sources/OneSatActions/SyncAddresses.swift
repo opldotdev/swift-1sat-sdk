@@ -169,7 +169,7 @@ public enum SyncAddresses {
                 processed += 1
             } catch {
                 OneSatLog.error(error, "deposit sync: transaction failed", category: "OneSatActions")
-                failures.append(Failure(txid: txid, message: String(describing: error)))
+                failures.append(Failure(txid: txid, message: OneSatLog.message(error)))
             }
         }
 
@@ -187,7 +187,7 @@ public enum SyncAddresses {
             _ = try await SweepDeposit.execute(ctx)
         } catch {
             OneSatLog.error(error, "deposit sync: sweep failed", category: "OneSatActions")
-            sweepError = String(describing: error)
+            sweepError = OneSatLog.message(error)
         }
 
         return Result(

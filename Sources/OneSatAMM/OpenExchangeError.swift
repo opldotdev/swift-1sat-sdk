@@ -82,7 +82,7 @@ public enum OpenExchangeError: Error, Equatable, Sendable, LocalizedError, Custo
     static func errorText(_ error: Error) -> String {
         if let known = error as? OpenExchangeError { return known.message }
         if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty { return localized }
-        return String(describing: error)
+        return OneSatLog.message(error)
     }
 }
 

@@ -22,9 +22,10 @@ public struct PaymailInboxError: Error, Equatable, Sendable, LocalizedError, Cus
     /// The error behind `reason`, its type and reflection, for the log. Not part of `==`.
     public let underlying: String?
 
-    /// Not logged here: an unreadable message stays in the box and is met again on every sync,
-    /// so the caller that walks the box logs once per sync, with this error's
-    /// `debugDescription`.
+    /// Not logged here: an unreadable message stays in the box and is met again on every sync.
+    /// The SDK has no sync loop of its own; the wallet app's `IncomingPaymentsService` collects
+    /// these errors and logs one line per sync with each one's full `debugDescription`.
+    /// `underlying` is ``OneSatLog/describe(_:)``, so no URL query or secret value reaches it.
     public init(_ reason: String, underlying: (any Error)? = nil) {
         self.reason = reason
         self.underlying = underlying.map { OneSatLog.describe($0) }

@@ -139,7 +139,7 @@ public enum DeployOrdfsDir {
             return Response(error: error.message)
         } catch {
             OneSatLog.error(error, "ORDFS directory deploy failed", category: "OneSatActions")
-            return Response(error: String(describing: error))
+            return Response(error: OneSatLog.message(error))
         }
     }
 
