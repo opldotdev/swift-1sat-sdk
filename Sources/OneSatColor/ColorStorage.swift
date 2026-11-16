@@ -33,14 +33,6 @@ extension StorageClient: ColorWalletStorage {
 public enum ColorBEEF {
     static let limits = WalletBEEFLimits.standard
 
-    /// The last transaction of a BEEF, which is the subject of an overlay answer.
-    static func subject(of beef: BEEF) throws -> Transaction {
-        guard let transaction = beef.transactions.last?.transaction else {
-            throw ColorError.overlay("BEEF has no transaction")
-        }
-        return transaction
-    }
-
     /// `toBinaryAtomic(txid)`: the subject with exactly its ancestry, down to proven or
     /// transaction-ID-only records, and the BUMPs those use.
     public static func atomic(_ txid: TransactionID, in beef: BEEF) throws -> AtomicBEEF {
