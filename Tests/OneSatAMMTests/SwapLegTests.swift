@@ -367,6 +367,49 @@ final class SwapLegTests: XCTestCase {
         XCTAssertEqual(try ids(kept), try ids([.raw(other), .raw(parent), .raw(child)]))
     }
 
+    /// The whole funding BEEF, not just its order: a stage spends a proven child and that child's
+    /// unproven parent, so the walk meets the child (proven, its inputs not walked) before the
+    /// parent. The BEEF it writes lists the parent first, serializes, and re-parses strictly.
+    func testAFundingBEEFWithAProvenChildAheadOfItsParentReparses() throws {
+        func tx(spending parents: [Transaction], tag: UInt32) throws -> Transaction {
+            var t = Transaction(version: 1, lockTime: tag)
+            let previous = try parents.isEmpty
+                ? [Outpoint(transactionID: try TransactionID(displayHex: String(repeating: "11", count: 32)), outputIndex: tag)]
+                : parents.map { Outpoint(transactionID: try $0.transactionID(limits: OpenExchangeSwapLeg.txLimits), outputIndex: 0) }
+            t.inputs = try previous.map { TransactionInput(previousOutput: $0, unlockingScript: try AMMPoolCall.script([])) }
+            t.outputs = [TransactionOutput(satoshis: 1_000, lockingScript: try AMMPoolCall.script(AMMPoolCall.p2pkh(OpenExchangeSwapLeg.zeroPkh)))]
+            return t
+        }
+        let parent = try tx(spending: [], tag: 1)
+        let child = try tx(spending: [parent], tag: 2)
+        let stage = try tx(spending: [child, parent], tag: 3)
+        let childID = try child.transactionID(limits: OpenExchangeSwapLeg.txLimits)
+        let path = try MerklePath(blockHeight: 80, levels: [[.hash(offset: 0, hash: try Hash256(childID.wireBytes), isTransactionID: true)]])
+        let held = try BEEF(
+            merklePaths: [path],
+            transactions: [.raw(parent), .rawWithMerklePath(transaction: child, merklePathIndex: 0), .raw(stage)],
+            limits: OpenExchangeSwapLeg.beefLimits
+        )
+        let stageTxid = try stage.transactionID(limits: OpenExchangeSwapLeg.txLimits).displayHex
+        let outside = String(repeating: "11", count: 32)
+        func ids(_ beef: BEEF) throws -> [String] {
+            try beef.transactions.compactMap { try $0.transaction?.transactionID(limits: OpenExchangeSwapLeg.txLimits).displayHex }
+        }
+        let expected = try [parent, child, stage].map { try $0.transactionID(limits: OpenExchangeSwapLeg.txLimits).displayHex }
+
+        let funding = try OpenExchangeSwapLeg.fundingBEEF(held, fundingTxid: stageTxid, sources: [], poolTxid: outside, admitted: { _, _ in false })
+        let atomic = try AtomicBEEF(bytes: funding, limits: OpenExchangeSwapLeg.beefLimits)
+        XCTAssertEqual(atomic.subjectTransactionID.displayHex, stageTxid)
+        XCTAssertEqual(try ids(atomic.beef), expected)
+        XCTAssertEqual(atomic.beef.merklePaths.count, 1)
+        XCTAssertEqual(try atomic.serialized(limits: OpenExchangeSwapLeg.beefLimits), funding)
+
+        let topic = try OpenExchangeSwapLeg.topicBEEF(held, subjects: [stageTxid], admitted: { _, _ in false })
+        let reread = try BEEF(bytes: topic, limits: OpenExchangeSwapLeg.beefLimits)
+        XCTAssertEqual(try ids(reread), expected)
+        XCTAssertEqual(try reread.serialized(limits: OpenExchangeSwapLeg.beefLimits), topic)
+    }
+
     func testALegPricedOnAnotherOutpointIsRefused() async throws {
         let c = SwapFixture.legs[0]
         let w = try await LegWorld(c)

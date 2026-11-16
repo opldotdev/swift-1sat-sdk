@@ -79,8 +79,9 @@ public enum OpenExchangeSwapEvent: Equatable, Sendable {
     /// What the basket lacked was staged: the staging transaction, the sats and tokens staged,
     /// the page's submit of the tokens in words, and the submit's and the filing's failures.
     case staged(txid: String, sats: UInt64, tokens: BigInt, submitted: String, errors: [String])
-    /// A leg's fee shortfall could not be staged: the sats asked for and the wallet's error, in
-    /// full. The swap stops `fees` and moves its rows back.
+    /// A leg's fee shortfall could not be staged, or was staged and the basket still did not
+    /// cover the leg: the sats asked for and why, the wallet's error in full. The swap stops
+    /// `fees` and moves its rows back.
     case stageFailed(sats: UInt64, error: String)
     /// A leg's relay (attempt 1, or 2 when it is sent once more after no answer) and its outcome,
     /// the host's or validator's reason with it.
@@ -99,7 +100,8 @@ extension OpenExchange {
     /// (`cancelled`). `floor` is the least total amount out the swap accepts (default: the
     /// quote's `minAmountOut`, as TS). `onEvent` is told each staging, relay, exclusion, pass and
     /// move back, for a log. The sats spent can exceed the quote's stage (`amount + feeSats` on a
-    /// buy, `feeSats` on a sell) by up to `legMinerFeeSats` for each leg attempted (see
+    /// buy, `feeSats` on a sell) by up to `legMinerFeeSats` for each leg attempted, plus the
+    /// miner fee (about 20 sats) of each such top-up, its own wallet transaction (see
     /// `OpenExchangeQuote.stage`).
     public func executeSwap(
         _ ctx: OneColorContext, quote: OpenExchangeQuote, sym: String = "token",
@@ -274,8 +276,9 @@ extension OpenExchange {
                     poolOutputIndex: poolOutput.outputIndex, commissionPkh: commissionPkh, satsPerKb: feeRate
                 )
                 // A sell's leg spends token rows and sats; the top-up below only ever stages sats.
-                let tokenRows = buy ? [] : try await OpenExchangeSwapLeg.tokenHoldings(ctx, tokenId: tokenId)
+                // The sats rows first, then the token rows (client.ts:1238).
                 var holdings = try await OpenExchangeSwapLeg.satsHoldings(ctx)
+                let tokenRows = buy ? [] : try await OpenExchangeSwapLeg.tokenHoldings(ctx, tokenId: tokenId)
                 var selected = try OpenExchangeSwapLeg.selectInputs(input, sats: holdings, tokens: tokenRows)
                 // Addition to TS: the quote stages one leg's miner fee as a ~13 kB estimate, and a
                 // leg over a pool that pays its LP fee out (0.55) is ~13.3 kB, so a one-leg swap can
@@ -297,6 +300,9 @@ extension OpenExchange {
                         event(.staged(txid: staged.txid, sats: lack, tokens: 0, submitted: staged.submitted, errors: staged.errors))
                         holdings = try await OpenExchangeSwapLeg.satsHoldings(ctx)
                         selected = try OpenExchangeSwapLeg.selectInputs(input, sats: holdings, tokens: tokenRows)
+                        if selected == nil {
+                            event(.stageFailed(sats: lack, error: "staged \(staged.txid) but the basket still does not cover the leg"))
+                        }
                     }
                 }
                 guard let inputs = selected else {

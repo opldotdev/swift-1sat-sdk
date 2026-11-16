@@ -599,6 +599,67 @@ final class SwapRecoveryTests: XCTestCase {
         XCTAssertEqual(posts, 1)
     }
 
+    /// A top-up the wallet stages but whose row the basket still does not show: the leg is not
+    /// sent, `onEvent` says the staged txid did not cover it, and the swap stops `fees`.
+    func testATopUpStagedButNotInTheBasketStopsFees() async throws {
+        let h = try await Host(SwapFixture.legs[0])
+        await h.w.storage.unfile(create: 1)
+        let quote = try h.quote(25_000)
+        let log = ProgressLog()
+        let events = EventLog()
+        let result = try await h.run(log, quote: quote, events: events)
+        XCTAssertEqual(result.stop, .fees, "\(events.all)")
+        XCTAssertEqual(log.phases.filter { $0 == "staging" }.count, 2)
+        let created = await h.w.storage.created
+        XCTAssertEqual(created.map(\.description), [
+            "AMM swap: sats into the swap basket", "AMM swap: sats into the swap basket", "AMM move back: TST sats",
+        ])
+        let topUp = try XCTUnwrap(created[1].outputs?.first?.satoshis)
+        let staged = events.all.compactMap { if case let .staged(txid, sats, _, _, _) = $0 { (txid, sats) } else { nil } }
+        XCTAssertEqual(staged.count, 2, "\(events.all)")
+        XCTAssertEqual(staged.last.map { BigInt($0.1) }, BigInt(topUp))
+        let failed = events.all.compactMap { if case let .stageFailed(sats, error) = $0 { (sats, error) } else { nil } }
+        XCTAssertEqual(failed.map(\.0), [topUp])
+        XCTAssertEqual(failed.map(\.1), ["staged \(staged.last?.0 ?? "") but the basket still does not cover the leg"])
+        let posts = await h.posts
+        XCTAssertEqual(posts, 0)
+    }
+
+    /// A shortfall just over the allowance is not topped up: a quote priced at 1 sat/kB stages
+    /// ~13 sats of miner fee where the leg at 100 sats/kB needs ~1,300 more, so the rows lack just
+    /// over `legMinerFeeSats`. One staging, nothing sent, stop `fees`.
+    func testAShortfallJustOverTheAllowanceStopsFeesWithOneStaging() async throws {
+        let h = try await Host(SwapFixture.legs[0])
+        let quote = try OpenExchangeQuotes.quoteSwap(
+            OpenExchangeQuoteRequest(tokenId: SwapFixture.tokenId, side: .buy, amountIn: 25_000, maxSlippageBps: 100, maxSources: 1),
+            held: try OpenExchangePools.read(JSONValue.parse(Array(h.pools.utf8))), sym: "TST", dec: 0, feeRateSatsPerKb: 1
+        )
+        XCTAssertEqual(quote.legMinerFeeSats, 13)
+        // The same leg quoted at 100 sats/kB stages 1,287 sats more and then tops up `usualTopUp`:
+        // here the rows lack both, just over that quote's 1,300-sat allowance.
+        let usual = try await Host(SwapFixture.legs[0])
+        await usual.http.json(usual.swapURL, #"{"ok":false,"reason":"below_minimum"}"#)
+        let full = try usual.quote(25_000)
+        _ = try await usual.run(ProgressLog(), quote: full)
+        let usualCreated = await usual.w.storage.created
+        let usualTopUp = BigInt(try XCTUnwrap(usualCreated[1].outputs?.first?.satoshis))
+        XCTAssertEqual(full.legs, quote.legs)
+        XCTAssertEqual(full.stage.feeSats - quote.stage.feeSats, full.legMinerFeeSats - quote.legMinerFeeSats)
+        let lack = usualTopUp + full.legMinerFeeSats - quote.legMinerFeeSats
+        XCTAssertGreaterThan(lack, full.legMinerFeeSats)
+        XCTAssertLessThan(lack, full.legMinerFeeSats + 100)
+        let log = ProgressLog()
+        let events = EventLog()
+        let result = try await h.run(log, quote: quote, events: events)
+        XCTAssertEqual(result.stop, .fees, "\(events.all)")
+        XCTAssertEqual(log.phases.filter { $0 == "staging" }.count, 1)
+        let created = await h.w.storage.created
+        XCTAssertEqual(created.map(\.description), ["AMM swap: sats into the swap basket", "AMM move back: TST sats"])
+        XCTAssertTrue(events.all.allSatisfy { if case .stageFailed = $0 { false } else { true } }, "\(events.all)")
+        let posts = await h.posts
+        XCTAssertEqual(posts, 0)
+    }
+
     /// A later leg's fee shortfall that the wallet cannot stage (a spend-everything buy) stops the
     /// swap `fees`: the wallet's error goes to `onEvent`, the rows go back, and the leg already
     /// filled is in the result. The vectors' `topUp`: 80,000 sats over pool_deploy and a smaller

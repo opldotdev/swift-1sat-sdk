@@ -785,7 +785,7 @@ public enum OpenExchangeSwapLeg {
         var out: [BEEFTransaction] = []
         while !pending.isEmpty {
             guard let next = pending.firstIndex(where: { $0.parents.intersection(ids).isSubset(of: placed) }) else {
-                throw fail("the funding BEEF's transactions spend each other in a cycle")
+                throw fail("the BEEF's transactions spend each other in a cycle")
             }
             let item = pending.remove(at: next)
             placed.insert(item.id)

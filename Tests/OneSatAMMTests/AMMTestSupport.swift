@@ -82,6 +82,7 @@ actor MemoryStorage: ColorWalletStorage {
         let reserved: [String]
         let anchorVout: UInt32?
         var requested: [WalletCreateActionOutput] = []
+        var unfiled = false
     }
 
     static let fundingPrefix = Data("funding-prefix".utf8).base64EncodedString()
@@ -111,6 +112,9 @@ actor MemoryStorage: ColorWalletStorage {
     var noSendSupported = true
     /// When set, a createAction with this description throws (a wallet that cannot fund it).
     var refusedDescription: String?
+    /// When set, the createAction at this index of `created` is processed but its basket outputs
+    /// are not filed (a wallet whose listing does not show what it just made).
+    var unfiledCreate: Int?
     /// What listActions answers, and what it was asked.
     var actions: [WalletAction] = []
     var actionsError: String?
@@ -138,6 +142,7 @@ actor MemoryStorage: ColorWalletStorage {
     func setNoSendSupported(_ value: Bool) { noSendSupported = value }
     func setInternalizeAccepts(_ value: Bool) { internalizeAccepts = value }
     func refuse(description: String?) { refusedDescription = description }
+    func unfile(create index: Int?) { unfiledCreate = index }
     func setInternalizeError(_ value: String?) { internalizeError = value }
     func setFilesInternalized(_ value: Bool) { filesInternalized = value }
     func setActions(_ value: [WalletAction], error: String? = nil) {
@@ -246,7 +251,8 @@ actor MemoryStorage: ColorWalletStorage {
             reference: reference, version: 1, lockTime: 0, outputs: outputs, inputs: inputs,
             inputBEEF: try inputBEEF(roots), derivationPrefix: Self.fundingPrefix
         )
-        pending[reference] = Pending(funded: funded, reserved: reserved, anchorVout: nil, requested: requested)
+        pending[reference] = Pending(funded: funded, reserved: reserved, anchorVout: nil, requested: requested,
+                                     unfiled: unfiledCreate == created.count - 1)
         return funded
     }
 
@@ -372,7 +378,7 @@ actor MemoryStorage: ColorWalletStorage {
         let spent = Set(transaction.inputs.map(\.previousOutput.description))
         records.removeAll { spent.contains($0.outpoint.description) }
         for (index, output) in action.requested.enumerated() {
-            guard let basket = output.basket else { continue }
+            guard let basket = output.basket, !action.unfiled else { continue }
             records.append(Record(outpoint: Outpoint(transactionID: id, outputIndex: UInt32(index)), satoshis: output.satoshis,
                                   script: output.lockingScript, basket: basket, customInstructions: output.customInstructions,
                                   tags: output.tags))
