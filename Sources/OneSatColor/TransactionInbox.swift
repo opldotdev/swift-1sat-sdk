@@ -7,6 +7,7 @@ import BSVWallet
 import ToolboxActions
 import OneSatCBOR
 import OneSatMetanet
+import OneSatSweep
 
 /// A message internalized and acknowledged.
 public struct TransactionInboxReceipt: Equatable, Sendable {
@@ -69,6 +70,7 @@ public enum TransactionInbox {
         do {
             messages = try await ctx.relay.list(host: host, messageBox: OneColorConstants.transactionDeliveryBox)
         } catch {
+            OneSatLog.error(error, "1Color inbox sync failed", category: "OneSatColor")
             result.error = error.localizedDescription
             return result
         }
@@ -78,6 +80,7 @@ public enum TransactionInbox {
                 result.received.append(try await handle(ctx, message: message, overlayFor: overlayFor))
                 acknowledged.append(message.messageID)
             } catch {
+                OneSatLog.error(error, "1Color inbox: message skipped", category: "OneSatColor")
                 result.skipped.append(TransactionInboxSkip(messageID: message.messageID, reason: error.localizedDescription))
             }
         }
@@ -85,6 +88,7 @@ public enum TransactionInbox {
             do {
                 try await ctx.relay.acknowledge(host: host, messageIDs: acknowledged)
             } catch {
+                OneSatLog.error(error, "1Color inbox: acknowledge failed", category: "OneSatColor")
                 result.error = "acknowledge-failed: \(error.localizedDescription)"
             }
         }

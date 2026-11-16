@@ -83,6 +83,34 @@ final class OwnerSyncClientTests: XCTestCase {
             XCTFail("unexpected error \(error)")
         }
     }
+
+    func test_httpFailureCarriesTheIndexerReason() async {
+        let client = OwnerSyncClient(
+            baseURL: URL(string: "https://example.invalid")!,
+            http: StubHTTP(status: 429, body: Array(#"{"error":"too many requests"}"#.utf8))
+        )
+        do {
+            _ = try await client.syncOutputs(owners: ["1abc"], from: nil)
+            XCTFail("HTTP 429 must throw")
+        } catch let error as OwnerSyncError {
+            XCTAssertEqual(
+                error.errorDescription,
+                "Syncing with the 1Sat indexer failed. The 1Sat indexer could not answer (HTTP 429): too many requests. Try again in a minute."
+            )
+            XCTAssertTrue(String(reflecting: error).contains("GET example.invalid/1sat/owner/sync"))
+            XCTAssertFalse(String(reflecting: error).contains("owner=1abc"))
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+    }
+
+    func test_serverEventDescriptionIsOneLine() {
+        XCTAssertEqual(
+            OwnerSyncError.server("indexer unavailable\nstack trace").errorDescription,
+            "The 1Sat indexer stopped the sync: indexer unavailable"
+        )
+        XCTAssertEqual(OwnerSyncError.server("").errorDescription, "The 1Sat indexer stopped the sync with an error.")
+    }
 }
 
 private struct StubHTTP: HTTPGet {

@@ -1,5 +1,6 @@
 import Foundation
 import BSVWallet
+import OneSatSweep
 
 /// Best-effort plaintext view of WalletPermissionsManager-encrypted custom instructions.
 public enum WalletMetadataCI {
@@ -47,6 +48,8 @@ public enum WalletMetadataCI {
                     )
                 )
             } catch {
+                // Plaintext custom instructions are read as they are; a failed decrypt keeps them raw.
+                OneSatLog.error(error, "wallet metadata: decrypting custom instructions", category: "OneSatActions")
                 return rawFields(current)
             }
             guard result.plaintext.count <= limits.maximumPayloadByteCount else {

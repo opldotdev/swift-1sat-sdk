@@ -1,5 +1,6 @@
 import Foundation
 import BigInt
+import OneSatSweep
 
 // The exchange's public market reads (skein-amm cc146be web/ui/src/lib/overlay.ts, the 0.55.1
 // client): a token's pools (P2), its stats (H3) and every enabled token's (H4); and discovery's
@@ -277,7 +278,12 @@ extension OpenExchange {
 
     /// `statsAll().catch(() => null)`.
     private func statsOrNil() async -> [OpenExchangeTokenStats]? {
-        do { return try await statsAll() } catch { return nil }
+        do {
+            return try await statsAll()
+        } catch {
+            OneSatLog.error(error, "Open Exchange: host-wide stats (tokens shown unpriced)", category: Self.logCategory)
+            return nil
+        }
     }
 
     /// Discovery's token search (1sat-amm `api.discoverySearch`): tokens whose symbol or id
@@ -359,6 +365,11 @@ extension OpenExchange {
 
     /// `api.discoverySearch(...).catch(() => [])`.
     private func discoveryHits(_ query: String, limit: Int) async -> [OpenExchangeDiscoveryRow] {
-        do { return try await discoverySearch(query, limit: limit) } catch { return [] }
+        do {
+            return try await discoverySearch(query, limit: limit)
+        } catch {
+            OneSatLog.error(error, "Open Exchange: discovery search (local hits only)", category: Self.logCategory)
+            return []
+        }
     }
 }

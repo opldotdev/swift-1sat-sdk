@@ -1,4 +1,5 @@
 import Foundation
+import OneSatSweep
 import ToolboxServices
 
 /// One output from `GET /1sat/owner/sync`. Matches `@1sat/types` `SyncOutput`.
@@ -18,11 +19,50 @@ public protocol OwnerSyncSource: Sendable {
     func syncOutputs(owners: [String], from: Double?) async throws -> [SyncOutput]
 }
 
-public enum OwnerSyncError: Error, Equatable, Sendable {
-    case httpFailure(statusCode: Int)
+public enum OwnerSyncError: Error, Equatable, Sendable, LocalizedError, CustomDebugStringConvertible {
+    /// `detail` carries the host, path, server reason and body; it does not take part in `==`.
+    case httpFailure(statusCode: Int, detail: OneSatHTTPFailure? = nil)
     case server(String)
     case unreadableOutput
     case invalidURL
+
+    public var errorDescription: String? {
+        switch self {
+        case .httpFailure(_, let detail?):
+            "Syncing with the 1Sat indexer failed. \(detail.userMessage)"
+        case .httpFailure(let status, nil):
+            "Syncing with the 1Sat indexer failed (HTTP \(status))."
+        case .server(let message):
+            OneSatHTTPFailure.oneLine(message).map { "The 1Sat indexer stopped the sync: \($0)" }
+                ?? "The 1Sat indexer stopped the sync with an error."
+        case .unreadableOutput:
+            "The 1Sat indexer sent a sync entry this wallet could not read."
+        case .invalidURL:
+            "The 1Sat indexer address is not a valid URL."
+        }
+    }
+
+    public var debugDescription: String {
+        switch self {
+        case .httpFailure(let status, let detail):
+            "OwnerSyncError.httpFailure(\(status)): \(detail?.debugDescription ?? "no detail")"
+        case .server(let message):
+            "OwnerSyncError.server(\(OneSatHTTPFailure.logText(Array(message.utf8))))"
+        case .unreadableOutput:
+            "OwnerSyncError.unreadableOutput"
+        case .invalidURL:
+            "OwnerSyncError.invalidURL"
+        }
+    }
+
+    public static func == (lhs: OwnerSyncError, rhs: OwnerSyncError) -> Bool {
+        switch (lhs, rhs) {
+        case (.httpFailure(let a, _), .httpFailure(let b, _)): a == b
+        case (.server(let a), .server(let b)): a == b
+        case (.unreadableOutput, .unreadableOutput), (.invalidURL, .invalidURL): true
+        default: false
+        }
+    }
 }
 
 /// `OwnerClient.sync` from `@1sat/client`. Fetches the SSE body through `HTTPGet`.
@@ -55,9 +95,21 @@ public struct OwnerSyncClient: OwnerSyncSource {
 
         let (status, body) = try await http.get(url)
         guard (200..<300).contains(status) else {
-            throw OwnerSyncError.httpFailure(statusCode: status)
+            let detail = OneSatHTTPFailure(
+                service: "the 1Sat indexer", operation: "OwnerSyncClient.syncOutputs", method: "GET", url: url,
+                statusCode: status, body: body
+            )
+            detail.log(category: "OneSatActions")
+            throw OwnerSyncError.httpFailure(statusCode: status, detail: detail)
         }
-        return try Self.parse(sse: body)
+        do {
+            return try Self.parse(sse: body)
+        } catch {
+            OneSatLog.unreadable(
+                "OwnerSyncClient.syncOutputs", method: "GET", url: url, body: body, error: error, category: "OneSatActions"
+            )
+            throw error
+        }
     }
 
     /// `event: error` throws, `event: done` stops, `event: sync` is skipped.
@@ -81,11 +133,12 @@ public struct OwnerSyncClient: OwnerSyncSource {
             if event == "error" { throw OwnerSyncError.server(data) }
             if event == "sync" { continue }
             guard event == nil, !data.isEmpty else { continue }
-            guard let decoded = try? JSONDecoder().decode(SyncOutput.self, from: Data(data.utf8))
-            else {
+            do {
+                outputs.append(try JSONDecoder().decode(SyncOutput.self, from: Data(data.utf8)))
+            } catch {
+                OneSatLog.error(error, "OwnerSyncClient: sync entry \(OneSatHTTPFailure.logText(Array(data.utf8)))", category: "OneSatActions")
                 throw OwnerSyncError.unreadableOutput
             }
-            outputs.append(decoded)
         }
         return outputs
     }

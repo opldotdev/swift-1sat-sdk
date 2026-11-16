@@ -3,11 +3,12 @@ import Foundation
 import FoundationNetworking
 #endif
 import ToolboxAuth
+import OneSatSweep
 
 /// What an Open Exchange call threw: `ClientError` of `@dcasegr/amm-client` 0.55.1 (errors.ts:36)
 /// for the kinds a paid enable meets, and `failed` for what TS leaves a plain `Error`. `message`
 /// is the TS text.
-public enum OpenExchangeError: Error, Equatable, Sendable, LocalizedError {
+public enum OpenExchangeError: Error, Equatable, Sendable, LocalizedError, CustomDebugStringConvertible {
     /// `refused`: the exchange (or the wallet, before anything was sent) said no. `code` is the
     /// exchange's code when it gave one; `message` leads with it, as `"<code>: <description>"`.
     case refused(code: String?, message: String)
@@ -30,6 +31,16 @@ public enum OpenExchangeError: Error, Equatable, Sendable, LocalizedError {
     }
 
     public var errorDescription: String? { message }
+
+    public var debugDescription: String {
+        switch self {
+        case .refused(let code, let message): "OpenExchangeError.refused(code: \(code ?? "nil")): \(message)"
+        case .network(let message): "OpenExchangeError.network: \(message)"
+        case .userRejected(let message): "OpenExchangeError.userRejected: \(message)"
+        case .belowMinimum(let message): "OpenExchangeError.belowMinimum: \(message)"
+        case .failed(let message): "OpenExchangeError.failed: \(message)"
+        }
+    }
 
     /// The exchange's refusal code, when it is one the paid enable names.
     public var refusal: OpenExchangeRefusal? {
@@ -56,6 +67,8 @@ public enum OpenExchangeError: Error, Equatable, Sendable, LocalizedError {
     /// `toClientError` (errors.ts:107) for a public call's error: its kind, else `failed`.
     static func of(_ error: Error) -> OpenExchangeError {
         if let known = error as? OpenExchangeError { return known }
+        // The kind keeps only the error's words; its type and detail go to the log here.
+        OneSatLog.error(error, "Open Exchange call failed", category: "OneSatAMM")
         return kinded(error) ?? .failed(errorText(error))
     }
 

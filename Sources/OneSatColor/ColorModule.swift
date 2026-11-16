@@ -6,6 +6,7 @@ import BSVWallet
 import BSVInterpreter
 import ToolboxActions
 import OneSatTemplates
+import OneSatSweep
 
 /// The parts of `@bopen-io/color-permission-module` 0.2.3 (no processing profiles) that a Swift
 /// wallet runs itself, since it has no permissions manager in front of storage: input selection
@@ -298,7 +299,11 @@ enum ColorModule {
             let topics = try topics(of: held, in: atomic.beef)
             guard !topics.isEmpty else { continue }
             // A refused resubmission leaves the output unlisted; the spendability check decides.
-            _ = try? await overlay.submit(topics: topics, beef: bytes)
+            do {
+                _ = try await overlay.submit(topics: topics, beef: bytes)
+            } catch {
+                OneSatLog.error(error, "1Color: resubmitting \(txid) to the overlay", category: "OneSatColor")
+            }
         }
         return try await spendable(overlay, assetID: assetID, outputs: outputs)
     }
@@ -484,6 +489,7 @@ enum ColorModule {
                     )
                 )
             } catch {
+                OneSatLog.error(error, "1Color custody: verifying input \(index)", category: "OneSatColor")
                 throw ColorError.custody("transaction input \(index) does not unlock its source")
             }
         }

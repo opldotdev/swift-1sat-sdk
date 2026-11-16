@@ -9,6 +9,7 @@ import ToolboxBRC29
 import ToolboxStorage
 import OneSatColor
 import OneSatTemplates
+import OneSatSweep
 
 /// Paid listing ("enable") on Open Exchange: `enableTokenPaid` and `walletDeployBeef` of
 /// `@dcasegr/amm-client` 0.55.1 (skein-amm cc146be, client.ts), against the wallet the 1Color
@@ -107,6 +108,7 @@ extension OpenExchange {
             let url = "\(try discoveryBase())/\(canonical)/deploy"
             let response = try await get(url, accept: nil)
             guard (200..<300).contains(response.statusCode) else {
+                Self.logHTTP("enablePaid discovery deploy", url: url, status: response.statusCode, body: response.body)
                 throw OpenExchangeError.refused(
                     code: nil, message: "no deploy for \(canonical) on discovery (\(response.statusCode)): pass deployBeef"
                 )
@@ -136,6 +138,7 @@ extension OpenExchange {
             )
         } catch {
             // No fallback to a plain noSend: a wallet that cannot make a protected one says why.
+            OneSatLog.error(error, "Open Exchange enable: building the protected payment", category: Self.logCategory)
             throw OpenExchangeError.kinded(error) ?? OpenExchangeError.refused(
                 code: nil,
                 message: "the wallet could not build the protected payment (BRC-177 noSend): \(OpenExchangeError.errorText(error))"
@@ -164,7 +167,10 @@ extension OpenExchange {
                 (status, answer) = (replyStatus, replyBody)
             }
             let value = JSONValue.parse(answer)
-            guard status == 200 else { throw Self.refusal(status: status, answer: value) }
+            guard status == 200 else {
+                Self.logHTTP("enablePaid", method: "POST", url: instance + path, status: status, body: answer)
+                throw Self.refusal(status: status, answer: value)
+            }
             return OpenExchangeListing.read(value?["result"], listURL: "\(base)/tokens")
         } catch {
             await Self.abort(ctx, txid: txid)
@@ -268,7 +274,11 @@ extension OpenExchange {
     static func abort(_ ctx: OneColorContext, txid: String) async {
         guard let reference = try? WalletBase64Data(base64: txid) else { return }
         await Task {
-            _ = try? await ctx.storage.abortAction(ctx.auth, WalletAbortActionRequest(reference: reference))
+            do {
+                _ = try await ctx.storage.abortAction(ctx.auth, WalletAbortActionRequest(reference: reference))
+            } catch {
+                OneSatLog.error(error, "Open Exchange: releasing the inputs of payment \(txid)", category: "OneSatAMM")
+            }
         }.value
     }
 

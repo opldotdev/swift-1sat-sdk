@@ -10,6 +10,7 @@ import ToolboxBRC29
 import ToolboxStorage
 import OneSatActions
 import OneSatMetanet
+import OneSatSweep
 
 /// Fixed values of the 1Color actions, as `@1sat/types` and the color permission module define them.
 public enum OneColorConstants {
@@ -175,7 +176,12 @@ enum ColorExecutor {
     static func abort(_ ctx: OneColorContext, reference: String) async {
         guard let bytes = Data(base64Encoded: reference),
               let data = try? WalletBase64Data(Array(bytes)) else { return }
-        _ = try? await ctx.storage.abortAction(ctx.auth, WalletAbortActionRequest(reference: data))
+        do {
+            _ = try await ctx.storage.abortAction(ctx.auth, WalletAbortActionRequest(reference: data))
+        } catch {
+            // The action's own failure is what the caller sees; this only leaves inputs reserved.
+            OneSatLog.error(error, "1Color: releasing the inputs of a failed action", category: "OneSatColor")
+        }
     }
 
     static func randomBase64() -> String {

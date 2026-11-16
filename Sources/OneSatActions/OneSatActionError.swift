@@ -1,3 +1,5 @@
+import OneSatSweep
+
 public enum OneSatActionError: Error, Equatable, Sendable {
     case noTransfers
     case mustProvideCounterpartyOrAddress
@@ -273,6 +275,15 @@ public struct ActionResult: Equatable, Sendable {
         ActionResult(actionId: actionId, error: error.wireMessage)
     }
 
+    /// `error`'s wire message, as `@1sat/actions` returns it, keeping the failure behind it as
+    /// the ``diagnostic`` and in the log (an overlay's HTTP 500 is not a missing token).
+    public static func failure(
+        _ error: OneSatActionError, underlying: any Error, actionId: String? = nil
+    ) -> ActionResult {
+        OneSatLog.error(underlying, "action failed as \(error.wireMessage)", category: "OneSatActions")
+        return ActionResult(actionId: actionId, error: error.wireMessage, diagnostic: String(reflecting: underlying))
+    }
+
     public static func failure(_ message: String, actionId: String? = nil) -> ActionResult {
         ActionResult(actionId: actionId, error: message)
     }
@@ -280,7 +291,8 @@ public struct ActionResult: Equatable, Sendable {
     /// A failure shown as `error`'s plain description, keeping `String(reflecting: error)` as
     /// the ``diagnostic``.
     public static func failure(describing error: any Error, actionId: String? = nil) -> ActionResult {
-        ActionResult(
+        OneSatLog.error(error, "action failed", category: "OneSatActions")
+        return ActionResult(
             actionId: actionId, error: error.localizedDescription,
             diagnostic: String(reflecting: error)
         )

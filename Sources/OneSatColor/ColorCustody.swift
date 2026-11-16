@@ -3,6 +3,7 @@ import BSVCore
 import BSVCrypto
 import BSVKeys
 import BSVWallet
+import OneSatSweep
 
 /// The custody tuple of a managed `p color` output, stored as its custom instructions: the
 /// receipt-format JSON `{"version":1,"assetId":…,"derivationPrefix":…,"derivationSuffix":…,
@@ -144,10 +145,16 @@ public enum ColorMetadata {
     public static func decrypt(_ stored: String, identity: PrivateKey) async -> String? {
         if stored.hasPrefix("{") { return stored }
         guard let data = Data(base64Encoded: stored) else { return nil }
-        guard let result = try? await ProtoWallet(rootKey: identity).decrypt(WalletDecryptRequest(
-            protocolID: .walletMetadataEncryption, keyID: try WalletKeyID("1"),
-            counterparty: .self, ciphertext: Array(data)
-        )) else { return nil }
+        let result: WalletDecryptResult
+        do {
+            result = try await ProtoWallet(rootKey: identity).decrypt(WalletDecryptRequest(
+                protocolID: .walletMetadataEncryption, keyID: try WalletKeyID("1"),
+                counterparty: .self, ciphertext: Array(data)
+            ))
+        } catch {
+            OneSatLog.error(error, "1Color custody: decrypting stored custody", category: "OneSatColor")
+            return nil
+        }
         return String(bytes: result.plaintext, encoding: .utf8)
     }
 }

@@ -33,6 +33,9 @@ public struct URLSessionOneSatTransport: OneSatHTTPTransport {
         }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
+            OneSatClientHTTP.unreadable(
+                "URLSessionOneSatTransport.send", method: method, url: url, body: Array(data), why: "not an HTTP response"
+            )
             throw OneSatClientError.unreadableResponse
         }
         return (http.statusCode, Array(data))
@@ -88,14 +91,16 @@ public struct OpnsClient: Sendable {
 
     public func validateOrigins(_ outpoints: [String]) async throws -> [String: Bool] {
         let body = Array(try JSONEncoder().encode(outpoints))
-        return try decode(
+        let url = Self.originsURL(baseURL: baseURL)
+        return try OneSatClientHTTP.decode(
+            [String: Bool].self,
             try await transport.send(
                 method: "POST",
-                url: Self.originsURL(baseURL: baseURL),
+                url: url,
                 headers: ["Content-Type": "application/json"],
                 body: body
             ),
-            as: [String: Bool].self
+            service: Self.service, operation: "OpnsClient.validateOrigins", method: "POST", url: url
         )
     }
 
@@ -108,24 +113,13 @@ public struct OpnsClient: Sendable {
         )
     }
 
-    private func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
-        try decode(
-            try await transport.send(method: "GET", url: url, headers: [:], body: nil),
-            as: type
-        )
-    }
+    private static let service = "the OpNS name service"
 
-    private func decode<T: Decodable>(
-        _ response: (status: Int, body: [UInt8]),
-        as type: T.Type
-    ) throws -> T {
-        guard (200..<300).contains(response.status) else {
-            throw OneSatClientError.httpFailure(statusCode: response.status)
-        }
-        guard let value = try? JSONDecoder().decode(type, from: Data(response.body)) else {
-            throw OneSatClientError.unreadableResponse
-        }
-        return value
+    private func get<T: Decodable>(_ url: URL, as type: T.Type, operation: String = #function) async throws -> T {
+        try OneSatClientHTTP.decode(
+            type, try await transport.send(method: "GET", url: url, headers: [:], body: nil),
+            service: Self.service, operation: "OpnsClient.\(operation)", method: "GET", url: url
+        )
     }
 
     private static func trimmedBase(_ baseURL: URL) -> String {

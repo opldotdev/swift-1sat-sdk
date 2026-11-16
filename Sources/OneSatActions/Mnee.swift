@@ -5,6 +5,7 @@ import BSVTransaction
 import OneSatAddresses
 import OneSatTemplates
 import ToolboxActions
+import OneSatSweep
 
 public enum Mnee {
     public struct Config: Equatable, Sendable {
@@ -244,12 +245,14 @@ public enum Mnee {
                 do {
                     raw = try await client.rawTransaction(txid: utxo.txid)
                 } catch {
+                    OneSatLog.error(error, "MNEE send: fetching source transaction \(utxo.txid)", category: "OneSatActions")
                     return SendResult(error: "failed-to-fetch-source-tx: \(utxo.txid)")
                 }
                 let sourceTx: Transaction
                 do {
                     sourceTx = try Transaction(bytes: raw, limits: limits)
                 } catch {
+                    OneSatLog.error(error, "MNEE send: parsing source transaction \(utxo.txid)", category: "OneSatActions")
                     return SendResult(error: "failed-to-fetch-source-tx: \(utxo.txid)")
                 }
                 guard sourceTx.outputs.indices.contains(Int(utxo.vout)) else {
@@ -346,6 +349,9 @@ public enum Mnee {
                         return SendResult(txid: status.txid, ticketId: ticketId)
                     }
                 } catch {
+                    // A failed poll is retried, as in TS; each failure is logged so a timeout
+                    // that was really a refused status call can be told apart.
+                    OneSatLog.error(error, "MNEE send: polling ticket \(ticketId)", category: "OneSatActions")
                     continue
                 }
             }
@@ -353,6 +359,7 @@ public enum Mnee {
         } catch let error as OneSatActionError {
             return SendResult(error: error.wireMessage)
         } catch {
+            OneSatLog.error(error, "MNEE send failed", category: "OneSatActions")
             return SendResult(error: error.localizedDescription)
         }
     }

@@ -3,6 +3,7 @@ import BSVScript
 import BSVWallet
 import ToolboxActions
 import OneSatTemplates
+import OneSatSweep
 
 /// The result of `OneColorActions.transfer`.
 package struct Transfer1ColorResult: Equatable, Sendable {
@@ -100,6 +101,7 @@ extension OneColorActions {
             result.submitted = true
             return result
         } catch {
+            OneSatLog.error(error, "1Color transfer failed", category: "OneSatColor")
             result.error = error.localizedDescription
             return result
         }

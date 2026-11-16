@@ -115,6 +115,7 @@ public enum Sweep {
             do {
                 try transaction.signPayToPublicKeyHashInput(at: index, with: key, limits: limits)
             } catch {
+                OneSatLog.error(error, "sweep: signing input \(index)", category: "OneSatSweep")
                 throw SweepError.inputNotOwned(index: index)
             }
         }

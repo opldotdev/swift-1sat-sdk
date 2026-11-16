@@ -116,6 +116,7 @@ let package = Package(
             name: "OneSatPermissions",
             dependencies: [
                 "OneSatClient",
+                "OneSatSweep",
                 "OneSatTemplates",
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
@@ -136,6 +137,7 @@ let package = Package(
             name: "OneSatMetanet",
             dependencies: [
                 "OneSatCBOR",
+                "OneSatSweep",
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
@@ -152,6 +154,7 @@ let package = Package(
             name: "OneSatColor",
             dependencies: [
                 "OneSatTemplates",
+                "OneSatSweep",
                 "OneSatCBOR",
                 "OneSatActions",
                 "OneSatMetanet",
@@ -178,6 +181,7 @@ let package = Package(
             name: "OneSatAMM",
             dependencies: [
                 "OneSatColor",
+                "OneSatSweep",
                 "OneSatTemplates",
                 .product(name: "BigInt", package: "BigInt"),
                 .product(name: "BSVCore", package: "swift-sdk"),
@@ -197,6 +201,8 @@ let package = Package(
             name: "OneSatActions",
             dependencies: [
                 "OneSatClient",
+                // `OneSatHTTPFailure` and `OneSatLog`, the detail and log of a failed request.
+                "OneSatSweep",
                 "OneSatTemplates",
                 "OneSatAddresses",
                 "OneSatCBOR",
