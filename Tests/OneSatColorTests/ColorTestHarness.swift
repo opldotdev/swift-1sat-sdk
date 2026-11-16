@@ -256,7 +256,7 @@ actor MockWallet: ColorWalletStorage {
             for record in page where !roots.contains(record.outpoint.transactionID) { roots.append(record.outpoint.transactionID) }
             beef = try graph(try ancestry(roots, pool: transactions))
         }
-        return try WalletListOutputsResult(totalOutputs: UInt32(matching.count), beef: beef, outputs: outputs)
+        return try WalletListOutputsResult(totalOutputs: UInt64(matching.count), beef: beef, outputs: outputs)
     }
 
     private var internalizeFailures = 0

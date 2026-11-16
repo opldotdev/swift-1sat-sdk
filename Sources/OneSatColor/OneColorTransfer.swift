@@ -108,7 +108,7 @@ extension OneColorActions {
             return result
         } catch {
             OneSatLog.error(error, "1Color transfer failed", category: "OneSatColor")
-            result.error = error.localizedDescription
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }

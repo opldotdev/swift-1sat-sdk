@@ -677,7 +677,7 @@ public enum Tokens {
             return .failure(error)
         } catch {
             OneSatLog.error(error, "BSV-21 overlay funding failed", category: "OneSatActions")
-            return FundOverlayResult(error: error.localizedDescription, diagnostic: OneSatLog.reflecting(error))
+            return FundOverlayResult(error: OneSatLog.localizedMessage(error), diagnostic: OneSatLog.reflecting(error))
         }
     }
 

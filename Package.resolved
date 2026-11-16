@@ -1,5 +1,5 @@
 {
-  "originHash" : "8146bb856f811176bd3331e8add9802cf70645f991a195231aa0583b37ac8bac",
+  "originHash" : "6fecd05db6543db7b99fc4c2e149f490d41eced4bcff6248c3177c90a170811b",
   "pins" : [
     {
       "identity" : "bigint",
@@ -33,7 +33,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/opldotdev/swift-sdk.git",
       "state" : {
-        "revision" : "89e40eed1d9d8fc1039ac1b5229915b2f7655c31"
+        "revision" : "3dae243a69c48d2ac4d4e15e4f294f049e6f3a2c"
       }
     },
     {
@@ -50,7 +50,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/opldotdev/swift-wallet-toolbox.git",
       "state" : {
-        "revision" : "94e2ec4b292ca52fcaf183922222beda543da124"
+        "revision" : "380f74c95c68037d15aa17eb7e18eea8fd574c84"
       }
     }
   ],

@@ -63,7 +63,7 @@ public enum OneColorActions {
             )
         } catch {
             OneSatLog.error(error, "1Color deploy failed", category: "OneSatColor")
-            return Deploy1ColorResult(error: error.localizedDescription)
+            return Deploy1ColorResult(error: OneSatLog.localizedMessage(error))
         }
         return await deploy(ctx, amount: amount, decimals: decimals, symbol: symbol, icon: icon, custody: custody)
     }
@@ -135,7 +135,7 @@ public enum OneColorActions {
             return result
         } catch {
             OneSatLog.error(error, "1Color resubmit deploy failed", category: "OneSatColor")
-            result.error = error.localizedDescription
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }
@@ -196,7 +196,7 @@ public enum OneColorActions {
             return result
         } catch {
             OneSatLog.error(error, "1Color send failed", category: "OneSatColor")
-            result.error = error.localizedDescription
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }
@@ -314,12 +314,12 @@ public enum OneColorActions {
                 result.messageID = sent.messageID
             } catch {
                 OneSatLog.error(error, "1Color send: delivery to the recipient failed", category: "OneSatColor")
-                result.error = "delivery-failed: \(error.localizedDescription)"
+                result.error = "delivery-failed: \(OneSatLog.localizedMessage(error))"
             }
             return result
         } catch {
             OneSatLog.error(error, "1Color send failed", category: "OneSatColor")
-            result.error = error.localizedDescription
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }

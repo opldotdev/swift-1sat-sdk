@@ -40,11 +40,11 @@ let package = Package(
         // generic wallet a 1Sat action executes against.
         .package(
             url: "https://github.com/opldotdev/swift-sdk.git",
-            revision: "89e40eed1d9d8fc1039ac1b5229915b2f7655c31"
+            revision: "3dae243a69c48d2ac4d4e15e4f294f049e6f3a2c"
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "94e2ec4b292ca52fcaf183922222beda543da124"
+            revision: "380f74c95c68037d15aa17eb7e18eea8fd574c84"
         ),
         // Open Exchange's engine works in exact integers as the TS does in `bigint`. The version
         // swift-sdk pins (exact 5.7.0); SwiftPM resolves the two to the same checkout.
@@ -293,6 +293,30 @@ let package = Package(
                 .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
             ],
             resources: [.copy("Fixtures")]
+        ),
+        // End-to-end flows against a live backend. Every test skips unless ONESAT_LIVE is set:
+        // `local` runs against Tools/local-stack (real TS storage server, stub chain),
+        // `testnet` against the hosted testnet servers with real broadcast (see Backend.swift).
+        .testTarget(
+            name: "OneSatLiveTests",
+            dependencies: [
+                "OneSatActions",
+                "OneSatClient",
+                "OneSatSweep",
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVCrypto", package: "swift-sdk"),
+                .product(name: "BSVCompat", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxWallet", package: "swift-wallet-toolbox"),
+            ]
         ),
         .testTarget(
             name: "OneSatCBORTests",

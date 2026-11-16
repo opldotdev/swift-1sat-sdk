@@ -266,7 +266,7 @@ actor MemoryStorage: ColorWalletStorage {
         if request.include == .entireTransactions, !page.isEmpty {
             beef = try boundedGraph(ancestry(page.map(\.outpoint.transactionID), pool: transactions))
         }
-        return try WalletListOutputsResult(totalOutputs: UInt32(matching.count), beef: beef, outputs: outputs)
+        return try WalletListOutputsResult(totalOutputs: UInt64(matching.count), beef: beef, outputs: outputs)
     }
 
     func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult {

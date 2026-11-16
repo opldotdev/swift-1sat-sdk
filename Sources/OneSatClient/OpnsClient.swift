@@ -36,17 +36,8 @@ public struct URLSessionOneSatTransport: OneSatHTTPTransport {
         let response: URLResponse
         do {
             (data, response) = try await URLSession.shared.data(for: request)
-        } catch let error as URLError {
-            throw Self.urlFree(error)
         } catch {
-            // On Linux URLSession throws an `NSError` in the URL domain, which does not cast to
-            // `URLError` there; it carries the same full URL.
-            guard let foundation = OneSatLog.FoundationError(error), foundation.domain == "NSURLErrorDomain" else {
-                throw error
-            }
-            // `URLError.Code(rawValue:)` is failable in corelibs Foundation and not on Darwin.
-            let code: URLError.Code? = URLError.Code(rawValue: foundation.code)
-            throw Self.urlFree(URLError(code ?? .unknown, userInfo: foundation.userInfo))
+            throw OneSatLog.urlFree(thrown: error)
         }
         guard let http = response as? HTTPURLResponse else {
             OneSatClientHTTP.unreadable(
@@ -57,25 +48,10 @@ public struct URLSessionOneSatTransport: OneSatHTTPTransport {
         return (http.statusCode, Array(data))
     }
 
-    /// `error` rebuilt without the failing URL's query string: the same code and description,
-    /// the failing URL as scheme, host and path, and the error under it as its domain, code and
-    /// description only. Some services take an API key in the query (MNEE's `auth_token`), and
-    /// URLSession's error carries the full URL to every caller and log.
+    /// `error` rebuilt without the failing URL's query string, as ``OneSatLog/urlFree(_:)``
+    /// rebuilds it.
     public static func urlFree(_ error: URLError) -> URLError {
-        var info: [String: Any] = [NSLocalizedDescriptionKey: OneSatLog.redactingQueries(error.localizedDescription)]
-        let original = OneSatLog.FoundationError(error)
-        if let failing = original?.failingURL, let bare = OneSatLog.withoutQuery(failing) {
-            info[OneSatLog.failingURLKey] = bare
-            info[OneSatLog.failingURLStringKey] = bare.absoluteString
-        }
-        if let underlying = original?.underlying {
-            let inner = OneSatLog.FoundationError(underlying)
-            info[NSUnderlyingErrorKey] = NSError(
-                domain: inner?.domain ?? String(describing: type(of: underlying)), code: inner?.code ?? 0,
-                userInfo: [NSLocalizedDescriptionKey: OneSatLog.redactingQueries(underlying.localizedDescription)]
-            )
-        }
-        return URLError(error.code, userInfo: info)
+        OneSatLog.urlFree(error)
     }
 }
 

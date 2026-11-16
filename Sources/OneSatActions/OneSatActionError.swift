@@ -294,7 +294,7 @@ public struct ActionResult: Equatable, Sendable {
     public static func failure(describing error: any Error, actionId: String? = nil) -> ActionResult {
         OneSatLog.error(error, "action failed", category: "OneSatActions")
         return ActionResult(
-            actionId: actionId, error: error.localizedDescription,
+            actionId: actionId, error: OneSatLog.localizedMessage(error),
             diagnostic: OneSatLog.reflecting(error)
         )
     }

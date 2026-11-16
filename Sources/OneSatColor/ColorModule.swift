@@ -345,7 +345,7 @@ enum ColorModule {
         var sources = try BEEF(merklePaths: [], transactions: [], limits: beefLimits)
         var offset: UInt32 = 0
         var limit = min(UInt32(selected.count), OneColorConstants.listPageLimit)
-        var total: UInt32?
+        var total: UInt64?
         while true {
             let page = try await ctx.storage.colorListOutputs(ctx.auth, try WalletListOutputsRequest(
                 basket: basket, tags: selected.map(\.suffixTag), tagQueryMode: .any, include: .entireTransactions,
@@ -355,8 +355,16 @@ enum ColorModule {
                 throw ColorError.custody("the matching output count changed during listing")
             }
             total = page.totalOutputs
+            // `totalOutputs` is UInt64, but an output count may not exceed UInt32.max and the
+            // pagination offset is UInt32, so a larger count could not be paged through: refuse it
+            // rather than trap on a later offset. (TS accepts any safe integer; Swift fails closed.)
+            guard page.totalOutputs <= UInt64(UInt32.max) else {
+                throw ColorError.custody("the listing's output count exceeds its pagination range")
+            }
             // `offset` never passes the count: the loop continues only while `offset < total`.
-            if page.outputs.count > Int(limit) || page.outputs.count > Int(page.totalOutputs) - Int(offset) {
+            // UInt64 throughout, so a hostile count must not trap.
+            let returned = UInt64(page.outputs.count)
+            if returned > UInt64(limit) || returned > page.totalOutputs - UInt64(offset) {
                 throw ColorError.custody("the listing exceeded its bounds")
             }
             for output in page.outputs {
@@ -366,11 +374,16 @@ enum ColorModule {
             }
             if let pageBEEF = page.beef { sources = try sources.merging(pageBEEF, limits: beefLimits) }
             if found == wanted { return sources }
-            offset += UInt32(page.outputs.count)
-            guard !page.outputs.isEmpty, let total, offset < total else {
+            // Overflow-checked: the next offset must be a UInt32 below the count.
+            let next = UInt64(offset) + returned
+            guard !page.outputs.isEmpty, let total, next < total else {
                 throw ColorError.custody("the wallet returned other outputs than the selected token inputs")
             }
-            limit = min(OneColorConstants.listPageLimit, total - offset)
+            guard let nextOffset = UInt32(exactly: next) else {
+                throw ColorError.custody("the listing's next offset exceeds its pagination range")
+            }
+            offset = nextOffset
+            limit = UInt32(min(UInt64(OneColorConstants.listPageLimit), total - UInt64(offset)))
         }
     }
 
