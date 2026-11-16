@@ -56,7 +56,7 @@ extension OpenExchange {
                 method: "POST", path: path, query: nil, headers: ["content-type": "application/json"], body: body
             )
             (status, answer) = (response.statusCode, response.body)
-        } catch AuthTransportError.unauthenticatedReply(let replyStatus, let replyBody) {
+        } catch AuthTransportError.unauthenticatedReply(let replyStatus, let replyBody, _) {
             // An answer from in front of the instance's auth: its status and body, unsigned.
             (status, answer) = (replyStatus, replyBody)
         }
