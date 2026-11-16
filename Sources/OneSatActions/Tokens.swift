@@ -121,19 +121,28 @@ public enum Tokens {
         public let actionId: String?
         public let error: String?
         public let status: OverlayStatus?
+        /// For a log, as `ActionResult.diagnostic`; ignored by `==`.
+        public let diagnostic: String?
 
         public init(
             txid: String? = nil,
             tx: [UInt8]? = nil,
             actionId: String? = nil,
             error: String? = nil,
-            status: OverlayStatus? = nil
+            status: OverlayStatus? = nil,
+            diagnostic: String? = nil
         ) {
             self.txid = txid
             self.tx = tx
             self.actionId = actionId
             self.error = error
             self.status = status
+            self.diagnostic = diagnostic
+        }
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.txid == rhs.txid && lhs.tx == rhs.tx && lhs.actionId == rhs.actionId
+                && lhs.error == rhs.error && lhs.status == rhs.status
         }
 
         public static func failure(_ error: OneSatActionError, actionId: String? = nil) -> Self {
@@ -466,10 +475,9 @@ public enum Tokens {
             ) { transaction in
                 try Ordinals.signP2PKHInputs(ctx.identity, transaction, prepared.signers)
             }
-            if let tx = result.tx {
-                try? await bsv21.submitTransfer(tx: tx, tokenId: request.tokenId)
+            return await ActionResult.submitting(result) {
+                try await bsv21.submitTransfer(tx: $0, tokenId: request.tokenId)
             }
-            return result
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {
@@ -601,10 +609,9 @@ public enum Tokens {
                 extras: Array(outputs.dropFirst(2)),
                 labels: [OneSatConstants.tokenLabel(request.tokenId)]
             )
-            if let tx = result.tx {
-                try? await bsv21.submitTransfer(tx: tx, tokenId: request.tokenId)
+            return await ActionResult.submitting(result) {
+                try await bsv21.submitTransfer(tx: $0, tokenId: request.tokenId)
             }
-            return result
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {
@@ -637,7 +644,7 @@ public enum Tokens {
                 options: TrackedAction.Options(acceptDelayedBroadcast: false)
             )
             if let error = result.error {
-                return FundOverlayResult(actionId: result.actionId, error: error)
+                return FundOverlayResult(actionId: result.actionId, error: error, diagnostic: result.diagnostic)
             }
             guard let txid = result.txid else {
                 return .failure(.noTxidReturned, actionId: result.actionId)
@@ -666,7 +673,7 @@ public enum Tokens {
         } catch let error as OneSatActionError {
             return .failure(error)
         } catch {
-            return FundOverlayResult(error: error.localizedDescription)
+            return FundOverlayResult(error: error.localizedDescription, diagnostic: String(reflecting: error))
         }
     }
 

@@ -176,7 +176,13 @@ actor MockWallet: ColorWalletStorage {
         }
     }
 
+    /// When set, created and activated actions come back with an empty `inputBEEF`, as storage
+    /// that lost the inputs' history would send, so their Atomic BEEF cannot be built.
+    private(set) var omitsInputBEEF = false
+    func setOmitsInputBEEF(_ value: Bool) { omitsInputBEEF = value }
+
     private func inputBEEF(_ inputs: [StorageActionInput], pool: [TransactionID: Transaction]) throws -> [UInt8] {
+        if omitsInputBEEF { return try graph([]).serialized(limits: harnessBEEFLimits) }
         let roots = try inputs.map { try TransactionID(displayHex: $0.sourceTXID) }
         return try graph(try ancestry(roots, pool: pool)).serialized(limits: harnessBEEFLimits)
     }

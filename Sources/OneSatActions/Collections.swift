@@ -261,7 +261,9 @@ public enum Collections {
                 )
             )
             guard result.txid != nil else {
-                return ActionResult.failure(SigmaPublish.publishError(result.error))
+                return ActionResult(
+                    error: SigmaPublish.publishError(result.error), diagnostic: result.diagnostic
+                )
             }
             return result
         } catch let error as OneSatActionError {

@@ -216,6 +216,10 @@ public struct ActionResult: Equatable, Sendable {
     /// case and transaction IDs after `error` has become a plain sentence. It is not part of the
     /// result's value and is ignored by `==`.
     public let diagnostic: String?
+    /// Set when the action succeeded but the overlay that indexes it was not told: why the submit
+    /// failed, or "no transaction to submit" when the action's Atomic BEEF could not be built.
+    /// The transaction is on chain either way; the overlay may still find it later.
+    public let submitError: String?
 
     public init(
         txid: String? = nil,
@@ -223,7 +227,8 @@ public struct ActionResult: Equatable, Sendable {
         actionId: String? = nil,
         error: String? = nil,
         noSendChange: [String]? = nil,
-        diagnostic: String? = nil
+        diagnostic: String? = nil,
+        submitError: String? = nil
     ) {
         self.txid = txid
         self.tx = tx
@@ -231,11 +236,37 @@ public struct ActionResult: Equatable, Sendable {
         self.error = error
         self.noSendChange = noSendChange
         self.diagnostic = diagnostic
+        self.submitError = submitError
     }
 
     public static func == (lhs: ActionResult, rhs: ActionResult) -> Bool {
         lhs.txid == rhs.txid && lhs.tx == rhs.tx && lhs.actionId == rhs.actionId
             && lhs.error == rhs.error && lhs.noSendChange == rhs.noSendChange
+            && lhs.submitError == rhs.submitError
+    }
+
+    /// Submits a successful action's transaction with `submit`, recording in `submitError` why
+    /// the overlay was not told: the submit's own failure, or no Atomic BEEF to send. A failed
+    /// action is returned unchanged.
+    static func submitting(
+        _ result: ActionResult, _ submit: ([UInt8]) async throws -> Void
+    ) async -> ActionResult {
+        guard result.error == nil, result.txid != nil else { return result }
+        let failure: String
+        if let tx = result.tx {
+            do {
+                try await submit(tx)
+                return result
+            } catch {
+                failure = Tokens.submitFailure(error)
+            }
+        } else {
+            failure = "no transaction to submit"
+        }
+        return ActionResult(
+            txid: result.txid, tx: result.tx, actionId: result.actionId, error: result.error,
+            noSendChange: result.noSendChange, diagnostic: result.diagnostic, submitError: failure
+        )
     }
 
     public static func failure(_ error: OneSatActionError, actionId: String? = nil) -> ActionResult {

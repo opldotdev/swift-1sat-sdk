@@ -171,8 +171,11 @@ public enum OrdLockV2Purchase {
                     nowMilliseconds: nowMilliseconds
                 ),
             ],
+            // The purchase spends this deposit through its BEEF, so the BEEF is checked before
+            // the deposit is broadcast: one the wallet could not then spend is never sent.
             options: TrackedAction.Options(
-                bypassP1Sat: true, randomizeOutputs: false, acceptDelayedBroadcast: false
+                bypassP1Sat: true, randomizeOutputs: false, acceptDelayedBroadcast: false,
+                requiresBEEF: true
             )
         )
         // TS lets the wallet's own createAction error through unchanged.

@@ -387,6 +387,47 @@ final class SigmaPublishTests: XCTestCase {
         XCTAssertFalse(methods.contains("processAction"))
     }
 
+    /// A caller that hands the BEEF on (`requiresBEEF`) gets the same check as a held action:
+    /// the transaction is never processed when the BEEF cannot be built.
+    func test_aSentActionThatRequiresItsBEEFIsNotProcessedWithoutIt() async throws {
+        let transport = PublishTransport(omitsFundingSource: true)
+        let result = try await TrackedAction.execute(
+            try context(transport),
+            description: "sent action",
+            outputs: [try WalletCreateActionOutput(lockingScript: [0x51], satoshis: 1, outputDescription: "out")],
+            options: TrackedAction.Options(bypassP1Sat: true, requiresBEEF: true)
+        )
+        XCTAssertEqual(
+            result.error,
+            "The transaction data is incomplete: a transaction it depends on is missing."
+        )
+        XCTAssertNil(result.txid)
+        let methods = await transport.methods
+        XCTAssertFalse(methods.contains("processAction"))
+    }
+
+    /// OrdLock v2 front funding is spent through its BEEF by the purchase built right after. A
+    /// deposit whose BEEF cannot be built is never broadcast, so a retry does not leave a second
+    /// deposit on chain.
+    func test_ordLockFrontFundingWithoutBEEFIsNeverBroadcast() async throws {
+        let transport = PublishTransport(omitsFundingSource: true)
+        do {
+            _ = try await OrdLockV2Purchase.prepareFrontFunding(
+                try context(transport), keyID: "front-funding", satoshis: 1_000, nowMilliseconds: 0
+            )
+            XCTFail("front funding without BEEF")
+        } catch let error as OneSatActionError {
+            XCTAssertEqual(
+                error,
+                .ordLockV2FrontFundingFailed(
+                    "The transaction data is incomplete: a transaction it depends on is missing."
+                )
+            )
+        }
+        let processed = await transport.processed
+        XCTAssertTrue(processed.isEmpty)
+    }
+
     /// The inscribe the app runs with Sign with identity on: the held anchor's BEEF cannot be
     /// built, and the user reads the plain sentence rather than a BEEFError case number.
     func test_inscribeWithSigmaReportsAnUnbuildableAnchorInPlainWords() async throws {

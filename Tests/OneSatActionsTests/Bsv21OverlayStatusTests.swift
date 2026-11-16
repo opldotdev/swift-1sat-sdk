@@ -336,6 +336,51 @@ final class Bsv21OverlayStatusTests: XCTestCase {
         XCTAssertEqual(submitted, 1)
     }
 
+    /// The sweep is broadcast, but its Atomic BEEF cannot be built, so the overlay is not told.
+    /// The result says so instead of looking like a complete transfer.
+    func test_aSweepWithoutBEEFReportsThatTheOverlayWasNotTold() async throws {
+        let fixture = try sweepFixture()
+        let overlay = OverlayStub(states: [.valid, .spent])
+        let transport = OverlayTransport(omitsInputBEEF: true)
+
+        let result = await AssetSweep.bsv21(
+            try context(transport: transport, bsv21: overlay),
+            inputs: fixture.inputs,
+            inputBEEF: fixture.beef,
+            feeAddress: ActionVectors.templateAddress,
+            feePerOutput: 0,
+            symbol: nil,
+            decimals: 0
+        )
+
+        XCTAssertNil(result.error, result.error ?? "")
+        XCTAssertNotNil(result.txid)
+        XCTAssertNil(result.tx)
+        XCTAssertEqual(result.submitError, "no transaction to submit")
+        let methods = await transport.methods
+        XCTAssertTrue(methods.contains("processAction"))
+        let submitted = await overlay.transfers
+        XCTAssertEqual(submitted, 0)
+    }
+
+    /// The overlay funding payment is broadcast without BEEF; its txid is kept and the
+    /// submission reported failed.
+    func test_fundWithoutBEEFKeepsTheTxidAndReportsTheSubmission() async throws {
+        let overlay = OverlayStub(template: Self.template)
+        let transport = OverlayTransport(omitsInputBEEF: true)
+
+        let result = await Tokens.fundOverlay(
+            try context(transport: transport, bsv21: overlay),
+            tokenId: Self.tokenID
+        )
+
+        XCTAssertNotNil(result.txid)
+        XCTAssertNil(result.tx)
+        XCTAssertEqual(result.error, "funding-submit-failed")
+        let submitted = await overlay.submitted
+        XCTAssertTrue(submitted.isEmpty)
+    }
+
     // MARK: Fixtures
 
     private func sendRequest(amount: UInt64) -> Tokens.SendRequest {
@@ -536,11 +581,15 @@ private actor OverlayTransport: AuthenticatedTransport {
     private(set) var bodies: [[UInt8]] = []
     private let listed: [TokenRow]
     private let completeActions: Bool
+    /// Funds actions without an `inputBeef`, as storage that lost their history would, so their
+    /// Atomic BEEF cannot be built.
+    private let omitsInputBEEF: Bool
     private var nextReference = 0
 
-    init(listed: [TokenRow] = [], completeActions: Bool = true) {
+    init(listed: [TokenRow] = [], completeActions: Bool = true, omitsInputBEEF: Bool = false) {
         self.listed = listed
         self.completeActions = completeActions
+        self.omitsInputBEEF = omitsInputBEEF
     }
 
     func capturedCreateAction() -> CapturedCreateAction? {
@@ -667,7 +716,7 @@ private actor OverlayTransport: AuthenticatedTransport {
             "outputs": outputRows,
         ]
         nextReference += 1
-        if !inputBeef.isEmpty {
+        if !inputBeef.isEmpty, !omitsInputBEEF {
             result["inputBeef"] = inputBeef.map(Int.init)
         }
         return try envelope(id: id, result: result)
