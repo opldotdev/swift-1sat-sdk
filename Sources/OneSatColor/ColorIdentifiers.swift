@@ -39,8 +39,8 @@ public enum ColorIdentifiers {
     public static func protocolName(
         _ selector: ColorAssetSelector, derivationPrefix: String, derivationSuffix: String
     ) throws -> String {
-        try validateRemittance(derivationPrefix)
-        try validateRemittance(derivationSuffix)
+        try validateRemittance(derivationPrefix, name: "derivationPrefix")
+        try validateRemittance(derivationSuffix, name: "derivationSuffix")
         let name = "p color \(tag(selector)) \(Hex.encode(Array(derivationPrefix.utf8))) \(Hex.encode(Array(derivationSuffix.utf8)))"
         // TS compares `name.length`, UTF-16 units; the name is ASCII, so bytes and units agree.
         guard name.utf16.count <= maxProtocolNameLength else { throw ColorError.protocolNameTooLong }
@@ -58,8 +58,8 @@ public enum ColorIdentifiers {
               let suffix = strictUTF8(try Hex.decode(parts[4], maximumDecodedByteCount: 280)) else {
             throw ColorError.invalid("p color remittance tags")
         }
-        try validateRemittance(prefix)
-        try validateRemittance(suffix)
+        try validateRemittance(prefix, name: "derivationPrefix")
+        try validateRemittance(suffix, name: "derivationSuffix")
         return (try selector(fromTag: parts[2]), prefix, suffix)
     }
 
@@ -107,20 +107,30 @@ public enum ColorIdentifiers {
         return hex.count == 64 && hex.allSatisfy(isLowerHexByte)
     }
 
-    /// A remittance string is nonempty strict UTF-8 without whitespace. Swift strings are always
-    /// valid Unicode, so only the emptiness and whitespace checks can fail here.
-    public static func validateRemittance(_ value: String) throws {
+    /// TS `validateRemittanceString`: a remittance string is nonempty strict UTF-8 without
+    /// whitespace. Swift strings are always valid Unicode, so only the emptiness and whitespace
+    /// checks can fail here. `name` is the TS name of the field.
+    public static func validateRemittance(_ value: String, name: String) throws {
         guard !value.isEmpty, !value.unicodeScalars.contains(where: isJSWhitespace) else {
-            throw ColorError.invalid("remittance string")
+            throw ColorError.message("\(name) must be a nonempty string without whitespace")
         }
     }
 
-    /// A compressed secp256k1 key in lowercase hex.
-    public static func validateIdentityKey(_ value: String) throws {
-        guard value.utf8.count == 66, value.hasPrefix("02") || value.hasPrefix("03"),
-              value.allSatisfy({ ("0"..."9").contains($0) || ("a"..."f").contains($0) }),
-              (try? PublicKey(Hex.decode(value, maximumDecodedByteCount: 33))) != nil else {
-            throw ColorError.invalid("identity key")
+    /// TS `IDENTITY_KEY`, `/^0[23][0-9a-f]{64}$/`, on bytes: a digit followed by a combining
+    /// mark is no hex digit.
+    static func isIdentityKeyHex(_ value: String) -> Bool {
+        value.utf8.count == 66 && (value.utf8.starts(with: "02".utf8) || value.utf8.starts(with: "03".utf8))
+            && value.utf8.allSatisfy(isLowerHexByte)
+    }
+
+    /// TS `validateIdentityKey`: a compressed secp256k1 key in lowercase hex, on the curve. TS
+    /// quotes the SDK's error; `@bsv/sdk` says `Invalid point` for a well-formed key off the curve.
+    public static func validateIdentityKey(_ value: String, name: String) throws {
+        guard isIdentityKeyHex(value) else {
+            throw ColorError.message("\(name) must be a compressed public key in lowercase hex")
+        }
+        guard (try? PublicKey(Hex.decode(value, maximumDecodedByteCount: 33))) != nil else {
+            throw ColorError.message("\(name) is not a valid public key (Invalid point)")
         }
     }
 
@@ -146,7 +156,7 @@ public enum ColorIdentifiers {
     private static func parseTagged(_ rest: [String]) throws -> (assetID: ColorAssetID, role: ColorTokenRole)? {
         guard !rest.isEmpty, rest.count <= 2, rest.count == 1 || rest[1] == "authority" else { return nil }
         guard case .asset(let id) = try selector(fromTag: rest[0]) else {
-            throw ColorError.invalid("issue is not a stored basket")
+            throw ColorError.message("issue is not a stored basket")
         }
         return (id, rest.count == 2 ? .authority : .value)
     }
@@ -234,7 +244,12 @@ public enum ColorAssetSelector: Hashable, Sendable, CustomStringConvertible {
 }
 
 public enum ColorError: Error, Equatable, Sendable, LocalizedError {
+    /// `BRC-207: invalid <what>`, where TS says exactly that.
     case invalid(String)
+    /// `BRC-207: <text>`: a TS message that is a whole sentence.
+    case message(String)
+    /// The text alone: a TS message without the `BRC-207: ` prefix.
+    case plain(String)
     case protocolNameTooLong
     case planTooLarge
     case receiptTooLarge
@@ -248,6 +263,8 @@ public enum ColorError: Error, Equatable, Sendable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .invalid(let what): "BRC-207: invalid \(what)"
+        case .message(let text): "BRC-207: \(text)"
+        case .plain(let text): text
         case .protocolNameTooLong: "BRC-207: protocol name exceeds 280 characters"
         case .planTooLarge: "BRC-207: plan exceeds 16 MiB"
         case .receiptTooLarge: "BRC-207: receipt exceeds 1000 bytes"
