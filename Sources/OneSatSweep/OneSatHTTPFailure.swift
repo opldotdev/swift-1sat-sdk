@@ -207,7 +207,8 @@ public enum OneSatLog {
     /// is a token ID (`<txid>_<vout>`) or, quoted, a plain word, since this SDK names token IDs and
     /// labels that way; an `Authorization:` header's credential (a plain word
     /// such as `denied` with no scheme is prose); a `Bearer` credential that looks like one (it
-    /// holds a digit, or is 24 characters or more); a recovery phrase; and a mainnet WIF private key.
+    /// holds a digit, or is 24 characters or more); a recovery phrase of twelve words or more; and a
+    /// mainnet WIF private key. A value that reads as prose (`Invalid password: too short`) is kept.
     public static func redactingQueries(_ text: String) -> String {
         var result = text
         for redaction in redactions {
@@ -241,8 +242,12 @@ public enum OneSatLog {
     /// capitals. Case-sensitive inside a case-insensitive pattern.
     private static let plainWord = #"(?-i:[A-Za-z][a-z]{0,31})"#
     /// The characters of an unquoted value: not a quote, escaped or not, so a quoted value
-    /// already redacted is left alone.
-    private static let bareValue = #"[^\s"'\\,;)}\]<>(]"#
+    /// already redacted is left alone, and not an opening `{` or `[`, so a JSON object or array
+    /// after the name is not a value.
+    private static let bareValue = #"[^\s"'\\,;)}\]<>(\{\[]"#
+    /// An unquoted value that is prose, not a secret: a plain word, a space and another word
+    /// (`Invalid password: too short`).
+    private static let proseValue = #"\#(plainWord)[ \t]+[A-Za-z]"#
     /// The separator between a name and its quoted value: JSON, a reflected property or a
     /// quoted assignment, with an optional `Optional(`.
     private static let quotedSeparator = #"(\\?["']?\s*[:=]\s*(?:Optional\()?)(\\?["'])"#
@@ -266,20 +271,24 @@ public enum OneSatLog {
         // A quoted `key` or `token` value, unless it is a token ID or a plain word.
         (#"(?i)\#(nameStart)(\#(ambiguousName))\#(quotedSeparator)(?!(?:\#(tokenID)|\#(plainWord))\3)(?:\\.|[^\\])*?\3"#,
          "$1$2$3<redacted>$3"),
-        // An authorization header: a credential after a scheme, or one with no scheme unless it
-        // is one plain word of prose (`authorization: denied.`).
-        (#"(?i)\#(nameStart)((?:proxy-)?authorization\s*[:=]\s*)(?:(?:bearer|basic|token|digest|negotiate|ntlm)\s+[^\s"'<>]+|(?!\#(plainWord)[.,;:!?]?(?:[\s"'<>)\]}]|$))[^\s"'<>]+)"#,
+        // An authorization header (`Authorization`, `Proxy-Authorization`, `X-Authorization`): a
+        // credential after a known scheme; after any one-word scheme (`Apikey`, `Key`) when it
+        // holds a digit or is 16 characters or more; or with no scheme unless it is one plain word
+        // of prose (`authorization: denied.`).
+        (#"(?i)\#(nameStart)([A-Za-z0-9_.-]*authorization\s*[:=]\s*)(?:(?:bearer|basic|token|digest|negotiate|ntlm)\s+[^\s"'<>]+|\#(plainWord)\s+(?:(?=[^\s"'<>]*[0-9])[^\s"'<>]+|[^\s"'<>]{16,})|(?!\#(plainWord)[.,;:!?]?(?:[\s"'<>)\]}]|$))[^\s"'<>]+)"#,
          "$1<redacted>"),
-        // A recovery phrase, unquoted: three or more lowercase words after the name.
-        (#"(?i)\#(nameStart)([A-Za-z0-9_.-]*(?:mnemonic|phrase|seed)[ \t]*[:=][ \t]*)(?-i:[a-z]+(?:[ \t]+[a-z]+){2,})"#,
+        // A recovery phrase, unquoted: twelve or more lowercase words (the BIP-39 minimum) after
+        // the name.
+        (#"(?i)\#(nameStart)([A-Za-z0-9_.-]*(?:mnemonic|phrase|seed)[ \t]*[:=][ \t]*)(?-i:[a-z]+(?:[ \t]+[a-z]+){11,})"#,
          "$1<redacted>"),
         // An unquoted value after a colon, as in a header (`X-Api-Key: abc`) or a JSON number;
-        // not a reflected value such as `nil`, `Optional(…)` or `Type(…)`.
-        (#"(?i)\#(nameStart)(\#(secretNameButAuthorization))\#(bareSeparator)(?!nil\b)\#(bareValue)++(?!\()"#,
+        // not a reflected value such as `nil`, `Optional(…)` or `Type(…)`, and not prose
+        // (`Invalid password: too short`).
+        (#"(?i)\#(nameStart)(\#(secretNameButAuthorization))\#(bareSeparator)(?!nil\b|\#(proseValue))\#(bareValue)++(?!\()"#,
          "$1$2<redacted>"),
         // A bare `key` or `token` only where a header or a list item starts (`token: abc` on its
         // own line, `{token: abc`), so prose such as "this token: no pool" is left alone.
-        (#"(?im)(^|[,;{(\[])([ \t]*\\?["']?)(\#(ambiguousName))\#(bareSeparator)(?!nil\b|\#(tokenID)(?!\#(bareValue)))\#(bareValue)++(?!\()"#,
+        (#"(?im)(^|[,;{(\[])([ \t]*\\?["']?)(\#(ambiguousName))\#(bareSeparator)(?!nil\b|\#(proseValue)|\#(tokenID)(?!\#(bareValue)))\#(bareValue)++(?!\()"#,
          "$1$2$3$4<redacted>"),
         // A query or form parameter (`key=`, `mnee_token=`), up to the next `&` or space.
         (#"(?i)\#(nameStart)(\#(secretName)|\#(ambiguousName))=[^&\s"'<>]+"#, "$1=<redacted>"),

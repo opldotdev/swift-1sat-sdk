@@ -123,16 +123,26 @@ final class OneSatLogRedactionTests: XCTestCase {
         )
         XCTAssertEqual(OneSatLog.redactingQueries("GET /v1\ntoken: abc\nhost: x"), "GET /v1\ntoken: <redacted>\nhost: x")
         XCTAssertEqual(OneSatLog.redactingQueries(#"{"api_key": 12345}"#), #"{"api_key": <redacted>}"#)
+        XCTAssertEqual(OneSatLog.redactingQueries(#"{"api_key": [1]}"#), #"{"api_key": [1]}"#)
         XCTAssertEqual(OneSatLog.redactingQueries("password: hunter2"), "password: <redacted>")
     }
 
     func test_redactingQueriesLeavesUnquotedTokenWordsInProseAndReflections() {
-        let prose = "no liveness read for this token: no pool can be planned"
-        XCTAssertEqual(OneSatLog.redactingQueries(prose), prose)
+        for prose in [
+            "no liveness read for this token: no pool can be planned",
+            "token: no pool can be planned",
+            "Invalid mnemonic: word count must be 12",
+            "Invalid password: too short",
+            "Invalid WIF: bad checksum",
+        ] {
+            XCTAssertEqual(OneSatLog.redactingQueries(prose), prose)
+        }
         XCTAssertEqual(OneSatLog.redactingQueries("token: \(tokenID)"), "token: \(tokenID)")
         XCTAssertEqual(OneSatLog.redactingQueries("Session(authToken: nil)"), "Session(authToken: nil)")
         let nested = #"Holder(token: OneSatClient.Token(id: "x"))"#
         XCTAssertEqual(OneSatLog.redactingQueries(nested), nested)
+        let json = #"{"token":{"id":"x"}}"#
+        XCTAssertEqual(OneSatLog.redactingQueries(json), json)
     }
 
     func test_redactingQueriesRedactsABearerCredentialButNotTheWord() {
@@ -158,6 +168,14 @@ final class OneSatLogRedactionTests: XCTestCase {
         XCTAssertEqual(
             OneSatLog.redactingQueries("Authorization: denied. Sign in again"), "Authorization: denied. Sign in again"
         )
+        XCTAssertEqual(OneSatLog.redactingQueries("authorization: denied for user"), "authorization: denied for user")
+        XCTAssertEqual(OneSatLog.redactingQueries("Authorization: Apikey abc123"), "Authorization: <redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("Authorization: Key abc123"), "Authorization: <redacted>")
+        XCTAssertEqual(
+            OneSatLog.redactingQueries("Authorization: Key abcdefghijklmnopqr"), "Authorization: <redacted>"
+        )
+        XCTAssertEqual(OneSatLog.redactingQueries("X-Authorization: abc123"), "X-Authorization: <redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("x-authorization: denied"), "x-authorization: denied")
     }
 
     func test_redactingQueriesKeepsTokenIDsAndLabelsButNotSecretsInKeyAndTokenFields() {
@@ -180,17 +198,14 @@ final class OneSatLogRedactionTests: XCTestCase {
     }
 
     func test_redactingQueriesRedactsRecoveryPhrases() {
+        let phrase = "abandon ability able about above absent absorb abstract absurd abuse access accident"
         XCTAssertEqual(
             OneSatLog.redactingQueries(#"Wallet(mnemonic: "abandon ability able about")"#),
             #"Wallet(mnemonic: "<redacted>")"#
         )
-        XCTAssertEqual(
-            OneSatLog.redactingQueries("mnemonic: abandon ability able about above"), "mnemonic: <redacted>"
-        )
-        XCTAssertEqual(OneSatLog.redactingQueries("recovery_phrase=abandon ability able"), "recovery_phrase=<redacted>")
-        XCTAssertEqual(
-            OneSatLog.redactingQueries("seedPhrase: abandon ability able, next"), "seedPhrase: <redacted>, next"
-        )
+        XCTAssertEqual(OneSatLog.redactingQueries("mnemonic: \(phrase)"), "mnemonic: <redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("recovery_phrase=\(phrase)"), "recovery_phrase=<redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("seedPhrase: \(phrase), next"), "seedPhrase: <redacted>, next")
         XCTAssertEqual(OneSatLog.redactingQueries("a phrase of three words"), "a phrase of three words")
     }
 
