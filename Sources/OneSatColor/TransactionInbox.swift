@@ -71,7 +71,7 @@ public enum TransactionInbox {
             messages = try await ctx.relay.list(host: host, messageBox: OneColorConstants.transactionDeliveryBox)
         } catch {
             OneSatLog.error(error, "1Color inbox sync failed", category: "OneSatColor")
-            result.error = error.localizedDescription
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
         var acknowledged: [String] = []
@@ -84,7 +84,7 @@ public enum TransactionInbox {
                 acknowledged.append(message.messageID)
             } catch {
                 if firstSkip == nil { firstSkip = (messageID: message.messageID, error: error) }
-                result.skipped.append(TransactionInboxSkip(messageID: message.messageID, reason: error.localizedDescription))
+                result.skipped.append(TransactionInboxSkip(messageID: message.messageID, reason: OneSatLog.localizedMessage(error)))
             }
         }
         if let firstSkip {
@@ -99,7 +99,7 @@ public enum TransactionInbox {
                 try await ctx.relay.acknowledge(host: host, messageIDs: acknowledged)
             } catch {
                 OneSatLog.error(error, "1Color inbox: acknowledge failed", category: "OneSatColor")
-                result.error = "acknowledge-failed: \(error.localizedDescription)"
+                result.error = "acknowledge-failed: \(OneSatLog.localizedMessage(error))"
             }
         }
         return result
@@ -274,7 +274,7 @@ public enum TransactionInbox {
                         resolved = ctx.overlay
                     }
                 } catch {
-                    throw Skip(reason: error.localizedDescription)
+                    throw Skip(reason: OneSatLog.localizedMessage(error))
                 }
                 guard let resolved else { throw Skip(reason: "overlay-required") }
                 targets.append((assetID, resolved, indexes))

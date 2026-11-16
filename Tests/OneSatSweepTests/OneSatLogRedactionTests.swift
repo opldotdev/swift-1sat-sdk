@@ -110,6 +110,166 @@ final class OneSatLogRedactionTests: XCTestCase {
         )
     }
 
+    /// A token ID as this SDK writes one: a txid, `_`, an output index.
+    private let tokenID = "e6d40ba206340aa94ed40fe1a8adcd722c08c9438b2c1dd16b4527d561e848a2_0"
+
+    func test_redactingQueriesRedactsUnquotedHeaderValues() {
+        XCTAssertEqual(OneSatLog.redactingQueries("token: abc"), "token: <redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("X-Api-Key: abc"), "X-Api-Key: <redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("x-api-key: abc123 sent"), "x-api-key: <redacted> sent")
+        XCTAssertEqual(
+            OneSatLog.redactingQueries("headers: [token: abc, accept: json]"),
+            "headers: [token: <redacted>, accept: json]"
+        )
+        XCTAssertEqual(OneSatLog.redactingQueries("GET /v1\ntoken: abc\nhost: x"), "GET /v1\ntoken: <redacted>\nhost: x")
+        XCTAssertEqual(OneSatLog.redactingQueries(#"{"api_key": 12345}"#), #"{"api_key": <redacted>}"#)
+        XCTAssertEqual(OneSatLog.redactingQueries(#"{"api_key": [1]}"#), #"{"api_key": [1]}"#)
+        XCTAssertEqual(OneSatLog.redactingQueries("password: hunter2"), "password: <redacted>")
+    }
+
+    func test_redactingQueriesLeavesUnquotedTokenWordsInProseAndReflections() {
+        for prose in [
+            "no liveness read for this token: no pool can be planned",
+            "token: no pool can be planned",
+            "Invalid mnemonic: word count must be 12",
+            "Invalid password: too short",
+            "Invalid WIF: bad checksum",
+        ] {
+            XCTAssertEqual(OneSatLog.redactingQueries(prose), prose)
+        }
+        XCTAssertEqual(OneSatLog.redactingQueries("token: \(tokenID)"), "token: \(tokenID)")
+        XCTAssertEqual(OneSatLog.redactingQueries("Session(authToken: nil)"), "Session(authToken: nil)")
+        let nested = #"Holder(token: OneSatClient.Token(id: "x"))"#
+        XCTAssertEqual(OneSatLog.redactingQueries(nested), nested)
+        let json = #"{"token":{"id":"x"}}"#
+        XCTAssertEqual(OneSatLog.redactingQueries(json), json)
+    }
+
+    func test_redactingQueriesRedactsABearerCredentialButNotTheWord() {
+        XCTAssertEqual(OneSatLog.redactingQueries("sent Bearer abcdefgh123"), "sent Bearer <redacted>")
+        XCTAssertEqual(
+            OneSatLog.redactingQueries("sent Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig"),
+            "sent Bearer <redacted>"
+        )
+        XCTAssertEqual(
+            OneSatLog.redactingQueries("sent bearer abcdefghijklmnopqrstuvwxyz"), "sent bearer <redacted>"
+        )
+        XCTAssertEqual(OneSatLog.redactingQueries("the bearer certificate expired"), "the bearer certificate expired")
+        XCTAssertEqual(OneSatLog.redactingQueries("bearer instruments are paper"), "bearer instruments are paper")
+    }
+
+    func test_redactingQueriesRedactsAnAuthorizationCredentialButNotProse() {
+        XCTAssertEqual(OneSatLog.redactingQueries("Authorization: abc123"), "Authorization: <redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("Authorization: SECRETSECRET"), "Authorization: <redacted>")
+        XCTAssertEqual(
+            OneSatLog.redactingQueries("Proxy-Authorization: Basic dXNlcjpwYXNz"), "Proxy-Authorization: <redacted>"
+        )
+        XCTAssertEqual(OneSatLog.redactingQueries("authorization: denied"), "authorization: denied")
+        XCTAssertEqual(
+            OneSatLog.redactingQueries("Authorization: denied. Sign in again"), "Authorization: denied. Sign in again"
+        )
+        XCTAssertEqual(OneSatLog.redactingQueries("authorization: denied for user"), "authorization: denied for user")
+        XCTAssertEqual(OneSatLog.redactingQueries("Authorization: Apikey abc123"), "Authorization: <redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("Authorization: Key abc123"), "Authorization: <redacted>")
+        XCTAssertEqual(
+            OneSatLog.redactingQueries("Authorization: Key abcdefghijklmnopqr"), "Authorization: <redacted>"
+        )
+        XCTAssertEqual(OneSatLog.redactingQueries("X-Authorization: abc123"), "X-Authorization: <redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("x-authorization: denied"), "x-authorization: denied")
+    }
+
+    func test_redactingQueriesKeepsTokenIDsAndLabelsButNotSecretsInKeyAndTokenFields() {
+        let reflected = #"Bsv21Token(token: "\#(tokenID)", amount: 5)"#
+        XCTAssertEqual(OneSatLog.redactingQueries(reflected), reflected)
+        let label = #"RarityLabelEntry(key: "Legendary", value: "1")"#
+        XCTAssertEqual(OneSatLog.redactingQueries(label), label)
+        XCTAssertEqual(OneSatLog.redactingQueries(#"{"token":"\#(tokenID)"}"#), #"{"token":"\#(tokenID)"}"#)
+        XCTAssertEqual(
+            OneSatLog.redactingQueries(#"Session(token: "eyJhbGciOiJIUzI1NiJ9")"#),
+            #"Session(token: "<redacted>")"#
+        )
+        XCTAssertEqual(
+            OneSatLog.redactingQueries(#"Config(key: "L1aXYZ9secretvalue")"#), #"Config(key: "<redacted>")"#
+        )
+        XCTAssertEqual(OneSatLog.redactingQueries(#"{"key":"abc_0"}"#), #"{"key":"<redacted>"}"#)
+        XCTAssertEqual(
+            OneSatLog.redactingQueries(#"Client(authToken: "\#(tokenID)")"#), #"Client(authToken: "<redacted>")"#
+        )
+    }
+
+    func test_redactingQueriesRedactsRecoveryPhrases() {
+        let phrase = "abandon ability able about above absent absorb abstract absurd abuse access accident"
+        XCTAssertEqual(
+            OneSatLog.redactingQueries(#"Wallet(mnemonic: "abandon ability able about")"#),
+            #"Wallet(mnemonic: "<redacted>")"#
+        )
+        XCTAssertEqual(OneSatLog.redactingQueries("mnemonic: \(phrase)"), "mnemonic: <redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("recovery_phrase=\(phrase)"), "recovery_phrase=<redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("seedPhrase: \(phrase), next"), "seedPhrase: <redacted>, next")
+        XCTAssertEqual(OneSatLog.redactingQueries("a phrase of three words"), "a phrase of three words")
+    }
+
+    func test_redactingQueriesRedactsAWIFButNotAnAddressOrATxid() {
+        XCTAssertEqual(
+            OneSatLog.redactingQueries("imported KwdMAjGmerYanjeui5SHS7JkmpZvVipYvB2LJGU1ZxJwYvP98617 ok"),
+            "imported <redacted> ok"
+        )
+        XCTAssertEqual(
+            OneSatLog.redactingQueries("imported 5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ ok"),
+            "imported <redacted> ok"
+        )
+        let address = "pay 1BgGZ9tcN4rm9KBzDn7KprQz87SZ26SAMH now"
+        XCTAssertEqual(OneSatLog.redactingQueries(address), address)
+        XCTAssertEqual(OneSatLog.redactingQueries("sent \(tokenID)"), "sent \(tokenID)")
+    }
+
+    func test_redactingTwiceChangesNothing() {
+        let text = #"Authorization: Bearer abc123 {"auth_token":"S"} token: abc key=v https://h/p?q=1 "#
+            + "KwdMAjGmerYanjeui5SHS7JkmpZvVipYvB2LJGU1ZxJwYvP98617"
+        let once = OneSatLog.redactingQueries(text)
+        XCTAssertEqual(OneSatLog.redactingQueries(once), once)
+        XCTAssertFalse(once.contains("abc123"), once)
+        XCTAssertFalse(once.contains("KwdMAj"), once)
+    }
+
+    func test_localizedMessageKeepsTheLocalizedWordsWithoutSecrets() {
+        struct Refused: LocalizedError {
+            var errorDescription: String? { "The overlay at https://o.example/submit?api_key=SECRET refused it." }
+        }
+        XCTAssertEqual(OneSatLog.localizedMessage(Refused()), "The overlay at https://o.example/submit refused it.")
+        struct Plain: LocalizedError { var errorDescription: String? { "overlay-required" } }
+        XCTAssertEqual(OneSatLog.localizedMessage(Plain()), "overlay-required")
+    }
+
+    func test_urlFreeThrownRebuildsAURLErrorWithoutItsQuery() throws {
+        let error = URLError(
+            .timedOut,
+            userInfo: [
+                NSLocalizedDescriptionKey: "The request timed out.",
+                "NSErrorFailingURLKey": url, "NSErrorFailingURLStringKey": url.absoluteString,
+            ]
+        )
+        let clean = try XCTUnwrap(OneSatLog.urlFree(thrown: error) as? URLError)
+        XCTAssertEqual(clean.code, .timedOut)
+        XCTAssertEqual(clean.errorUserInfo["NSErrorFailingURLStringKey"] as? String, "https://proxy-api.mnee.net/v1/tx/abc")
+        XCTAssertFalse(String(reflecting: clean).contains("SECRET"), String(reflecting: clean))
+    }
+
+    /// What URLSession throws on Linux: an `NSError` in the URL domain, not a `URLError`.
+    func test_urlFreeThrownRebuildsAnNSErrorInTheURLDomain() throws {
+        let clean = try XCTUnwrap(OneSatLog.urlFree(thrown: offline()) as? URLError)
+        XCTAssertEqual(clean.code, .notConnectedToInternet)
+        XCTAssertFalse(String(reflecting: clean).contains("SECRET"), String(reflecting: clean))
+        XCTAssertFalse(String(describing: clean.errorUserInfo).contains("SECRET"))
+    }
+
+    func test_urlFreeThrownPassesOtherErrorsThrough() {
+        XCTAssertTrue(OneSatLog.urlFree(thrown: CancellationError()) is CancellationError)
+        let other = NSError(domain: "dev.opl.test", code: 3)
+        let passed = OneSatLog.urlFree(thrown: other)
+        XCTAssertEqual(OneSatLog.FoundationError(passed)?.domain, "dev.opl.test")
+    }
+
     func test_messageKeepsAPlainErrorsOwnWords() {
         struct Plain: Error, CustomStringConvertible { var description: String { "the overlay refused it" } }
         XCTAssertEqual(OneSatLog.message(Plain()), "the overlay refused it")

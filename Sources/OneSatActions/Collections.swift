@@ -170,7 +170,7 @@ public enum Collections {
             return MintResult(error: error.wireMessage)
         } catch {
             OneSatLog.error(error, "collection mint failed", category: "OneSatActions")
-            return MintResult(error: error.localizedDescription)
+            return MintResult(error: OneSatLog.localizedMessage(error))
         }
     }
 

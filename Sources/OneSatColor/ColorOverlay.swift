@@ -120,8 +120,16 @@ public struct HTTPColorOverlay: ColorOverlayProvider {
         self.post = post
     }
 
-    public static let urlSessionPost: Post = { request in
-        let (data, response) = try await URLSession.shared.data(for: request)
+    /// One POST with `URLSession.shared`. A URL loading error is thrown without its URL's query
+    /// string (``OneSatLog/urlFree(thrown:)``), as every SDK transport throws it.
+    public static let urlSessionPost: Post = { (request: URLRequest) async throws -> (status: Int, body: [UInt8]) in
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw OneSatLog.urlFree(thrown: error)
+        }
         return ((response as? HTTPURLResponse)?.statusCode ?? 0, Array(data))
     }
 
