@@ -53,10 +53,10 @@ extension OneColorActions {
     ) async -> Transfer1ColorResult {
         var result = Transfer1ColorResult()
         do {
-            for label in labels where label.hasPrefix("\(ColorIdentifiers.basketNamespace) ") {
+            for label in labels where label.utf8.starts(with: "\(ColorIdentifiers.basketNamespace) ".utf8) {
                 throw ColorError.custody("unknown p color label")
             }
-            for label in labels where label.hasPrefix("p nosend expiry ") {
+            for label in labels where label.utf8.starts(with: "p nosend expiry ".utf8) {
                 throw ColorError.custody("a transfer is not a handoff; send hands tokens over")
             }
             let plan = ColorPlan(assets: [.asset(assetID)], operations: [.init(asset: .asset(assetID), operation: .transfer)])
@@ -136,7 +136,7 @@ extension ColorModule {
                 throw ColorError.invalid("output \(index) locking script")
             }
             guard let token = try ColorTokenOutput.read(script, txid: String(repeating: "0", count: 64), vout: UInt32(index)) else {
-                if output.basket?.hasPrefix("\(ColorIdentifiers.basketNamespace) ") == true {
+                if output.basket?.utf8.starts(with: "\(ColorIdentifiers.basketNamespace) ".utf8) == true {
                     throw ColorError.custody("a p color basket can only receive BRC-162 token outputs")
                 }
                 continue

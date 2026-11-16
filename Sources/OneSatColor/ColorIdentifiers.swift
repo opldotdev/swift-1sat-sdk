@@ -49,7 +49,7 @@ public enum ColorIdentifiers {
 
     /// Parses a `p color` protocol name back into its selector and remittance strings.
     public static func parseProtocolName(_ name: String) throws -> (selector: ColorAssetSelector, derivationPrefix: String, derivationSuffix: String) {
-        let parts = name.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        let parts = splitOnSpace(name)
         guard parts.count == 5, parts[0] == "p", parts[1] == "color", name.utf16.count <= maxProtocolNameLength else {
             throw ColorError.invalid("p color protocol name")
         }
@@ -71,7 +71,7 @@ public enum ColorIdentifiers {
 
     /// Parses a per-asset basket; nil for any other basket.
     public static func parseBasket(_ basket: String) throws -> (assetID: ColorAssetID, role: ColorTokenRole)? {
-        let parts = basket.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        let parts = splitOnSpace(basket)
         guard parts.count > 2, parts[0] == "p", parts[1] == "color", parts[2] != "balance", parts[2] != "assets" else {
             return nil
         }
@@ -80,7 +80,7 @@ public enum ColorIdentifiers {
 
     /// Parses `p color balance <tag>` or `p color balance <tag> authority`; nil otherwise.
     public static func parseBalanceSelector(_ basket: String) throws -> (assetID: ColorAssetID, role: ColorTokenRole)? {
-        let parts = basket.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        let parts = splitOnSpace(basket)
         guard parts.count > 2, parts[0] == "p", parts[1] == "color", parts[2] == "balance" else { return nil }
         return try parseTagged(Array(parts.dropFirst(3)))
     }
@@ -100,11 +100,11 @@ public enum ColorIdentifiers {
 
     public static func isDerivationSuffixTag(_ tag: String) -> Bool {
         let prefix = "\(basketNamespace) "
-        guard tag.hasPrefix(prefix) else { return false }
+        guard tag.utf8.starts(with: prefix.utf8) else { return false }
         // TS `/^p color [0-9a-f]{64}$/`: compare bytes, not graphemes, so a combining mark
         // after the last hex digit does not pass.
         let hex = tag.utf8.dropFirst(prefix.utf8.count)
-        return hex.count == 64 && hex.allSatisfy { (0x30...0x39).contains($0) || (0x61...0x66).contains($0) }
+        return hex.count == 64 && hex.allSatisfy(isLowerHexByte)
     }
 
     /// A remittance string is nonempty strict UTF-8 without whitespace. Swift strings are always
@@ -124,11 +124,23 @@ public enum ColorIdentifiers {
         }
     }
 
+    /// TS `assetIdFromTag`: anything but `issue` or `<64 hex>v<vout>` is an invalid asset tag.
     static func selector(fromTag tag: String) throws -> ColorAssetSelector {
         if tag == "issue" { return .issue }
-        guard let v = tag.firstIndex(of: "v") else { throw ColorError.invalid("asset tag") }
-        let txid = String(tag[..<v]), vout = String(tag[tag.index(after: v)...])
-        return .asset(try ColorAssetID(txid: txid, voutText: vout))
+        guard let v = tag.utf8.firstIndex(of: UInt8(ascii: "v")),
+              let id = try? ColorAssetID(
+                  txid: String(decoding: tag.utf8[..<v], as: UTF8.self),
+                  voutText: String(decoding: tag.utf8[tag.utf8.index(after: v)...], as: UTF8.self)
+              ) else {
+            throw ColorError.invalid("asset tag")
+        }
+        return .asset(id)
+    }
+
+    /// TS `split(' ')`: splits on U+0020 alone, so a combining mark after a space starts the next
+    /// part rather than joining the space into one character.
+    static func splitOnSpace(_ text: String) -> [String] {
+        text.utf8.split(separator: 0x20, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
     }
 
     private static func parseTagged(_ rest: [String]) throws -> (assetID: ColorAssetID, role: ColorTokenRole)? {
@@ -139,8 +151,13 @@ public enum ColorIdentifiers {
         return (id, rest.count == 2 ? .authority : .value)
     }
 
+    /// `/^(?:[0-9a-f]{2})+$/`, on bytes: a digit followed by a combining mark is no hex digit.
     private static func isHexTag(_ text: String) -> Bool {
-        !text.isEmpty && text.count % 2 == 0 && text.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
+        !text.isEmpty && text.utf8.count % 2 == 0 && text.utf8.allSatisfy(isLowerHexByte)
+    }
+
+    static func isLowerHexByte(_ byte: UInt8) -> Bool {
+        (0x30...0x39).contains(byte) || (0x61...0x66).contains(byte)
     }
 
     /// Decodes UTF-8 only when it round-trips: `TextDecoder('utf-8', { fatal: true })`.
@@ -168,7 +185,8 @@ public struct ColorAssetID: Hashable, Sendable, CustomStringConvertible, Compara
     public let vout: UInt32
 
     public init(txid: String, vout: UInt32) throws {
-        guard txid.utf8.count == 64, txid.allSatisfy({ ("0"..."9").contains($0) || ("a"..."f").contains($0) }) else {
+        // Bytes, not characters: `"1\u{301}"` is one character that sorts between "0" and "9".
+        guard txid.utf8.count == 64, txid.utf8.allSatisfy(ColorIdentifiers.isLowerHexByte) else {
             throw ColorError.invalid("asset ID")
         }
         self.txid = txid
@@ -183,8 +201,8 @@ public struct ColorAssetID: Hashable, Sendable, CustomStringConvertible, Compara
 
     init(txid: String, voutText: String) throws {
         // `(0|[1-9]\d{0,9})` then <= 0xffffffff.
-        guard !voutText.isEmpty, voutText.count <= 10, voutText.allSatisfy({ ("0"..."9").contains($0) }),
-              voutText == "0" || !voutText.hasPrefix("0"),
+        guard !voutText.isEmpty, voutText.utf8.count <= 10, voutText.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
+              voutText == "0" || voutText.utf8.first != 0x30,
               let value = UInt64(voutText), value <= UInt64(UInt32.max) else {
             throw ColorError.invalid("asset ID")
         }
