@@ -356,7 +356,7 @@ enum ColorModule {
             }
             total = page.totalOutputs
             // `offset` never passes the count: the loop continues only while `offset < total`.
-            if page.outputs.count > Int(limit) || page.outputs.count > Int(page.totalOutputs) - Int(offset) {
+            if page.outputs.count > Int(limit) || UInt64(page.outputs.count) > page.totalOutputs - UInt64(offset) {
                 throw ColorError.custody("the listing exceeded its bounds")
             }
             for output in page.outputs {
@@ -366,7 +366,9 @@ enum ColorModule {
             }
             if let pageBEEF = page.beef { sources = try sources.merging(pageBEEF, limits: beefLimits) }
             if found == wanted { return sources }
-            offset += UInt32(page.outputs.count)
+            let (next, overflow) = offset.addingReportingOverflow(UInt32(page.outputs.count))
+            guard !overflow else { throw ColorError.custody("the listing exceeded its bounds") }
+            offset = next
             guard !page.outputs.isEmpty, let total, offset < total else {
                 throw ColorError.custody("the wallet returned other outputs than the selected token inputs")
             }
