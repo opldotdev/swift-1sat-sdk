@@ -62,7 +62,7 @@ extension OneColorActions {
             let selected = outputs.value > 0
                 ? try await ColorModule.selectInputs(ctx, overlay: overlay, assetID: assetID, target: outputs.value)
                 : []
-            let selectedValue = selected.reduce(0) { $0 + $1.amount }
+            let selectedValue = try ColorModule.sumAmounts(selected)
             // Change returns what selection adds beyond the need.
             let change = selectedValue > 0 ? selectedValue - outputs.value : 0
             try ColorOperations.assertOperations(plan, assetID: assetID, required: try ColorOperations.required(

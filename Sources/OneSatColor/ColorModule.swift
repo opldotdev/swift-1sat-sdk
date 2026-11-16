@@ -85,7 +85,9 @@ enum ColorModule {
                 if total >= target { break }
                 if rejected.contains(candidate.output.outpoint.description) { continue }
                 chosen.append(candidate)
-                total += role == .value ? candidate.token.amount : 1
+                // TS sums in bigint; once the sum passes UInt64 it is past any target.
+                let (sum, overflow) = total.addingReportingOverflow(role == .value ? candidate.token.amount : 1)
+                total = overflow ? .max : sum
             }
             guard total >= target else {
                 throw ColorError.custody("insufficient spendable \(role == .value ? "balance" : "authority") of \(assetID)")
@@ -405,6 +407,16 @@ enum ColorModule {
         return (output, custody, script, suffixTag)
     }
 
+    /// The selected inputs' total. TS sums in bigint; a total past UInt64 cannot be filed as one
+    /// change output here, so it is refused rather than trapping.
+    static func sumAmounts(_ selected: [ColorManagedInput]) throws -> UInt64 {
+        try selected.reduce(UInt64(0)) { total, input in
+            let (sum, overflow) = total.addingReportingOverflow(input.amount)
+            if overflow { throw ColorError.custody("the selected token inputs exceed the largest amount") }
+            return sum
+        }
+    }
+
     /// Splits the selected inputs into an output of exactly `amount` and token change, broadcast
     /// and submitted, and returns the exact output as the handoff's input.
     ///
@@ -415,7 +427,7 @@ enum ColorModule {
         _ ctx: OneColorContext, overlay: any ColorOverlayProvider, assetID: ColorAssetID,
         selected: [ColorManagedInput], amount: UInt64
     ) async throws -> ColorManagedInput {
-        let change = selected.reduce(0) { $0 + $1.amount } - amount
+        let change = try ColorModule.sumAmounts(selected) - amount
         let exact = try await newManagedOutput(ctx, assetID: assetID, amount: amount)
         let rest = try await newManagedOutput(ctx, assetID: assetID, amount: change)
         let plan = ColorPlan(

@@ -101,8 +101,10 @@ public enum ColorIdentifiers {
     public static func isDerivationSuffixTag(_ tag: String) -> Bool {
         let prefix = "\(basketNamespace) "
         guard tag.hasPrefix(prefix) else { return false }
-        let hex = tag.dropFirst(prefix.count)
-        return hex.count == 64 && hex.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
+        // TS `/^p color [0-9a-f]{64}$/`: compare bytes, not graphemes, so a combining mark
+        // after the last hex digit does not pass.
+        let hex = tag.utf8.dropFirst(prefix.utf8.count)
+        return hex.count == 64 && hex.allSatisfy { (0x30...0x39).contains($0) || (0x61...0x66).contains($0) }
     }
 
     /// A remittance string is nonempty strict UTF-8 without whitespace. Swift strings are always
