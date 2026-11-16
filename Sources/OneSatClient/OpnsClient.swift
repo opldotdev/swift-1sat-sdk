@@ -44,7 +44,9 @@ public struct URLSessionOneSatTransport: OneSatHTTPTransport {
             guard let foundation = OneSatLog.FoundationError(error), foundation.domain == "NSURLErrorDomain" else {
                 throw error
             }
-            throw Self.urlFree(URLError(URLError.Code(rawValue: foundation.code), userInfo: foundation.userInfo))
+            // `URLError.Code(rawValue:)` is failable in corelibs Foundation and not on Darwin.
+            let code: URLError.Code? = URLError.Code(rawValue: foundation.code)
+            throw Self.urlFree(URLError(code ?? .unknown, userInfo: foundation.userInfo))
         }
         guard let http = response as? HTTPURLResponse else {
             OneSatClientHTTP.unreadable(
