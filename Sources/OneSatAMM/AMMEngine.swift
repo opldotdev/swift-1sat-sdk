@@ -275,8 +275,9 @@ public enum AMMAllocation {
         let scaled = floatShares.map { ($0 / totalFloat) * targetNum }
         let floors = try scaled.map { s -> BigInt in
             let value = jsMax(0, s.rounded(.down))
-            guard !value.isNaN else {
-                throw AMMEngineError(description: "RangeError: The number NaN cannot be converted to a BigInt because it is not an integer")
+            // NaN or an infinite share: the error JS's BigInt() throws, as the public engine error.
+            guard value.isFinite else {
+                throw AMMEngineError(description: "RangeError: The number \(JS.string(value)) cannot be converted to a BigInt because it is not an integer")
             }
             return try JS.bigInt(value)
         }
