@@ -2,6 +2,7 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+import OneSatSweep
 
 /// BRC-169 handle resolution, ported from `client/src/handles.ts`.
 ///
@@ -75,10 +76,18 @@ public struct HandleResolver: Sendable {
         }
         let manifest = try await fetch(manifestURL)
         guard (200..<300).contains(manifest.status) else {
-            throw MetanetError.handle("manifest fetch failed for \(domain): \(manifest.status)")
+            let detail = Self.failure("manifest", url: manifestURL, status: manifest.status, body: manifest.body, domain: domain)
+            throw MetanetError.handle(
+                "manifest fetch failed for \(domain): \(manifest.status)\(detail.serverMessage.map { ": \($0)" } ?? "")"
+            )
         }
+        // A manifest that is not JSON, or has no `metanet.handles`, is a domain without handles.
         let object = try? JSONSerialization.jsonObject(with: Data(manifest.body)) as? [String: Any]
         guard let handles = (object?["metanet"] as? [String: Any])?["handles"] as? [String: Any] else {
+            OneSatLog.error(
+                "HandleResolver: \(domain)/manifest.json has no metanet.handles; body: \(OneSatHTTPFailure.logText(manifest.body))",
+                category: Self.logCategory
+            )
             throw MetanetError.handle("\(domain) does not offer handle resolution")
         }
         let version = handles["version"] as? String
@@ -97,14 +106,22 @@ public struct HandleResolver: Sendable {
         }
         let answer = try await fetch(resolveURL)
         guard (200..<300).contains(answer.status) else {
+            let detail = Self.failure("resolve", url: resolveURL, status: answer.status, body: answer.body, domain: domain)
+            // An error body is optional; its `error.code` is added when there is one.
             let body = try? JSONSerialization.jsonObject(with: Data(answer.body)) as? [String: Any]
             let code = ((body?["error"] as? [String: Any])?["code"] as? String).map { " \($0)" } ?? ""
-            throw MetanetError.handle("resolve \(handle)@\(domain) failed: \(answer.status)\(code)")
+            var text = "resolve \(handle)@\(domain) failed: \(answer.status)\(code)"
+            if let message = detail.serverMessage, !code.hasSuffix(message) { text += ": \(message)" }
+            throw MetanetError.handle(text)
         }
         guard let row = try? JSONSerialization.jsonObject(with: Data(answer.body)) as? [String: Any],
               let identityKey = row["identityKey"] as? String,
               let subject = (row["certificate"] as? [String: Any])?["subject"] as? String,
               subject == identityKey else {
+            OneSatLog.error(
+                "HandleResolver: \(domain) resolution for \(handle) has no matching certificate subject; body: \(OneSatHTTPFailure.logText(answer.body))",
+                category: Self.logCategory
+            )
             throw MetanetError.handle(
                 "certificate subject does not match identity key for \(handle)@\(domain)"
             )
@@ -122,6 +139,18 @@ public struct HandleResolver: Sendable {
             revoked: row["revoked"] as? Bool ?? false,
             tag: tag
         )
+    }
+
+    static let logCategory = "OneSatMetanet"
+
+    /// Logs a failed handle request in full; the message keeps the status and server reason.
+    private static func failure(_ call: String, url: URL, status: Int, body: [UInt8], domain: String) -> OneSatHTTPFailure {
+        let detail = OneSatHTTPFailure(
+            service: "\(domain)'s handle service", operation: "HandleResolver \(call)", method: "GET", url: url,
+            statusCode: status, body: body
+        )
+        detail.log(category: logCategory)
+        return detail
     }
 
     /// JavaScript's `encodeURIComponent`.

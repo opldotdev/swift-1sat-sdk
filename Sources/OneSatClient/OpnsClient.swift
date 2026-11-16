@@ -1,4 +1,5 @@
 import Foundation
+import OneSatSweep
 
 #if canImport(FoundationNetworking)
     import FoundationNetworking
@@ -31,11 +32,50 @@ public struct URLSessionOneSatTransport: OneSatHTTPTransport {
         if let body {
             request.httpBody = Data(body)
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let error as URLError {
+            throw Self.urlFree(error)
+        } catch {
+            // On Linux URLSession throws an `NSError` in the URL domain, which does not cast to
+            // `URLError` there; it carries the same full URL.
+            guard let foundation = OneSatLog.FoundationError(error), foundation.domain == "NSURLErrorDomain" else {
+                throw error
+            }
+            // `URLError.Code(rawValue:)` is failable in corelibs Foundation and not on Darwin.
+            let code: URLError.Code? = URLError.Code(rawValue: foundation.code)
+            throw Self.urlFree(URLError(code ?? .unknown, userInfo: foundation.userInfo))
+        }
         guard let http = response as? HTTPURLResponse else {
+            OneSatClientHTTP.unreadable(
+                "URLSessionOneSatTransport.send", method: method, url: url, body: Array(data), why: "not an HTTP response"
+            )
             throw OneSatClientError.unreadableResponse
         }
         return (http.statusCode, Array(data))
+    }
+
+    /// `error` rebuilt without the failing URL's query string: the same code and description,
+    /// the failing URL as scheme, host and path, and the error under it as its domain, code and
+    /// description only. Some services take an API key in the query (MNEE's `auth_token`), and
+    /// URLSession's error carries the full URL to every caller and log.
+    public static func urlFree(_ error: URLError) -> URLError {
+        var info: [String: Any] = [NSLocalizedDescriptionKey: OneSatLog.redactingQueries(error.localizedDescription)]
+        let original = OneSatLog.FoundationError(error)
+        if let failing = original?.failingURL, let bare = OneSatLog.withoutQuery(failing) {
+            info[OneSatLog.failingURLKey] = bare
+            info[OneSatLog.failingURLStringKey] = bare.absoluteString
+        }
+        if let underlying = original?.underlying {
+            let inner = OneSatLog.FoundationError(underlying)
+            info[NSUnderlyingErrorKey] = NSError(
+                domain: inner?.domain ?? String(describing: type(of: underlying)), code: inner?.code ?? 0,
+                userInfo: [NSLocalizedDescriptionKey: OneSatLog.redactingQueries(underlying.localizedDescription)]
+            )
+        }
+        return URLError(error.code, userInfo: info)
     }
 }
 
@@ -88,14 +128,16 @@ public struct OpnsClient: Sendable {
 
     public func validateOrigins(_ outpoints: [String]) async throws -> [String: Bool] {
         let body = Array(try JSONEncoder().encode(outpoints))
-        return try decode(
+        let url = Self.originsURL(baseURL: baseURL)
+        return try OneSatClientHTTP.decode(
+            [String: Bool].self,
             try await transport.send(
                 method: "POST",
-                url: Self.originsURL(baseURL: baseURL),
+                url: url,
                 headers: ["Content-Type": "application/json"],
                 body: body
             ),
-            as: [String: Bool].self
+            service: Self.service, operation: "OpnsClient.validateOrigins", method: "POST", url: url
         )
     }
 
@@ -108,24 +150,13 @@ public struct OpnsClient: Sendable {
         )
     }
 
-    private func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
-        try decode(
-            try await transport.send(method: "GET", url: url, headers: [:], body: nil),
-            as: type
-        )
-    }
+    private static let service = "the OpNS name service"
 
-    private func decode<T: Decodable>(
-        _ response: (status: Int, body: [UInt8]),
-        as type: T.Type
-    ) throws -> T {
-        guard (200..<300).contains(response.status) else {
-            throw OneSatClientError.httpFailure(statusCode: response.status)
-        }
-        guard let value = try? JSONDecoder().decode(type, from: Data(response.body)) else {
-            throw OneSatClientError.unreadableResponse
-        }
-        return value
+    private func get<T: Decodable>(_ url: URL, as type: T.Type, operation: String = #function) async throws -> T {
+        try OneSatClientHTTP.decode(
+            type, try await transport.send(method: "GET", url: url, headers: [:], body: nil),
+            service: Self.service, operation: "OpnsClient.\(operation)", method: "GET", url: url
+        )
     }
 
     private static func trimmedBase(_ baseURL: URL) -> String {

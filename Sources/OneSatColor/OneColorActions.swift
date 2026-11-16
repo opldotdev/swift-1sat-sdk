@@ -9,6 +9,7 @@ import ToolboxActions
 import ToolboxStorage
 import OneSatTemplates
 import OneSatMetanet
+import OneSatSweep
 
 public struct Deploy1ColorResult: Equatable, Sendable {
     public var txid: String?
@@ -61,6 +62,7 @@ public enum OneColorActions {
                 derivationSuffix: ColorExecutor.randomBase64(), senderIdentityKey: ctx.identityKey
             )
         } catch {
+            OneSatLog.error(error, "1Color deploy failed", category: "OneSatColor")
             return Deploy1ColorResult(error: error.localizedDescription)
         }
         return await deploy(ctx, amount: amount, decimals: decimals, symbol: symbol, icon: icon, custody: custody)
@@ -132,6 +134,7 @@ public enum OneColorActions {
             result.submitted = true
             return result
         } catch {
+            OneSatLog.error(error, "1Color resubmit deploy failed", category: "OneSatColor")
             result.error = error.localizedDescription
             return result
         }
@@ -192,6 +195,7 @@ public enum OneColorActions {
             result.submitted = true
             return result
         } catch {
+            OneSatLog.error(error, "1Color send failed", category: "OneSatColor")
             result.error = error.localizedDescription
             return result
         }
@@ -309,10 +313,12 @@ public enum OneColorActions {
                 result.delivered = true
                 result.messageID = sent.messageID
             } catch {
+                OneSatLog.error(error, "1Color send: delivery to the recipient failed", category: "OneSatColor")
                 result.error = "delivery-failed: \(error.localizedDescription)"
             }
             return result
         } catch {
+            OneSatLog.error(error, "1Color send failed", category: "OneSatColor")
             result.error = error.localizedDescription
             return result
         }

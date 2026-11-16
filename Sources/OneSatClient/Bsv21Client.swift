@@ -156,34 +156,34 @@ public struct Bsv21Client: Sendable {
     }
 
     public func tokenDetails(tokenID: String) async throws -> Bsv21TokenDetails {
-        try decode(try await transport.send(
+        try await send(
             method: "GET",
             url: endpoint(tokenID),
             headers: [:],
             body: nil
-        ))
+        )
     }
 
     /// The payment outputs that activate the token's overlay: enough to meet its minimum
     /// funding and index its queued backlog. Empty when no funding is needed.
     public func fundingTemplate(tokenID: String) async throws -> Bsv21FundingTemplate {
-        try decode(try await transport.send(
+        try await send(
             method: "GET",
             url: endpoint(tokenID).appendingPathComponent("fund"),
             headers: [:],
             body: nil
-        ))
+        )
     }
 
     /// Submits a BEEF transaction paying the token's fee address. The server broadcasts it,
     /// indexes it, and starts the overlay if the funding qualifies. Returns the token's status.
     public func submitFunding(tokenID: String, beef: [UInt8]) async throws -> Bsv21TokenDetails.Status {
-        try decode(try await transport.send(
+        try await send(
             method: "POST",
             url: endpoint(tokenID).appendingPathComponent("fund"),
             headers: ["Content-Type": "application/octet-stream"],
             body: beef
-        ))
+        )
     }
 
     /// The overlay state of each outpoint: valid, spent, queued, or unknown. Results come back
@@ -196,12 +196,12 @@ public struct Bsv21Client: Sendable {
         var start = 0
         while start < outpoints.count {
             let batch = Array(outpoints[start..<min(start + Self.outputStatusBatchSize, outpoints.count)])
-            let decoded: [Bsv21OutputStatus] = try decode(try await transport.send(
+            let decoded: [Bsv21OutputStatus] = try await send(
                 method: "POST",
                 url: url,
                 headers: ["Content-Type": "application/json"],
                 body: Array(try JSONEncoder().encode(batch))
-            ))
+            )
             results.append(contentsOf: decoded)
             start += Self.outputStatusBatchSize
         }
@@ -224,12 +224,12 @@ public struct Bsv21Client: Sendable {
             components?.queryItems = [URLQueryItem(name: "unspent", value: "true")]
         }
         guard let url = components?.url else { throw OneSatClientError.unreadableResponse }
-        return try decode(try await transport.send(
+        return try await send(
             method: "POST",
             url: url,
             headers: ["Content-Type": "application/json"],
             body: Array(try JSONEncoder().encode(outpoints))
-        ))
+        )
     }
 
     private func endpoint(_ tokenID: String) -> URL {
@@ -239,15 +239,14 @@ public struct Bsv21Client: Sendable {
             .appendingPathComponent(tokenID)
     }
 
-    private func decode<T: Decodable>(
-        _ response: (status: Int, body: [UInt8])
-    ) throws -> T {
-        guard (200..<300).contains(response.status) else {
-            throw OneSatClientError.httpFailure(statusCode: response.status)
-        }
-        guard let value = try? JSONDecoder().decode(T.self, from: Data(response.body)) else {
-            throw OneSatClientError.unreadableResponse
-        }
-        return value
+    private func send<T: Decodable>(
+        method: String, url: URL, headers: [String: String], body: [UInt8]?,
+        operation: String = #function
+    ) async throws -> T {
+        let response = try await transport.send(method: method, url: url, headers: headers, body: body)
+        return try OneSatClientHTTP.decode(
+            T.self, response, service: "the BSV-21 token overlay", operation: "Bsv21Client.\(operation)",
+            method: method, url: url
+        )
     }
 }

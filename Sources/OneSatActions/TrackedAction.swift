@@ -7,6 +7,7 @@ import BSVWallet
 import ToolboxActions
 import ToolboxBRC29
 import ToolboxStorage
+import OneSatSweep
 
 /// Tracked-action execute path from `utils/createTrackedAction.ts` + `completeSignedAction.ts`.
 public enum TrackedAction {
@@ -261,9 +262,17 @@ public enum TrackedAction {
             // without checking it; here a graph that cannot prove the transaction leaves `tx`
             // nil rather than aborting an action storage already holds. Callers that hand the
             // BEEF on check for it.
+            var tx = heldBEEF
+            if tx == nil {
+                do {
+                    tx = try signed.atomicBEEF()
+                } catch {
+                    OneSatLog.error(error, "action \(actionID) sent; no Atomic BEEF for its result", category: "OneSatActions")
+                }
+            }
             return ActionResult(
                 txid: signed.transactionID.displayHex,
-                tx: heldBEEF ?? (try? signed.atomicBEEF()),
+                tx: tx,
                 actionId: actionID,
                 noSendChange: changeOutpoints
             )
@@ -275,7 +284,13 @@ public enum TrackedAction {
                 await batch.abort(ctx.auth)
             } else if let bytes = Data(base64Encoded: reference) {
                 let abort = WalletAbortActionRequest(reference: try WalletBase64Data(Array(bytes)))
-                _ = try? await ctx.storage.abortAction(ctx.auth, abort)
+                do {
+                    _ = try await ctx.storage.abortAction(ctx.auth, abort)
+                } catch {
+                    // The action's own failure is what the caller sees; a failed release only
+                    // leaves its inputs reserved until storage reclaims them.
+                    OneSatLog.error(error, "releasing the inputs of a failed action", category: "OneSatActions")
+                }
             }
             if let actionError = error as? OneSatActionError {
                 return ActionResult.failure(actionError, actionId: actionID)

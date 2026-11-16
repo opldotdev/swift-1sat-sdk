@@ -3,6 +3,7 @@ import BSVCore
 import BSVKeys
 import BSVWallet
 import OneSatCBOR
+import OneSatSweep
 import ToolboxWallet
 
 /// One authenticated binary POST to a message box server. Abstracted so tests can stand in for
@@ -33,6 +34,7 @@ public actor MessageBoxHTTPRelay: MetanetTransport {
         } catch MessageBoxError.httpStatus(let status) {
             // The reference reports `<path without slash> <status>`.
             let name = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            OneSatLog.error("MessageBoxHTTPRelay: POST \(host.host ?? "")\(path) -> HTTP \(status)", category: "OneSatMetanet")
             throw MetanetError.relay("\(name) \(status)")
         }
     }

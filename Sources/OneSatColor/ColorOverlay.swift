@@ -7,6 +7,7 @@ import BSVScript
 import BSVTransaction
 import BSVWallet
 import ToolboxActions
+import OneSatSweep
 
 /// One BRC-24 `output-list` answer: each item a BEEF and the index of the listed output in its
 /// subject transaction.
@@ -82,6 +83,7 @@ public enum ColorOverlay {
                 transaction = try ColorBEEF.subject(of: beef)
                 txid = try transaction.transactionID(limits: beefLimits.transactionLimits).displayHex
             } catch {
+                OneSatLog.error(error, "1Color overlay answer: invalid BEEF", category: "OneSatColor")
                 throw ColorError.overlay("overlay answer carries invalid BEEF")
             }
             guard let index = Int(exactly: item.outputIndex), transaction.outputs.indices.contains(index) else {
@@ -141,8 +143,24 @@ public struct HTTPColorOverlay: ColorOverlayProvider {
         request.setValue(topics.joined(separator: ","), forHTTPHeaderField: "X-Topics")
         request.httpBody = Data(beef)
         let (status, body) = try await post(request)
-        guard (200..<300).contains(status) else { throw ColorError.overlay("overlay submit failed: \(status)") }
-        return try Self.readSteak(body)
+        guard (200..<300).contains(status) else {
+            let detail = OneSatHTTPFailure(
+                service: "the 1Color overlay", operation: "HTTPColorOverlay.submit \(topics.joined(separator: ","))",
+                method: "POST", url: url, statusCode: status, body: body
+            )
+            detail.log(category: "OneSatColor")
+            // The earlier text, "overlay submit failed: <status>", with the overlay's own reason after it.
+            throw ColorError.overlay("overlay submit failed: \(status)\(detail.serverMessage.map { ": \($0)" } ?? "")")
+        }
+        do {
+            return try Self.readSteak(body)
+        } catch {
+            OneSatLog.error(
+                "HTTPColorOverlay.submit: POST \(url.host ?? "")\(url.path) answered no STEAK; body: \(OneSatHTTPFailure.logText(body))",
+                category: "OneSatColor"
+            )
+            throw error
+        }
     }
 
     /// A STEAK: `{ <topic>: { outputsToAdmit: [n], coinsToRetain: [n], … } }`.

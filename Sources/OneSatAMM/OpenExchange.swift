@@ -5,6 +5,7 @@ import FoundationNetworking
 import BSVKeys
 import BSVWallet
 import ToolboxAuth
+import OneSatSweep
 
 /// An Open Exchange host as `createClient({origin})` of `@dcasegr/amm-client` 0.55.1 (skein-amm
 /// cc146be) sees it: the swap app's base and the reads a listing needs. Every GET goes through
@@ -89,10 +90,14 @@ public struct OpenExchange: Sendable {
             let url = "\(OpenExchangeURLs.instanceBase(base))/.well-known/skein"
             let response = try await get(url, accept: "application/json")
             guard (200..<300).contains(response.statusCode) else {
+                Self.logHTTP("exchangeIdentity", url: url, status: response.statusCode, body: response.body)
                 throw OpenExchangeError.failed("GET \(url): \(response.statusCode)")
             }
             let identity = (JSONValue.parse(response.body)?["identity"]?.text ?? "").lowercased()
-            guard Self.isIdentityKey(identity) else { throw OpenExchangeError.failed("GET \(url): no identity") }
+            guard Self.isIdentityKey(identity) else {
+                Self.logHTTP("exchangeIdentity: no identity", url: url, status: response.statusCode, body: response.body)
+                throw OpenExchangeError.failed("GET \(url): no identity")
+            }
             return identity
         } catch {
             throw OpenExchangeError.of(error)
@@ -107,6 +112,7 @@ public struct OpenExchange: Sendable {
             let response = try await get(url, accept: "application/octet-stream")
             if response.statusCode == 404 { return nil }
             guard (200..<300).contains(response.statusCode) else {
+                Self.logHTTP("discoveryDeployBeef", url: url, status: response.statusCode, body: response.body)
                 throw OpenExchangeError.failed("GET \(url): \(response.statusCode) \(Self.preview(response.body))")
             }
             return response.body
@@ -126,13 +132,30 @@ public struct OpenExchange: Sendable {
     func getJSON(_ url: String) async throws -> JSONValue? {
         let response = try await get(url, accept: "application/json")
         guard (200..<300).contains(response.statusCode) else {
+            Self.logHTTP("getJSON", url: url, status: response.statusCode, body: response.body)
             throw OpenExchangeError.failed("GET \(url): \(response.statusCode) \(Self.preview(response.body))")
         }
         guard let value = JSONValue.parse(response.body) else {
+            Self.logHTTP("getJSON: the answer is not JSON", url: url, status: response.statusCode, body: response.body)
             throw OpenExchangeError.failed("GET \(url): the answer is not JSON")
         }
         return value
     }
+
+    /// Logs a failed or unusable Open Exchange answer in full: host and path (never the query,
+    /// which can carry a payment's derivation), status and body.
+    static func logHTTP(_ operation: String, method: String = "GET", url: String, status: Int, body: [UInt8]) {
+        guard let target = URL(string: url) else {
+            OneSatLog.error("OpenExchange.\(operation): HTTP \(status) from an unparseable URL", category: logCategory)
+            return
+        }
+        OneSatHTTPFailure(
+            service: "Open Exchange", operation: "OpenExchange.\(operation)", method: method, url: target,
+            statusCode: status, body: body
+        ).log(category: logCategory)
+    }
+
+    static let logCategory = "OneSatAMM"
 
     /// `(await res.text()).slice(0, 200)`.
     static func preview(_ body: [UInt8]) -> String {

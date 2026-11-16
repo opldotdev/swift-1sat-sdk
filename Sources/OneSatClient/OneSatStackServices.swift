@@ -26,18 +26,26 @@ public struct OneSatStackServices: WalletServices {
             .appendingPathComponent("chaintracks")
             .appendingPathComponent("tip")
         let (status, body) = try await http.get(url)
-        guard (200..<300).contains(status) else {
-            throw OneSatClientError.httpFailure(statusCode: status)
-        }
-        guard let tip = try? JSONDecoder().decode(TipBody.self, from: Data(body)),
-              let height = tip.height
-        else {
+        let operation = "OneSatStackServices.chainTipHeader"
+        let tip = try OneSatClientHTTP.decode(
+            TipBody.self, (status, body), service: "the 1Sat chain tracker", operation: operation,
+            method: "GET", url: url
+        )
+        guard let height = tip.height else {
+            OneSatClientHTTP.unreadable(operation, method: "GET", url: url, body: body, why: "no height")
             throw OneSatClientError.unreadableResponse
+        }
+        let merkleRoot: [UInt8]
+        do {
+            merkleRoot = try Self.hexBytes(tip.merkleRoot)
+        } catch {
+            OneSatClientHTTP.unreadable(operation, method: "GET", url: url, body: body, why: "merkleRoot is not 32 bytes of hex")
+            throw error
         }
         return ChainBlockHeader(
             height: height,
             hash: tip.hash,
-            merkleRoot: try Self.hexBytes(tip.merkleRoot)
+            merkleRoot: merkleRoot
         )
     }
 
