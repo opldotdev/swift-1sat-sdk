@@ -1,0 +1,18 @@
+{
+  "name": "onesat-local-stack",
+  "private": true,
+  "type": "module",
+  "description": "Real 1Sat wallet storage server on localhost (sqlite, stub chain) for the Swift wire-compat tests.",
+  "scripts": {
+    "start": "bun run server.ts"
+  },
+  "dependencies": {
+    "@1sat/wallet-server": "^0.1.2",
+    "@bsv/auth-express-middleware": "^2.4.0",
+    "@bsv/paymail": "^2.5.0",
+    "@bsv/sdk": "^4.1.0",
+    "@bsv/wallet-toolbox": "^2.16.0",
+    "knex": "^3.3.0",
+    "sqlite3": "^6.0.1"
+  }
+}

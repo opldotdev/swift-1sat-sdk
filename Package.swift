@@ -286,6 +286,28 @@ let package = Package(
             ],
             resources: [.copy("Fixtures")]
         ),
+        // End-to-end flows against a live backend. Every test skips unless ONESAT_LIVE is set:
+        // `local` runs against Tools/local-stack (real TS storage server, stub chain),
+        // `testnet` against the hosted testnet servers with real broadcast (see Backend.swift).
+        .testTarget(
+            name: "OneSatLiveTests",
+            dependencies: [
+                "OneSatActions",
+                "OneSatClient",
+                "OneSatSweep",
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVCrypto", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxWallet", package: "swift-wallet-toolbox"),
+            ]
+        ),
         .testTarget(
             name: "OneSatCBORTests",
             dependencies: ["OneSatCBOR"]
