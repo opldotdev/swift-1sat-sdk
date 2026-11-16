@@ -85,7 +85,9 @@ public enum ColorOverlay {
             let txid: String
             do {
                 // TS `Transaction.fromBEEF(item.beef, item.txid)`: Atomic or standard BEEF, the
-                // named transaction when a txid is given, with BEEF decoding bounded.
+                // named transaction when a txid is given, with BEEF decoding bounded. One
+                // difference: when a named txid disagrees with an Atomic BEEF's subject, Swift
+                // throws, where TS would return the named transaction if the BEEF holds it.
                 transaction = try OutputListItem(
                     beef: item.beef, outputIndex: item.outputIndex, transactionID: item.transactionID
                 ).transaction(beefLimits: beefLimits)
