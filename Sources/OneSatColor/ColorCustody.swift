@@ -19,7 +19,7 @@ public struct ColorCustody: Equatable, Sendable {
 
     public init(asset: ColorAssetSelector, derivationPrefix: String, derivationSuffix: String, senderIdentityKey: String) throws {
         _ = try ColorIdentifiers.protocolName(asset, derivationPrefix: derivationPrefix, derivationSuffix: derivationSuffix)
-        try ColorIdentifiers.validateIdentityKey(senderIdentityKey)
+        try ColorIdentifiers.validateIdentityKey(senderIdentityKey, name: "senderIdentityKey")
         self.asset = asset
         self.derivationPrefix = derivationPrefix
         self.derivationSuffix = derivationSuffix
@@ -43,30 +43,39 @@ public struct ColorCustody: Equatable, Sendable {
         if let maxBytes, text.utf8.count > maxBytes {
             throw ColorError.custody("\(label) exceeds \(maxBytes) bytes")
         }
-        let value = try StrictJSON.parse(text, label: label)
-        guard case .object(let members) = value else { throw ColorError.custody("\(label) is not an object") }
+        // TS `parseCustody`: each check in its order, each with its message.
+        let members = try StrictJSON.parse(text, label: label).object(label)
         try StrictJSON.exactMembers(
             members,
             required: ["version", "assetId", "derivationPrefix", "derivationSuffix", "senderIdentityKey"],
             optional: ["profileData"], label: label
         )
-        guard members[member: "version"] == .number(1) else { throw ColorError.custody("\(label) version must be 1") }
+        guard members[member: "version"] == .number(1) else { throw ColorError.message("\(label) version must be 1") }
         if let profileData = members[member: "profileData"] {
-            guard case .object(let entries) = profileData else {
-                throw ColorError.custody("\(label).profileData must be an object")
+            // `parseProfileData`: every entry is read before a nonempty map fails.
+            let profiles = try profileData.object("\(label).profileData")
+            for (profile, byAsset) in profiles {
+                for (asset, _) in try byAsset.object("\(label).profileData.\(profile)") { _ = try ColorAssetSelector(asset) }
             }
-            guard entries.isEmpty else {
-                throw ColorError.custody("\(label).profileData names a profile the asset does not require")
+            guard profiles.isEmpty else {
+                throw ColorError.message("\(label).profileData names a profile the asset does not require")
             }
         }
-        guard case .string(let asset)? = members[member: "assetId"],
-              case .string(let prefix)? = members[member: "derivationPrefix"],
-              case .string(let suffix)? = members[member: "derivationSuffix"],
-              case .string(let sender)? = members[member: "senderIdentityKey"] else {
-            throw ColorError.custody("\(label) members must be strings")
+        guard case .string(let asset)? = members[member: "assetId"] else { throw ColorError.invalid("asset ID") }
+        let selector = try ColorAssetSelector(asset)
+        guard case .string(let prefix)? = members[member: "derivationPrefix"] else {
+            throw ColorError.message("\(label).derivationPrefix must be a nonempty string without whitespace")
         }
-        return try ColorCustody(asset: try ColorAssetSelector(asset), derivationPrefix: prefix,
-                                derivationSuffix: suffix, senderIdentityKey: sender)
+        try ColorIdentifiers.validateRemittance(prefix, name: "\(label).derivationPrefix")
+        guard case .string(let suffix)? = members[member: "derivationSuffix"] else {
+            throw ColorError.message("\(label).derivationSuffix must be a nonempty string without whitespace")
+        }
+        try ColorIdentifiers.validateRemittance(suffix, name: "\(label).derivationSuffix")
+        guard case .string(let sender)? = members[member: "senderIdentityKey"] else {
+            throw ColorError.message("\(label).senderIdentityKey must be a compressed public key in lowercase hex")
+        }
+        try ColorIdentifiers.validateIdentityKey(sender, name: "\(label).senderIdentityKey")
+        return try ColorCustody(asset: selector, derivationPrefix: prefix, derivationSuffix: suffix, senderIdentityKey: sender)
     }
 }
 

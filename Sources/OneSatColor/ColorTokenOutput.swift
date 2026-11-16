@@ -23,7 +23,7 @@ public struct ColorTokenOutput: Equatable, Sendable {
         let deploy = token.role == .deploy
         let assetID: ColorAssetID
         if deploy {
-            guard vout == 0 else { throw ColorError.invalid("deploy: a BRC-162 deploy must be output 0") }
+            guard vout == 0 else { throw ColorError.message("a BRC-162 deploy must be output 0") }
             assetID = try ColorAssetID(txid: txid, vout: 0)
         } else {
             guard let id = token.tokenID else { return nil }
@@ -59,8 +59,8 @@ public struct ColorTokenOutput: Equatable, Sendable {
     static func assertNoRequiredProfiles(_ token: OneColorToken) throws {
         guard let map = token.payloadMap else { return }
         let req = map["req"], ext = map["ext"]
-        if let req, req.mapValue == nil { throw ColorError.invalid("req in a BRC-162 payload") }
-        if let ext, ext.mapValue == nil { throw ColorError.invalid("ext in a BRC-162 payload") }
+        if let req, req.mapValue == nil { throw ColorError.message("malformed req in a BRC-162 payload") }
+        if let ext, ext.mapValue == nil { throw ColorError.message("malformed ext in a BRC-162 payload") }
         let names = (req?.mapValue?.entries ?? []).map(\.key) + (ext?.mapValue?.entries ?? []).map(\.key)
         for name in names where !isProfileID(name) {
             throw ColorError.invalid("processing-profile identifier in a BRC-162 payload")
