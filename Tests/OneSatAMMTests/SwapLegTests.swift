@@ -299,34 +299,6 @@ final class SwapLegTests: XCTestCase {
         }
     }
 
-    /// The wallet's take-in is the TS one, except that a `p color` receipt is stored as the
-    /// color module stores it: encrypted to the wallet, with a derivation-suffix tag.
-    private func assertTakeIn(_ got: [WalletInternalizeOutput], _ want: [[String: Any]], _ name: String) async throws {
-        XCTAssertEqual(got.count, want.count, name)
-        for (output, w) in zip(got, want) {
-            XCTAssertEqual(Int(output.outputIndex), w["outputIndex"] as? Int, name)
-            switch output.remittance {
-            case .walletPayment(let r):
-                let pay = try XCTUnwrap(w["paymentRemittance"] as? [String: String], name)
-                XCTAssertEqual(r.derivationPrefix.base64, pay["derivationPrefix"], name)
-                XCTAssertEqual(r.derivationSuffix.base64, pay["derivationSuffix"], name)
-                XCTAssertEqual(Hex.encode(r.senderIdentityKey.compressedBytes), pay["senderIdentityKey"], name)
-            case .basketInsertion(let r):
-                let insertion = try XCTUnwrap(w["insertionRemittance"] as? [String: String], name)
-                XCTAssertEqual(r.basket, insertion["basket"], name)
-                if r.basket.hasPrefix("p color ") {
-                    let stored = try XCTUnwrap(r.customInstructions)
-                    XCTAssertNotEqual(stored, insertion["customInstructions"], name)
-                    let plain = await ColorMetadata.decrypt(stored, identity: SwapFixture.walletRoot)
-                    XCTAssertEqual(plain, insertion["customInstructions"], name)
-                    XCTAssertEqual(r.tags.filter(ColorIdentifiers.isDerivationSuffixTag).count, 1, name)
-                } else {
-                    XCTAssertEqual(r.customInstructions, insertion["customInstructions"], name)
-                }
-            }
-        }
-    }
-
     func testATransactionThatIsNotTheSwapBuiltIsRefused() async throws {
         let w = try await LegWorld(SwapFixture.legs[0])
         let p = try w.prepare()
@@ -535,5 +507,35 @@ struct SlowHTTP: HTTPTransport {
     func send(_ request: HTTPRequest) async throws -> HTTPResponse {
         try await Task.sleep(nanoseconds: 10_000_000_000)
         return HTTPResponse(statusCode: 200, body: Array(#"{"ok":false,"reason":"late"}"#.utf8))
+    }
+}
+
+extension XCTestCase {
+    /// The wallet's take-in is the TS one, except that a `p color` receipt is stored as the
+    /// color module stores it: encrypted to the wallet, with a derivation-suffix tag.
+    func assertTakeIn(_ got: [WalletInternalizeOutput], _ want: [[String: Any]], _ name: String) async throws {
+        XCTAssertEqual(got.count, want.count, name)
+        for (output, w) in zip(got, want) {
+            XCTAssertEqual(Int(output.outputIndex), w["outputIndex"] as? Int, name)
+            switch output.remittance {
+            case .walletPayment(let r):
+                let pay = try XCTUnwrap(w["paymentRemittance"] as? [String: String], name)
+                XCTAssertEqual(r.derivationPrefix.base64, pay["derivationPrefix"], name)
+                XCTAssertEqual(r.derivationSuffix.base64, pay["derivationSuffix"], name)
+                XCTAssertEqual(Hex.encode(r.senderIdentityKey.compressedBytes), pay["senderIdentityKey"], name)
+            case .basketInsertion(let r):
+                let insertion = try XCTUnwrap(w["insertionRemittance"] as? [String: String], name)
+                XCTAssertEqual(r.basket, insertion["basket"], name)
+                if r.basket.hasPrefix("p color ") {
+                    let stored = try XCTUnwrap(r.customInstructions)
+                    XCTAssertNotEqual(stored, insertion["customInstructions"], name)
+                    let plain = await ColorMetadata.decrypt(stored, identity: SwapFixture.walletRoot)
+                    XCTAssertEqual(plain, insertion["customInstructions"], name)
+                    XCTAssertEqual(r.tags.filter(ColorIdentifiers.isDerivationSuffixTag).count, 1, name)
+                } else {
+                    XCTAssertEqual(r.customInstructions, insertion["customInstructions"], name)
+                }
+            }
+        }
     }
 }

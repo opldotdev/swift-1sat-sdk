@@ -159,7 +159,7 @@ actor MemoryStorage: ColorWalletStorage {
     }
 
     private func inputBEEF(_ roots: [TransactionID]) throws -> [UInt8] {
-        try graph(ancestry(roots, pool: transactions)).serialized(limits: beefLimits)
+        try boundedGraph(ancestry(roots, pool: transactions)).serialized(limits: beefLimits)
     }
 
     // MARK: - ColorWalletStorage
@@ -330,16 +330,25 @@ actor MemoryStorage: ColorWalletStorage {
 /// Answers GETs by URL, 404 otherwise, and records each request.
 actor StubHTTP: HTTPTransport {
     private var routes: [String: (Int, [UInt8])] = [:]
+    private var queued: [String: [(Int, [UInt8])]] = [:]
     private(set) var requests: [HTTPRequest] = []
 
     init(_ routes: [String: (Int, [UInt8])] = [:]) { self.routes = routes }
 
     func route(_ url: String, _ status: Int, _ body: [UInt8]) { routes[url] = (status, body) }
     func json(_ url: String, _ text: String, status: Int = 200) { routes[url] = (status, Array(text.utf8)) }
+    /// Answers `url` once with `text`, ahead of its route.
+    func once(_ url: String, _ text: String, status: Int = 200) { queued[url, default: []].append((status, Array(text.utf8))) }
 
     func send(_ request: HTTPRequest) async throws -> HTTPResponse {
         requests.append(request)
-        let (status, body) = routes[request.url.absoluteString] ?? (404, Array("no".utf8))
+        let url = request.url.absoluteString
+        if var first = queued[url], !first.isEmpty {
+            let (status, body) = first.removeFirst()
+            queued[url] = first
+            return HTTPResponse(statusCode: status, body: body)
+        }
+        let (status, body) = routes[url] ?? (404, Array("no".utf8))
         return HTTPResponse(statusCode: status, body: body)
     }
 
