@@ -40,11 +40,11 @@ let package = Package(
         // generic wallet a 1Sat action executes against.
         .package(
             url: "https://github.com/opldotdev/swift-sdk.git",
-            revision: "3dae243a69c48d2ac4d4e15e4f294f049e6f3a2c"
+            revision: "bcfcce0286313ed64812be7a64ae62e17f3d06b9"
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "380f74c95c68037d15aa17eb7e18eea8fd574c84"
+            revision: "6349f67b78862697ef3f7bda629c9e3b41227574"
         ),
         // Open Exchange's engine works in exact integers as the TS does in `bigint`. The version
         // swift-sdk pins (exact 5.7.0); SwiftPM resolves the two to the same checkout.
