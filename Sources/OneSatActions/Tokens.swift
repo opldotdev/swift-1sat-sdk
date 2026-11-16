@@ -5,6 +5,7 @@ import BSVTransaction
 import BSVWallet
 import OneSatTemplates
 import ToolboxActions
+import OneSatSweep
 
 /// BSV-21 transfer from `packages/actions/src/tokens/index.ts` `sendBsv21`.
 public enum Tokens {
@@ -410,7 +411,7 @@ public enum Tokens {
             do {
                 details = try await bsv21.tokenDetails(tokenId: request.tokenId, fresh: true)
             } catch {
-                return ActionResult.failure(.tokenNotFound)
+                return ActionResult.failure(.tokenNotFound, underlying: error)
             }
             guard details.isActive else { return ActionResult.failure(.tokenNotActive) }
 
@@ -438,7 +439,7 @@ public enum Tokens {
                         states[status.outpoint] = status.state
                     }
                 } catch {
-                    return ActionResult.failure(.overlayValidationFailed)
+                    return ActionResult.failure(.overlayValidationFailed, underlying: error)
                 }
             }
             let totalAmount = request.recipients.reduce(UInt64(0)) { $0 + $1.amount }
@@ -502,7 +503,7 @@ public enum Tokens {
                     return ActionResult.failure(.listingNotFoundInOverlay)
                 }
             } catch {
-                return ActionResult.failure(.listingNotFoundInOverlay)
+                return ActionResult.failure(.listingNotFoundInOverlay, underlying: error)
             }
             let details = try await bsv21.tokenDetails(tokenId: request.tokenId, fresh: true)
             let parsed = try await listings.beefGraph(forTxid: request.outpoint.transactionID.displayHex)
@@ -663,17 +664,20 @@ public enum Tokens {
                 let status = try await bsv21.submitFunding(tokenId: tokenId, beef: tx)
                 return FundOverlayResult(txid: txid, tx: tx, actionId: result.actionId, status: status)
             } catch {
+                OneSatLog.error(error, "BSV-21 overlay funding submit for \(tokenId)", category: "OneSatActions")
                 return FundOverlayResult(
                     txid: txid,
                     tx: tx,
                     actionId: result.actionId,
-                    error: OneSatActionError.fundingSubmitFailed.wireMessage
+                    error: OneSatActionError.fundingSubmitFailed.wireMessage,
+                    diagnostic: OneSatLog.reflecting(error)
                 )
             }
         } catch let error as OneSatActionError {
             return .failure(error)
         } catch {
-            return FundOverlayResult(error: error.localizedDescription, diagnostic: String(reflecting: error))
+            OneSatLog.error(error, "BSV-21 overlay funding failed", category: "OneSatActions")
+            return FundOverlayResult(error: OneSatLog.localizedMessage(error), diagnostic: OneSatLog.reflecting(error))
         }
     }
 

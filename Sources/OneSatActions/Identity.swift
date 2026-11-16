@@ -6,6 +6,7 @@ import BSVScript
 import BSVTransaction
 import BSVWallet
 import OneSatTemplates
+import OneSatSweep
 
 /// BAP `publishIdentity`, `updateProfile`, and `getProfile` from `@1sat/actions` `identity/index.ts`.
 public enum Identity {
@@ -195,13 +196,16 @@ public enum Identity {
                         )
                     )
                 } catch {
+                    // The new identity is published; an old alias left in the basket is harmless.
+                    OneSatLog.error(error, "BAP publish: relinquishing old alias \(old.outpoint)", category: "OneSatActions")
                     continue
                 }
             }
 
             return PublishResult(txid: txid, tx: result.tx, bapId: bapId)
         } catch {
-            return PublishResult(error: error.localizedDescription)
+            OneSatLog.error(error, "BAP identity publish failed", category: "OneSatActions")
+            return PublishResult(error: OneSatLog.localizedMessage(error))
         }
     }
 
@@ -253,7 +257,8 @@ public enum Identity {
             }
             return PublishResult(txid: txid, tx: result.tx, bapId: bapId)
         } catch {
-            return PublishResult(error: error.localizedDescription)
+            OneSatLog.error(error, "BAP identity publish failed", category: "OneSatActions")
+            return PublishResult(error: OneSatLog.localizedMessage(error))
         }
     }
 
@@ -349,13 +354,15 @@ public enum Identity {
                         )
                     )
                 } catch {
+                    OneSatLog.error(error, "BAP profile: relinquishing \(loser.outpoint)", category: "OneSatActions")
                     continue
                 }
             }
 
             return ProfileResult(bapId: bap.idKey ?? "", profileJSON: bap.profileJSON)
         } catch {
-            return ProfileResult(error: error.localizedDescription)
+            OneSatLog.error(error, "BAP profile update failed", category: "OneSatActions")
+            return ProfileResult(error: OneSatLog.localizedMessage(error))
         }
     }
 

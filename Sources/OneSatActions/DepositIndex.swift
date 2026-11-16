@@ -8,6 +8,7 @@ import OneSatClient
 import OneSatTemplates
 import ToolboxActions
 import ToolboxCore
+import OneSatSweep
 
 /// What arrived at a deposit address, filed the way `@1sat/actions` `internalizeBeef` files it
 /// after the `@1sat/wallet` indexers have parsed the transaction:
@@ -189,10 +190,15 @@ enum DepositIndex {
             originType = metadata.contentType
             let base = baseType(metadata.contentType) ?? ""
             let isText = base.hasPrefix("text/") || base == "application/json" || base == opnsType
-            if isText, let length = metadata.contentLength, length <= 1_000,
-               let data = try? await assets.ordinalContent(outpoint: origin)
-            {
-                originContent = String(decoding: data, as: UTF8.self)
+            if isText, let length = metadata.contentLength, length <= 1_000 {
+                // The origin's text only names it (an OpNS name); without it the deposit is
+                // still indexed, so the failure is logged, not thrown.
+                do {
+                    let data = try await assets.ordinalContent(outpoint: origin)
+                    originContent = String(decoding: data, as: UTF8.self)
+                } catch {
+                    OneSatLog.error(error, "deposit index: reading origin content \(origin)", category: "OneSatActions")
+                }
             }
         }
 

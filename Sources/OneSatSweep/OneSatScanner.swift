@@ -32,7 +32,12 @@ public struct OneSatScanner: AssetScanner {
     }
 
     public func scan(address: String) async throws -> [ScannedOutput] {
+        // The address parse is a probe: its failure is reported below with the address.
         guard limit > 0, (try? Address(address)) != nil else {
+            OneSatLog.error(
+                "OneSatScanner.scan: not scanning \(address) (not an address, or limit \(limit) is not positive)",
+                category: "OneSatSweep"
+            )
             throw AssetScannerError.unreadableResponse
         }
 
@@ -45,9 +50,17 @@ public struct OneSatScanner: AssetScanner {
 
         let (status, body) = try await http.get(url)
         guard (200..<300).contains(status) else {
-            throw AssetScannerError.httpFailure(statusCode: status)
+            throw AssetScannerError.http("OneSatScanner.scan owner txos", url: url, status: status, body: body)
         }
-        let scanned = try Self.parse(sse: body, limit: limit)
+        let scanned: [ScannedOutput]
+        do {
+            scanned = try Self.parse(sse: body, limit: limit)
+        } catch AssetScannerError.unreadableResponse {
+            OneSatLog.unreadable(
+                "OneSatScanner.scan owner txos", method: "GET", url: url, body: body, error: nil, category: "OneSatSweep"
+            )
+            throw AssetScannerError.unreadableResponse
+        }
         var transactions: [String: Transaction] = [:]
         var resolved: [ScannedOutput] = []
         for output in scanned {
@@ -59,19 +72,33 @@ public struct OneSatScanner: AssetScanner {
                 let sourceURL = baseURL.appendingPathComponent("1sat/beef/\(output.txid)/tx")
                 let (sourceStatus, sourceBody) = try await http.get(sourceURL)
                 guard (200..<300).contains(sourceStatus) else {
-                    throw AssetScannerError.httpFailure(statusCode: sourceStatus)
+                    throw AssetScannerError.http(
+                        "OneSatScanner.scan source transaction", url: sourceURL, status: sourceStatus, body: sourceBody
+                    )
                 }
                 transaction = try Transaction(bytes: sourceBody, limits: Sweep.defaultLimits)
                 guard try transaction.transactionID(limits: Sweep.defaultLimits).displayHex == output.txid else {
+                    OneSatLog.error(
+                        "OneSatScanner.scan: the 1Sat indexer's source transaction for \(output.txid) hashes to another txid",
+                        category: "OneSatSweep"
+                    )
                     throw AssetScannerError.unreadableResponse
                 }
                 transactions[output.txid] = transaction
             }
             guard transaction.outputs.indices.contains(Int(output.vout)) else {
+                OneSatLog.error(
+                    "OneSatScanner.scan: the 1Sat indexer listed \(output.txid).\(output.vout), which its transaction does not have",
+                    category: "OneSatSweep"
+                )
                 throw AssetScannerError.unreadableResponse
             }
             let source = transaction.outputs[Int(output.vout)]
             guard source.satoshis == output.satoshis else {
+                OneSatLog.error(
+                    "OneSatScanner.scan: the 1Sat indexer listed \(output.txid).\(output.vout) at \(output.satoshis) sats; the transaction says \(source.satoshis)",
+                    category: "OneSatSweep"
+                )
                 throw AssetScannerError.unreadableResponse
             }
             resolved.append(ScannedOutput(
@@ -103,7 +130,10 @@ public struct OneSatScanner: AssetScanner {
                     data = String(line.dropFirst("data:".count).drop(while: { $0 == " " }))
                 }
             }
-            if event == "error" { throw AssetScannerError.unreadableResponse }
+            if event == "error" {
+                OneSatLog.error("OneSatScanner: the 1Sat indexer's owner stream sent an error: \(data)", category: "OneSatSweep")
+                throw AssetScannerError.unreadableResponse
+            }
             if event == "done" { complete = true; break }
             guard event == "txo", !data.isEmpty else { continue }
             count += 1
@@ -149,10 +179,11 @@ public struct OneSatScanner: AssetScanner {
     }
 }
 
-public enum AssetScannerError: LocalizedError, Equatable, Sendable {
+public enum AssetScannerError: LocalizedError, Equatable, Sendable, CustomDebugStringConvertible {
     case unreadableResponse
     case scanLimitReached(limit: Int)
-    case httpFailure(statusCode: Int)
+    /// `detail` carries the host, path, server reason and body; it does not take part in `==`.
+    case httpFailure(statusCode: Int, detail: OneSatHTTPFailure? = nil)
 
     public var errorDescription: String? {
         switch self {
@@ -160,8 +191,39 @@ public enum AssetScannerError: LocalizedError, Equatable, Sendable {
             "Asset discovery reached its \(limit)-output limit; the scan is incomplete. Retain the source keys and retry with a larger limit."
         case .unreadableResponse:
             "Asset discovery returned an incomplete or unreadable response."
-        case .httpFailure(let status):
+        case .httpFailure(_, let detail?):
+            "Asset discovery failed. \(detail.userMessage)"
+        case .httpFailure(let status, nil):
             "Asset discovery failed (HTTP \(status))."
         }
+    }
+
+    public var debugDescription: String {
+        switch self {
+        case .httpFailure(let status, let detail):
+            "AssetScannerError.httpFailure(\(status)): \(detail?.debugDescription ?? "no detail")"
+        case .scanLimitReached(let limit):
+            "AssetScannerError.scanLimitReached(limit: \(limit))"
+        case .unreadableResponse:
+            "AssetScannerError.unreadableResponse"
+        }
+    }
+
+    public static func == (lhs: AssetScannerError, rhs: AssetScannerError) -> Bool {
+        switch (lhs, rhs) {
+        case (.unreadableResponse, .unreadableResponse): true
+        case (.scanLimitReached(let a), .scanLimitReached(let b)): a == b
+        case (.httpFailure(let a, _), .httpFailure(let b, _)): a == b
+        default: false
+        }
+    }
+
+    /// An HTTP failure from the 1Sat indexer, logged in full once here.
+    static func http(_ operation: String, method: String = "GET", url: URL, status: Int, body: [UInt8]) -> AssetScannerError {
+        let detail = OneSatHTTPFailure(
+            service: "the 1Sat indexer", operation: operation, method: method, url: url, statusCode: status, body: body
+        )
+        detail.log(category: "OneSatSweep")
+        return .httpFailure(statusCode: status, detail: detail)
     }
 }

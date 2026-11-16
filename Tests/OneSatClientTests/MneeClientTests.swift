@@ -282,6 +282,36 @@ final class MneeClientTests: XCTestCase {
         XCTAssertEqual(posted["callback_url"], "https://example.com/cb")
     }
 
+    func test_httpFailureNamesTheServiceAndReasonAndLogsNoToken() async {
+        let body = Array(#"{"message":"invalid auth token"}"#.utf8)
+        let client = MneeClient(baseURL: baseURL, apiKey: apiKey, transport: ScriptedHTTP(responses: [(401, body)]))
+
+        do {
+            _ = try await client.getConfig()
+            XCTFail("expected the HTTP failure")
+        } catch let error as OneSatClientError {
+            XCTAssertEqual(error, .httpFailure(statusCode: 401))
+            XCTAssertEqual(
+                error.errorDescription,
+                "The MNEE service refused the request (HTTP 401): invalid auth token."
+            )
+            let log = String(reflecting: error)
+            XCTAssertTrue(log.contains("MneeClient.getConfig()"))
+            XCTAssertTrue(log.contains("GET proxy-api.mnee.net/v1/config"))
+            XCTAssertTrue(log.contains("invalid auth token"))
+            XCTAssertFalse(log.contains(apiKey))
+        } catch {
+            XCTFail("expected OneSatClientError.httpFailure, got \(error)")
+        }
+    }
+
+    func test_unreadableResponseHasAPlainDescription() {
+        XCTAssertEqual(
+            OneSatClientError.unreadableResponse.errorDescription,
+            "A 1Sat service sent an answer this wallet could not read."
+        )
+    }
+
     func test_submitRawTxThrowsHttpFailureOn500() async {
         let client = MneeClient(transport: ScriptedHTTP(responses: [(500, [])]))
 

@@ -41,6 +41,10 @@ public struct OneSatClient: Sendable {
             if let parsed = output.tokenAmount {
                 tokenAmount = parsed
             } else if output.hasBsv21Event {
+                OneSatLog.error(
+                    "OneSatClient.tokenBalances: \(output.txid).\(output.vout) has a BSV-21 event but no readable amount",
+                    category: OneSatClientHTTP.category
+                )
                 throw OneSatClientError.unreadableResponse
             } else {
                 tokenAmount = 0
@@ -59,7 +63,12 @@ public struct OneSatClient: Sendable {
                 throw OneSatClientError.unreadableResponse
             }
             let (amount, overflow) = balance.amount.addingReportingOverflow(tokenAmount)
-            guard !overflow else { throw OneSatClientError.unreadableResponse }
+            guard !overflow else {
+                OneSatLog.error(
+                    "OneSatClient.tokenBalances: the \(tokenID) balance overflows UInt64", category: OneSatClientHTTP.category
+                )
+                throw OneSatClientError.unreadableResponse
+            }
             balance.amount = amount
             if balance.symbol == nil {
                 balance.symbol = output.tokenSymbol
@@ -119,10 +128,18 @@ public struct OneSatClient: Sendable {
         guard let url = components.url else { throw OneSatClientError.unreadableResponse }
 
         let (status, body) = try await http.get(url)
-        guard (200..<300).contains(status) else {
-            throw OneSatClientError.httpFailure(statusCode: status)
+        try OneSatClientHTTP.check(
+            (status, body), service: "the 1Sat indexer", operation: "OneSatClient owner txos", method: "GET", url: url
+        )
+        do {
+            return try Self.parse(sse: body)
+        } catch {
+            OneSatLog.unreadable(
+                "OneSatClient owner txos", method: "GET", url: url, body: body, error: error,
+                category: OneSatClientHTTP.category
+            )
+            throw error
         }
-        return try Self.parse(sse: body)
     }
 
     /// Refuses malformed TXO frames so a partial response cannot become a misleading asset view.
@@ -245,9 +262,39 @@ public struct TokenBalance: Equatable, Sendable {
 }
 
 /// Distinguishes transport failures from data that cannot safely represent an asset balance.
-public enum OneSatClientError: Error, Equatable, Sendable {
+public enum OneSatClientError: Error, Equatable, Sendable, LocalizedError, CustomDebugStringConvertible {
     case unreadableResponse
-    case httpFailure(statusCode: Int)
+    /// `detail` carries the service, host, path, server reason and body; it does not take part
+    /// in `==`, so a status still compares as before.
+    case httpFailure(statusCode: Int, detail: OneSatHTTPFailure? = nil)
+
+    public var errorDescription: String? {
+        switch self {
+        case .unreadableResponse:
+            "A 1Sat service sent an answer this wallet could not read."
+        case .httpFailure(_, let detail?):
+            detail.userMessage
+        case .httpFailure(let status, nil):
+            "A 1Sat service refused the request (HTTP \(status))."
+        }
+    }
+
+    public var debugDescription: String {
+        switch self {
+        case .unreadableResponse:
+            "OneSatClientError.unreadableResponse"
+        case .httpFailure(let status, let detail):
+            "OneSatClientError.httpFailure(\(status)): \(detail?.debugDescription ?? "no detail")"
+        }
+    }
+
+    public static func == (lhs: OneSatClientError, rhs: OneSatClientError) -> Bool {
+        switch (lhs, rhs) {
+        case (.unreadableResponse, .unreadableResponse): true
+        case (.httpFailure(let a, _), .httpFailure(let b, _)): a == b
+        default: false
+        }
+    }
 }
 
 private struct IndexedOutput: Sendable {

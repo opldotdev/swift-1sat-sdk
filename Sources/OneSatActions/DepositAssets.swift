@@ -1,5 +1,6 @@
 import Foundation
 import OneSatClient
+import OneSatSweep
 
 /// What `syncAddresses` reads from `OneSatServices` beyond the BEEF itself, to classify what
 /// arrived at a deposit address the way the `@1sat/wallet` indexers do.
@@ -31,8 +32,29 @@ public struct DepositTokenDetails: Equatable, Sendable {
     }
 }
 
-public enum DepositAssetError: Error, Equatable, Sendable {
-    case httpFailure(statusCode: Int)
+public enum DepositAssetError: Error, Equatable, Sendable, LocalizedError, CustomDebugStringConvertible {
+    /// `detail` carries the host, path, server reason and body; it does not take part in `==`.
+    case httpFailure(statusCode: Int, detail: OneSatHTTPFailure? = nil)
+
+    public var errorDescription: String? {
+        switch self {
+        case .httpFailure(_, let detail?): detail.userMessage
+        case .httpFailure(let status, nil): "The 1Sat indexer refused the request (HTTP \(status))."
+        }
+    }
+
+    public var debugDescription: String {
+        switch self {
+        case .httpFailure(let status, let detail):
+            "DepositAssetError.httpFailure(\(status)): \(detail?.debugDescription ?? "no detail")"
+        }
+    }
+
+    public static func == (lhs: DepositAssetError, rhs: DepositAssetError) -> Bool {
+        switch (lhs, rhs) {
+        case (.httpFailure(let a, _), .httpFailure(let b, _)): a == b
+        }
+    }
 }
 
 /// `OneSatServices` against one 1sat-stack host: `/1sat/beef`, `/1sat/ordfs`, `/content`,
@@ -72,7 +94,8 @@ public struct OneSatDepositAssets: DepositAssetSource {
                 decimals: details.token.decimals.flatMap { Int($0) } ?? 0,
                 icon: details.token.icon
             )
-        } catch OneSatClientError.httpFailure(statusCode: 404) {
+        } catch OneSatClientError.httpFailure(statusCode: 404, detail: _) {
+            // `Bsv21Indexer` takes the overlay's 404 as "keep the inscription's own values".
             return nil
         }
     }
@@ -85,10 +108,15 @@ public struct OneSatDepositAssets: DepositAssetSource {
             .appendingPathComponent("tx")
     }
 
-    private func get(_ url: URL) async throws -> [UInt8] {
+    private func get(_ url: URL, operation: String = #function) async throws -> [UInt8] {
         let response = try await transport.send(method: "GET", url: url, headers: [:], body: nil)
         guard (200..<300).contains(response.status) else {
-            throw DepositAssetError.httpFailure(statusCode: response.status)
+            let detail = OneSatHTTPFailure(
+                service: "the 1Sat indexer", operation: "OneSatDepositAssets.\(operation)", method: "GET", url: url,
+                statusCode: response.status, body: response.body
+            )
+            detail.log(category: "OneSatActions")
+            throw DepositAssetError.httpFailure(statusCode: response.status, detail: detail)
         }
         return response.body
     }

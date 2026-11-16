@@ -3,20 +3,26 @@ import Foundation
 import FoundationNetworking
 #endif
 import BSVCore
+import BSVOverlay
 import BSVScript
 import BSVTransaction
 import BSVWallet
 import ToolboxActions
+import OneSatSweep
 
 /// One BRC-24 `output-list` answer: each item a BEEF and the index of the listed output in its
 /// subject transaction.
 public struct ColorOutputList: Equatable, Sendable {
+    /// One output, in the `@bsv/sdk` `LookupAnswer` output shape. `transactionID` is the
+    /// optional `txid` that names which transaction in `beef` holds the output.
     public struct Item: Equatable, Sendable {
         public let beef: [UInt8]
         public let outputIndex: UInt32
-        public init(beef: [UInt8], outputIndex: UInt32) {
+        public let transactionID: TransactionID?
+        public init(beef: [UInt8], outputIndex: UInt32, transactionID: TransactionID? = nil) {
             self.beef = beef
             self.outputIndex = outputIndex
+            self.transactionID = transactionID
         }
     }
 
@@ -78,10 +84,16 @@ public enum ColorOverlay {
             let transaction: Transaction
             let txid: String
             do {
-                let beef = try BEEF(bytes: item.beef, limits: beefLimits, transactionOrder: .any)
-                transaction = try ColorBEEF.subject(of: beef)
+                // TS `Transaction.fromBEEF(item.beef, item.txid)`: Atomic or standard BEEF, the
+                // named transaction when a txid is given, with BEEF decoding bounded. One
+                // difference: when a named txid disagrees with an Atomic BEEF's subject, Swift
+                // throws, where TS would return the named transaction if the BEEF holds it.
+                transaction = try OutputListItem(
+                    beef: item.beef, outputIndex: item.outputIndex, transactionID: item.transactionID
+                ).transaction(beefLimits: beefLimits)
                 txid = try transaction.transactionID(limits: beefLimits.transactionLimits).displayHex
             } catch {
+                OneSatLog.error(error, "1Color overlay answer: invalid BEEF", category: "OneSatColor")
                 throw ColorError.overlay("overlay answer carries invalid BEEF")
             }
             guard let index = Int(exactly: item.outputIndex), transaction.outputs.indices.contains(index) else {
@@ -118,8 +130,16 @@ public struct HTTPColorOverlay: ColorOverlayProvider {
         self.post = post
     }
 
-    public static let urlSessionPost: Post = { request in
-        let (data, response) = try await URLSession.shared.data(for: request)
+    /// One POST with `URLSession.shared`. A URL loading error is thrown without its URL's query
+    /// string (``OneSatLog/urlFree(thrown:)``), as every SDK transport throws it.
+    public static let urlSessionPost: Post = { (request: URLRequest) async throws -> (status: Int, body: [UInt8]) in
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw OneSatLog.urlFree(thrown: error)
+        }
         return ((response as? HTTPURLResponse)?.statusCode ?? 0, Array(data))
     }
 
@@ -141,8 +161,24 @@ public struct HTTPColorOverlay: ColorOverlayProvider {
         request.setValue(topics.joined(separator: ","), forHTTPHeaderField: "X-Topics")
         request.httpBody = Data(beef)
         let (status, body) = try await post(request)
-        guard (200..<300).contains(status) else { throw ColorError.overlay("overlay submit failed: \(status)") }
-        return try Self.readSteak(body)
+        guard (200..<300).contains(status) else {
+            let detail = OneSatHTTPFailure(
+                service: "the 1Color overlay", operation: "HTTPColorOverlay.submit \(topics.joined(separator: ","))",
+                method: "POST", url: url, statusCode: status, body: body
+            )
+            detail.log(category: "OneSatColor")
+            // The earlier text, "overlay submit failed: <status>", with the overlay's own reason after it.
+            throw ColorError.overlay("overlay submit failed: \(status)\(detail.serverMessage.map { ": \($0)" } ?? "")")
+        }
+        do {
+            return try Self.readSteak(body)
+        } catch {
+            OneSatLog.error(
+                "HTTPColorOverlay.submit: POST \(url.host ?? "")\(url.path) answered no STEAK; body: \(OneSatHTTPFailure.logText(body))",
+                category: "OneSatColor"
+            )
+            throw error
+        }
     }
 
     /// A STEAK: `{ <topic>: { outputsToAdmit: [n], coinsToRetain: [n], … } }`.

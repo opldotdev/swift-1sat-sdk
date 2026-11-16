@@ -1,5 +1,6 @@
 import Foundation
 import OneSatClient
+import OneSatSweep
 
 /// Approval-time trust is evidence from a check performed now, never a persisted asset property.
 public enum OneSatPermissionTrustState: String, Codable, Equatable, Sendable {
@@ -218,7 +219,14 @@ public struct Bsv21PermissionVerifier: Sendable {
     ) async -> T? {
         let gate = FirstPermissionVerificationResult<T>()
         let operationTask = Task {
-            await gate.finish(try? await operation())
+            // Live verification is best effort: a failure leaves the asset unverified, and why
+            // goes to the log.
+            do {
+                await gate.finish(try await operation())
+            } catch {
+                OneSatLog.error(error, "asset permission review: live verification", category: "OneSatPermissions")
+                await gate.finish(nil)
+            }
         }
         let timeoutTask = Task {
             do {

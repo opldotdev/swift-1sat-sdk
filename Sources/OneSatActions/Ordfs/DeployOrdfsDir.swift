@@ -5,6 +5,7 @@ import BSVTransaction
 import BSVWallet
 import OneSatTemplates
 import ToolboxActions
+import OneSatSweep
 
 /// `deployOrdfsDir` from `packages/actions/src/ordfs/index.ts`: publish a directory of files as
 /// one on-chain `ord-fs/json` tree.
@@ -137,7 +138,8 @@ public enum DeployOrdfsDir {
         } catch let error as OrdfsDirTreeError {
             return Response(error: error.message)
         } catch {
-            return Response(error: String(describing: error))
+            OneSatLog.error(error, "ORDFS directory deploy failed", category: "OneSatActions")
+            return Response(error: OneSatLog.message(error))
         }
     }
 

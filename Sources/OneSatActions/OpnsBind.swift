@@ -4,6 +4,7 @@ import BSVScript
 import BSVTransaction
 import BSVWallet
 import OneSatClient
+import OneSatSweep
 import ToolboxActions
 
 /// OpNS name to identity, read from the signed PushDrop bind on the name's current coin.
@@ -137,7 +138,7 @@ extension OpNS {
         } catch let error as OpnsFieldError {
             throw OpnsBindError.noBind(error.wireMessage)
         } catch {
-            throw OpnsBindError.noBind(String(describing: error))
+            throw OpnsBindError.noBind(OneSatLog.message(error))
         }
 
         let identity = read.identity

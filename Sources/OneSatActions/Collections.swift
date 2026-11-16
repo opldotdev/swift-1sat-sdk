@@ -5,6 +5,7 @@ import BSVTransaction
 import BSVWallet
 import OneSatTemplates
 import ToolboxActions
+import OneSatSweep
 
 /// `mintCollection` and `mintCollectionItem` from `packages/actions/src/collections/index.ts`.
 public enum Collections {
@@ -168,7 +169,8 @@ public enum Collections {
         } catch let error as OneSatActionError {
             return MintResult(error: error.wireMessage)
         } catch {
-            return MintResult(error: error.localizedDescription)
+            OneSatLog.error(error, "collection mint failed", category: "OneSatActions")
+            return MintResult(error: OneSatLog.localizedMessage(error))
         }
     }
 

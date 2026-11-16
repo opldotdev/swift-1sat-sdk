@@ -4,6 +4,7 @@ import BSVScript
 import BSVTransaction
 import BSVWallet
 import OneSatTemplates
+import OneSatSweep
 
 public struct Mint1ColorResult: Equatable, Sendable {
     public var txid: String?
@@ -81,7 +82,8 @@ extension OneColorActions {
             result.submitted = true
             return result
         } catch {
-            result.error = error.localizedDescription
+            OneSatLog.error(error, "1Color mint failed", category: "OneSatColor")
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }
@@ -176,7 +178,8 @@ extension OneColorActions {
             result.submitted = true
             return result
         } catch {
-            result.error = error.localizedDescription
+            OneSatLog.error(error, "1Color resubmit mint failed", category: "OneSatColor")
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }

@@ -9,6 +9,7 @@ import ToolboxActions
 import ToolboxStorage
 import OneSatTemplates
 import OneSatMetanet
+import OneSatSweep
 
 public struct Deploy1ColorResult: Equatable, Sendable {
     public var txid: String?
@@ -61,7 +62,8 @@ public enum OneColorActions {
                 derivationSuffix: ColorExecutor.randomBase64(), senderIdentityKey: ctx.identityKey
             )
         } catch {
-            return Deploy1ColorResult(error: error.localizedDescription)
+            OneSatLog.error(error, "1Color deploy failed", category: "OneSatColor")
+            return Deploy1ColorResult(error: OneSatLog.localizedMessage(error))
         }
         return await deploy(ctx, amount: amount, decimals: decimals, symbol: symbol, icon: icon, custody: custody)
     }
@@ -132,7 +134,8 @@ public enum OneColorActions {
             result.submitted = true
             return result
         } catch {
-            result.error = error.localizedDescription
+            OneSatLog.error(error, "1Color resubmit deploy failed", category: "OneSatColor")
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }
@@ -192,7 +195,8 @@ public enum OneColorActions {
             result.submitted = true
             return result
         } catch {
-            result.error = error.localizedDescription
+            OneSatLog.error(error, "1Color send failed", category: "OneSatColor")
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }
@@ -309,11 +313,13 @@ public enum OneColorActions {
                 result.delivered = true
                 result.messageID = sent.messageID
             } catch {
-                result.error = "delivery-failed: \(error.localizedDescription)"
+                OneSatLog.error(error, "1Color send: delivery to the recipient failed", category: "OneSatColor")
+                result.error = "delivery-failed: \(OneSatLog.localizedMessage(error))"
             }
             return result
         } catch {
-            result.error = error.localizedDescription
+            OneSatLog.error(error, "1Color send failed", category: "OneSatColor")
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }

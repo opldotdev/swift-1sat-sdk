@@ -40,11 +40,11 @@ let package = Package(
         // generic wallet a 1Sat action executes against.
         .package(
             url: "https://github.com/opldotdev/swift-sdk.git",
-            revision: "fcfb0daeb30d6d69ed4a1ae4a619afef07a22f6c"
+            revision: "fab8998b2dc34af20dcabf8feef3165273a8bb2d"
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "f27741c84c11942a24bb34e1d1f24206f771464a"
+            revision: "b8bdafb6424fa2fc87cb5fe49c7c66e47814df0b"
         ),
         // Open Exchange's engine works in exact integers as the TS does in `bigint`. The version
         // swift-sdk pins (exact 5.7.0); SwiftPM resolves the two to the same checkout.
@@ -116,6 +116,7 @@ let package = Package(
             name: "OneSatPermissions",
             dependencies: [
                 "OneSatClient",
+                "OneSatSweep",
                 "OneSatTemplates",
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
@@ -136,6 +137,7 @@ let package = Package(
             name: "OneSatMetanet",
             dependencies: [
                 "OneSatCBOR",
+                "OneSatSweep",
                 .product(name: "BSVCore", package: "swift-sdk"),
                 .product(name: "BSVCrypto", package: "swift-sdk"),
                 .product(name: "BSVKeys", package: "swift-sdk"),
@@ -152,6 +154,7 @@ let package = Package(
             name: "OneSatColor",
             dependencies: [
                 "OneSatTemplates",
+                "OneSatSweep",
                 "OneSatCBOR",
                 "OneSatActions",
                 "OneSatMetanet",
@@ -178,6 +181,7 @@ let package = Package(
             name: "OneSatAMM",
             dependencies: [
                 "OneSatColor",
+                "OneSatSweep",
                 "OneSatTemplates",
                 .product(name: "BigInt", package: "BigInt"),
                 .product(name: "BSVCore", package: "swift-sdk"),
@@ -197,6 +201,8 @@ let package = Package(
             name: "OneSatActions",
             dependencies: [
                 "OneSatClient",
+                // `OneSatHTTPFailure` and `OneSatLog`, the detail and log of a failed request.
+                "OneSatSweep",
                 "OneSatTemplates",
                 "OneSatAddresses",
                 "OneSatCBOR",

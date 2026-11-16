@@ -6,6 +6,7 @@ import BSVTransaction
 import BSVWallet
 import OneSatTemplates
 import ToolboxActions
+import OneSatSweep
 
 /// BSV-21 token creation from `packages/actions/src/tokens/index.ts`: `deployBsv21Mint`,
 /// `deployBsv21Auth` (both through `executeBsv21Deploy`) and `mintBsv21`.
@@ -309,7 +310,8 @@ extension Tokens {
         } catch let error as OneSatActionError {
             return .failure(error)
         } catch {
-            return DeployResult(error: error.localizedDescription)
+            OneSatLog.error(error, "BSV-21 deploy+mint failed", category: "OneSatActions")
+            return DeployResult(error: OneSatLog.localizedMessage(error))
         }
     }
 
@@ -330,7 +332,8 @@ extension Tokens {
         } catch let error as OneSatActionError {
             return .failure(error)
         } catch {
-            return DeployResult(error: error.localizedDescription)
+            OneSatLog.error(error, "BSV-21 deploy+auth failed", category: "OneSatActions")
+            return DeployResult(error: OneSatLog.localizedMessage(error))
         }
     }
 
@@ -352,9 +355,12 @@ extension Tokens {
 
     /// The reason an overlay submit failed, as the result reports it.
     static func submitFailure(_ error: any Error) -> String {
+        OneSatLog.error(error, "overlay submit failed after the action succeeded", category: "OneSatActions")
         if let error = error as? OneSatActionError { return error.wireMessage }
-        if let error = error as? LocalizedError, let description = error.errorDescription { return description }
-        return String(describing: error)
+        if let error = error as? LocalizedError, let description = error.errorDescription {
+            return OneSatLog.redactingQueries(description)
+        }
+        return OneSatLog.message(error)
     }
 
     /// `executeBsv21Deploy` plus the caller's discovery submit.
@@ -410,7 +416,8 @@ extension Tokens {
         } catch let error as OneSatActionError {
             return .failure(error)
         } catch {
-            return DeployResult(error: error.localizedDescription)
+            OneSatLog.error(error, "BSV-21 deploy failed", category: "OneSatActions")
+            return DeployResult(error: OneSatLog.localizedMessage(error))
         }
     }
 
@@ -617,6 +624,7 @@ extension Tokens {
             do {
                 details = try await bsv21.tokenDetails(tokenId: request.tokenId, fresh: true)
             } catch {
+                OneSatLog.error(error, "BSV-21 mint: reading token \(request.tokenId)", category: "OneSatActions")
                 return .failure(.tokenNotFound)
             }
             guard details.isActive else { return .failure(.tokenNotActive) }
@@ -692,7 +700,8 @@ extension Tokens {
         } catch let error as OneSatActionError {
             return .failure(error)
         } catch {
-            return MintResult(error: error.localizedDescription)
+            OneSatLog.error(error, "BSV-21 mint failed", category: "OneSatActions")
+            return MintResult(error: OneSatLog.localizedMessage(error))
         }
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import OneSatSweep
 
 public struct MneeConfig: Equatable, Sendable, Decodable {
     public let approver: String
@@ -228,6 +229,10 @@ public struct MneeClient: Sendable {
             as: RawTxEnvelope.self
         )
         guard let rawtx = envelope.rawtx, let data = Data(base64Encoded: rawtx) else {
+            OneSatLog.error(
+                "MneeClient.fetchRawTx(\(txid)): the MNEE service answered with no base64 rawtx",
+                category: OneSatClientHTTP.category
+            )
             throw OneSatClientError.unreadableResponse
         }
         return Array(data)
@@ -247,16 +252,20 @@ public struct MneeClient: Sendable {
                 TransferRequest(rawtx: Data(tx).base64EncodedString(), callback_url: callbackUrl)
             )
         )
+        let url = Self.transferURL(baseURL: baseURL, apiKey: apiKey)
         let response = try await transport.send(
             method: "POST",
-            url: Self.transferURL(baseURL: baseURL, apiKey: apiKey),
+            url: url,
             headers: ["Content-Type": "application/json"],
             body: body
         )
-        guard (200..<300).contains(response.status) else {
-            throw OneSatClientError.httpFailure(statusCode: response.status)
-        }
+        try OneSatClientHTTP.check(
+            response, service: Self.service, operation: "MneeClient.submitRawTx", method: "POST", url: url
+        )
         guard let ticketId = String(bytes: response.body, encoding: .utf8) else {
+            OneSatClientHTTP.unreadable(
+                "MneeClient.submitRawTx", method: "POST", url: url, body: response.body, why: "the ticket id is not UTF-8"
+            )
             throw OneSatClientError.unreadableResponse
         }
         return MneeSubmitResponse(ticketId: ticketId, rawtx: nil)
@@ -271,37 +280,29 @@ public struct MneeClient: Sendable {
         let callback_url: String?
     }
 
-    private func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
-        try decode(
-            try await transport.send(method: "GET", url: url, headers: [:], body: nil),
-            as: type
+    private static let service = "the MNEE service"
+
+    private func get<T: Decodable>(_ url: URL, as type: T.Type, operation: String = #function) async throws -> T {
+        try OneSatClientHTTP.decode(
+            type, try await transport.send(method: "GET", url: url, headers: [:], body: nil),
+            service: Self.service, operation: "MneeClient.\(operation)", method: "GET", url: url
         )
     }
 
-    private func post<T: Decodable>(_ url: URL, jsonBody: some Encodable, as type: T.Type) async throws -> T {
+    private func post<T: Decodable>(
+        _ url: URL, jsonBody: some Encodable, as type: T.Type, operation: String = #function
+    ) async throws -> T {
         let body = Array(try JSONEncoder().encode(jsonBody))
-        return try decode(
+        return try OneSatClientHTTP.decode(
+            type,
             try await transport.send(
                 method: "POST",
                 url: url,
                 headers: ["Content-Type": "application/json"],
                 body: body
             ),
-            as: type
+            service: Self.service, operation: "MneeClient.\(operation)", method: "POST", url: url
         )
-    }
-
-    private func decode<T: Decodable>(
-        _ response: (status: Int, body: [UInt8]),
-        as type: T.Type
-    ) throws -> T {
-        guard (200..<300).contains(response.status) else {
-            throw OneSatClientError.httpFailure(statusCode: response.status)
-        }
-        guard let value = try? JSONDecoder().decode(type, from: Data(response.body)) else {
-            throw OneSatClientError.unreadableResponse
-        }
-        return value
     }
 
     private static func withAuth(_ path: String, apiKey: String) -> String {

@@ -70,14 +70,15 @@ public struct OrdfsClient: Sendable {
 
     /// `getMetadata(outpoint, seq?)`: `GET /1sat/ordfs/metadata/<outpoint>[:seq]`.
     public func metadata(outpoint: String, seq: Int? = nil) async throws -> OrdfsMetadata {
-        try decode(
+        let url = Self.metadataURL(outpoint: outpoint, seq: seq, baseURL: baseURL)
+        return try decode(
             try await transport.send(
                 method: "GET",
-                url: Self.metadataURL(outpoint: outpoint, seq: seq, baseURL: baseURL),
+                url: url,
                 headers: [:],
                 body: nil
             ),
-            as: OrdfsMetadata.self
+            as: OrdfsMetadata.self, method: "GET", url: url
         )
     }
 
@@ -87,14 +88,15 @@ public struct OrdfsClient: Sendable {
     /// No batching here, as in TS: the API takes at most 100 per request, so callers chunk.
     public func bulkMetadata(_ outpoints: [String]) async throws -> [String: OrdfsMetadata?] {
         let body = Array(try JSONEncoder().encode(["outpoints": outpoints]))
+        let url = Self.bulkMetadataURL(baseURL: baseURL)
         return try decode(
             try await transport.send(
                 method: "POST",
-                url: Self.bulkMetadataURL(baseURL: baseURL),
+                url: url,
                 headers: ["Content-Type": "application/json"],
                 body: body
             ),
-            as: [String: OrdfsMetadata?].self
+            as: [String: OrdfsMetadata?].self, method: "POST", url: url
         )
     }
 
@@ -128,15 +130,12 @@ public struct OrdfsClient: Sendable {
 
     private func decode<T: Decodable>(
         _ response: (status: Int, body: [UInt8]),
-        as type: T.Type
+        as type: T.Type, method: String, url: URL, operation: String = #function
     ) throws -> T {
-        guard (200..<300).contains(response.status) else {
-            throw OneSatClientError.httpFailure(statusCode: response.status)
-        }
-        guard let value = try? JSONDecoder().decode(type, from: Data(response.body)) else {
-            throw OneSatClientError.unreadableResponse
-        }
-        return value
+        try OneSatClientHTTP.decode(
+            type, response, service: "the 1Sat content service", operation: "OrdfsClient.\(operation)",
+            method: method, url: url
+        )
     }
 
     private static func trimmedBase(_ baseURL: URL) -> String {
