@@ -351,11 +351,15 @@ public enum OpenExchangeQuotes {
         let minerFee = try legMinerFeeSats(feeRateSatsPerKb)
         let carry = plan.legs.map { legCarrySats($0, buy: buy, minerFeeSats: minerFee) }
         // The fee sats for exactly maxSources legs: the planned legs' own, each further leg at the largest of theirs.
-        let more = BigInt(Swift.max(0, req.maxSources - carry.count))
+        let (spare, overflow) = req.maxSources.subtractingReportingOverflow(carry.count)
+        let more = BigInt(overflow ? 0 : Swift.max(0, spare))
         let feeSats = carry.reduce(BigInt(0), +) + more * carry.reduce(BigInt(0)) { $1 > $0 ? $1 : $0 }
 
+        // TS reads `poolId` off the planned leg's pool, which comes from the live pools only.
         var poolIds: [String: String] = [:]
-        for row in rows { poolIds[row.pool.outpoint] = row.poolId }
+        for row in rows where OpenExchangeValidatorStatus.of(row.pool.validatorIdentityKey, live).live {
+            poolIds[row.pool.outpoint] = row.poolId
+        }
         let legs = used.map { l in
             OpenExchangeQuoteLeg(
                 poolOutpoint: OpenExchangePrices.outpointText(l.outpoint),

@@ -92,7 +92,7 @@ extension OpenExchange {
         switch x {
         case .object(let m): members = m
         case .array: members = [:]
-        default: throw OpenExchangeError.failed("relay: not swap terms: \(jsonPrimitive(x))")
+        default: throw OpenExchangeError.failed("relay: not swap terms: \(jsSlice(jsonPrimitive(x), 200))")
         }
         var min = 0
         if let m = members["minCommissionBps"], m != .null {
@@ -171,6 +171,13 @@ extension OpenExchange {
             }
         }
         return out
+    }
+
+    /// `s.slice(0, n)`: the first `n` UTF-16 code units, as JS counts them.
+    static func jsSlice(_ s: String, _ n: Int) -> String {
+        let units = s.utf16
+        guard units.count > n else { return s }
+        return String(decoding: Array(units.prefix(n)), as: UTF16.self)
     }
 
     /// `JSON.stringify(x)` of a JSON value that is not an object.

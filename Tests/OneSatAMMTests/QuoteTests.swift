@@ -547,6 +547,40 @@ final class OpenExchangeQuoteSheetTests: XCTestCase {
         XCTAssertEqual(q.minAmountOut, q.amountOut)
     }
 
+    func testALegsPoolIdComesFromALivePool() throws {
+        // The same outpoint twice, the second under a validator that is not live: TS plans over the
+        // live row only, so its poolId is the leg's.
+        let o = String(repeating: "1", count: 64) + "_0"
+        let dead = row("1").replacingOccurrences(of: #""poolId":"\#(o)""#, with: #""poolId":"PID1""#)
+            .replacingOccurrences(of: #""validatorPeerId":"p""#, with: #""validatorPeerId":"""#)
+            .replacingOccurrences(of: "02" + String(repeating: "a", count: 64), with: "02" + String(repeating: "d", count: 64))
+        let q = try OpenExchangeQuotes.quoteSwap(
+            OpenExchangeQuoteRequest(tokenId: T, side: .buy, amountIn: 100_000, maxSlippageBps: 50, maxSources: 1),
+            held: try held("[\(row("1")),\(dead)]"), sym: "TST", dec: 2
+        )
+        XCTAssertEqual(q.legs.map(\.poolId), [o])
+    }
+
+    func testTheSmallestMaxSourcesDoesNotTrap() throws {
+        // TS `Math.max(0, maxSources - legs)` is 0 here; Swift's subtraction must not overflow.
+        let q = try OpenExchangeQuotes.quoteSwap(
+            OpenExchangeQuoteRequest(tokenId: T, side: .buy, amountIn: 100_000, maxSlippageBps: 50, maxSources: Int.min),
+            held: try held("[\(row("1"))]"), sym: "TST", dec: 2
+        )
+        XCTAssertEqual(q.stage.feeSats, 1301)
+    }
+
+    func testANonTermsAnswerIsCutAt200Units() throws {
+        let long = String(repeating: "x", count: 250)
+        do {
+            _ = try OpenExchange.parseSwapTerms(.string(long))
+            XCTFail("expected a failure")
+        } catch {
+            // `JSON.stringify(x)?.slice(0, 200)`: the opening quote and 199 characters.
+            XCTAssertEqual(error as? OpenExchangeError, .failed("relay: not swap terms: \"" + String(repeating: "x", count: 199)))
+        }
+    }
+
     func testRefusals() throws {
         let pools = try held("[\(row("1"))]")
         func message(_ req: OpenExchangeQuoteRequest, _ held: OpenExchangePools?) -> OpenExchangeError? {
