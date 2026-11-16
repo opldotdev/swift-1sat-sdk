@@ -36,9 +36,6 @@ public struct ColorCustody: Equatable, Sendable {
         ]).serialized
     }
 
-    /// The tag filed on the output, by which its transaction is listed.
-    public var suffixTag: String { ColorIdentifiers.derivationSuffixTag(derivationSuffix) }
-
     /// Parses stored or received custody: exactly the five members, plus an optional empty
     /// `profileData`. `maxBytes` bounds a receipt.
     public static func parse(_ text: String, maxBytes: Int? = nil, label: String = "custody") throws -> ColorCustody {

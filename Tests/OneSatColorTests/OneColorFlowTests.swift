@@ -50,7 +50,7 @@ final class OneColorFlowTests: XCTestCase {
         let custody = try ColorCustody.parse(try XCTUnwrap(plaintext))
         XCTAssertEqual(custody.asset, .issue)
         XCTAssertEqual(custody.senderIdentityKey, world.alice.key)
-        XCTAssertEqual(record.tags, [custody.suffixTag])
+        assertOneSuffixTag(record.tags)
 
         let requests = await world.alice.wallet.createRequests
         XCTAssertEqual(requests.first?.description, "Deploy 1Color token (fixed supply)")
@@ -226,7 +226,7 @@ final class OneColorFlowTests: XCTestCase {
         let plaintext = await ColorMetadata.decrypt(stored, identity: world.bob.identity)
         let custody = try ColorCustody.parse(try XCTUnwrap(plaintext))
         XCTAssertEqual(custody.senderIdentityKey, world.alice.key)
-        XCTAssertEqual(record.tags, [custody.suffixTag])
+        assertOneSuffixTag(record.tags)
 
         let unspent = await world.overlay.unspent
         XCTAssertNotNil(unspent["\(txid).0"])

@@ -80,7 +80,7 @@ final class OneColorDeployFixtureTests: XCTestCase {
             XCTAssertFalse(stored.hasPrefix("{"), "\(name): custody is encrypted")
             let plaintext = await ColorMetadata.decrypt(stored, identity: identity)
             XCTAssertEqual(plaintext, forwarded["customInstructions"] as? String, name)
-            XCTAssertEqual(output.tags, [custody.suffixTag], name)
+            assertOneSuffixTag(output.tags, name)
             let theirTags = try XCTUnwrap(forwarded["tags"] as? [String])
             XCTAssertEqual(theirTags.count, 1, name)
             for tag in output.tags + theirTags {

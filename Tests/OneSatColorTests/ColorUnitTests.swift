@@ -65,13 +65,21 @@ final class ColorUnitTests: XCTestCase {
         XCTAssertThrowsError(try ColorCustody.parse(good, maxBytes: 10))
     }
 
-    func test_withSuffixTagAddsTheTagOnce() throws {
-        let custody = try ColorCustody(
-            asset: .issue, derivationPrefix: "cA==", derivationSuffix: "cw==",
-            senderIdentityKey: Hex.encode(identity.publicKey.compressedBytes)
+    /// Module 0.2.3 `withSuffixTag`: the caller's tags without any of the suffix tag form, each
+    /// once, then one new suffix tag; other `p color ` tags stay.
+    func test_withSuffixTagDropsCallerSuffixTagsAndAddsANewOne() throws {
+        let fresh = ColorIdentifiers.derivationSuffixTag(random: Array(0x40..<0x60))
+        let caller = ColorIdentifiers.derivationSuffixTag(random: Array(0x00..<0x20))
+        XCTAssertEqual(ColorModule.withSuffixTag(nil, suffixTag: fresh), [fresh])
+        XCTAssertEqual(ColorModule.withSuffixTag(["a", caller, "a"], suffixTag: fresh), ["a", fresh])
+        XCTAssertEqual(
+            ColorModule.withSuffixTag(["p color offline", "p color \(String(repeating: "A", count: 64))", caller], suffixTag: fresh),
+            ["p color offline", "p color \(String(repeating: "A", count: 64))", fresh]
         )
-        XCTAssertEqual(ColorModule.withSuffixTag(nil, custody), [custody.suffixTag])
-        XCTAssertEqual(ColorModule.withSuffixTag(["a", custody.suffixTag, "a"], custody), ["a", custody.suffixTag])
+        XCTAssertEqual(ColorModule.withSuffixTag([fresh], suffixTag: fresh), [fresh])
+        let drawn = ColorModule.withSuffixTag(["a"])
+        XCTAssertEqual(drawn.count, 2)
+        XCTAssertTrue(ColorIdentifiers.isDerivationSuffixTag(drawn[1]))
     }
 
     // MARK: - Overlay answers

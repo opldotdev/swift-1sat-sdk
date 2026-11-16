@@ -3,7 +3,7 @@ import BSVScript
 import OneSatCBOR
 import OneSatTemplates
 
-/// One BRC-162 output read the way `@bopen-io/color-permission-module` 0.2.2 `readTokenOutput`
+/// One BRC-162 output read the way `@bopen-io/color-permission-module` 0.2.3 `readTokenOutput`
 /// reads it: the asset, role, amount, whether it is the deploy, and the public key hash when the
 /// rest of the script is plain P2PKH.
 public struct ColorTokenOutput: Equatable, Sendable {

@@ -103,7 +103,7 @@ public enum OneColorActions {
                 outputs: [try WalletCreateActionOutput(
                     lockingScript: script.bytes, satoshis: OneColorConstants.carrierSatoshis,
                     outputDescription: "1Color deploy", customInstructions: instructions,
-                    tags: [custody.suffixTag]
+                    tags: [ColorIdentifiers.derivationSuffixTag()]
                 )],
                 labels: try plan.labels(),
                 options: try ColorExecutor.options()

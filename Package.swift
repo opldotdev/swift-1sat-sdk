@@ -128,7 +128,7 @@ let package = Package(
 
         // BRC-207 color custody for 1Color (BRC-162): identifiers, action plans, receipts, overlay
         // admission and spendability. Wire-compatible with `@bopen-io/color-permission-module`
-        // 0.2.2, so a Swift wallet and a TS wallet can share one storage account.
+        // 0.2.3, so a Swift wallet and a TS wallet can share one storage account.
         // Metanet delivery: BRC-169 handles and signed envelopes, BRC-78 framing, BRC-232
         // transaction delivery, and the BRC-231 DAG-CBOR message relay. Ported from
         // `@1sat/actions` `metanet/` and `@1sat/client` handles.

@@ -70,7 +70,7 @@ final class OneColorMintFlowTests: XCTestCase {
         let plaintext = await ColorMetadata.decrypt(try XCTUnwrap(record.customInstructions), identity: world.alice.identity)
         let custody = try ColorCustody.parse(try XCTUnwrap(plaintext))
         XCTAssertEqual(custody.asset, .asset(assetID))
-        XCTAssertEqual(record.tags, [custody.suffixTag])
+        assertOneSuffixTag(record.tags)
     }
 
     func test_aSecondMintSpendsTheFirstMintsAuthority() async throws {

@@ -1,0 +1,481 @@
+{
+  "meta": {
+    "generator": "transfer.ts (Bun) with published packages; module random bytes come from crypto.getRandomValues filled (n*16 + i) on its n-th call, n counted per case",
+    "packages": {
+      "@bopen-io/color-permission-module": "0.2.3",
+      "@bsv/templates": "2.2.0",
+      "@bsv/sdk": "4.1.0",
+      "@bsv/wallet-toolbox-client": "2.16.0"
+    },
+    "identityHex": "ffbd04ccf50e9822ac4387cc180d1a5021c16c89b288013fc8b9a2111dfa2da2",
+    "deployTx": "01000000000101000000000000001c00006d76a91481777cc96bd3406b286f6964007a804b57f3695488ac00000000",
+    "assetId": "42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0",
+    "otherAsset": "abababababababababababababababababababababababababababababababab_1",
+    "topic": "tm_color_42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0",
+    "valueBasket": "p color 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331v0",
+    "description": "AMM pool deploy: TOK",
+    "labels": [
+      "p color plan 0 3 7b2276657273696f6e223a312c22617373657473223a5b22343262633364326230396461663237653837306435656662626233643662323763656232393835303334316231656264323930613637353639336238393333315f30225d2c226f776e65644f",
+      "p color plan 1 3 757470757473223a5b5d2c226f7065726174696f6e73223a5b7b2261737365744964223a22343262633364326230396461663237653837306435656662626233643662323763656232393835303334316231656264323930613637353639336238393333",
+      "p color plan 2 3 315f30222c226f7065726174696f6e223a227472616e73666572227d5d2c22696e707574506f736974696f6e73223a5b5d2c226368616e6765506f736974696f6e73223a5b5d2c22736967686173685479706573223a5b5d7d",
+      "amm-pool-deploy"
+    ],
+    "held": [
+      {
+        "name": "A",
+        "amount": 30,
+        "custodyAsset": "42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0",
+        "prefix": "YGFiY2RlZmdoaWprbG1ubw==",
+        "suffix": "cHFyc3R1dnd4eXp7fH1+fw==",
+        "tag": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "admitted": true,
+        "row": {
+          "outpoint": "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3.0",
+          "satoshis": 1,
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc42011e6d76a91457337d626beae19b2729690d5c7a95fc2751b8e488ac",
+          "basket": "p color 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331v0",
+          "customInstructions": "{\"version\":1,\"assetId\":\"42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0\",\"derivationPrefix\":\"YGFiY2RlZmdoaWprbG1ubw==\",\"derivationSuffix\":\"cHFyc3R1dnd4eXp7fH1+fw==\",\"senderIdentityKey\":\"02bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a5\"}",
+          "tags": [
+            "p color a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+          ],
+          "txid": "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3"
+        }
+      },
+      {
+        "name": "B",
+        "amount": 50,
+        "custodyAsset": "42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0",
+        "prefix": "YWJjZGVmZ2hpamtsbW5vcA==",
+        "suffix": "cXJzdHV2d3h5ent8fX5/gA==",
+        "tag": "a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0",
+        "admitted": true,
+        "row": {
+          "outpoint": "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3.1",
+          "satoshis": 1,
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201326d76a91469f013a71f0f0cb65bdbab1a658e32e37c20a45988ac",
+          "basket": "p color 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331v0",
+          "customInstructions": "{\"version\":1,\"assetId\":\"42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0\",\"derivationPrefix\":\"YWJjZGVmZ2hpamtsbW5vcA==\",\"derivationSuffix\":\"cXJzdHV2d3h5ent8fX5/gA==\",\"senderIdentityKey\":\"02bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a5\"}",
+          "tags": [
+            "p color a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0"
+          ],
+          "txid": "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3"
+        }
+      },
+      {
+        "name": "C",
+        "amount": 20,
+        "custodyAsset": "42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0",
+        "prefix": "YmNkZWZnaGlqa2xtbm9wcQ==",
+        "suffix": "cnN0dXZ3eHl6e3x9fn+AgQ==",
+        "tag": "a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1",
+        "admitted": true,
+        "row": {
+          "outpoint": "adce3e54457fdc15d1855a310c0c8ed15a52d8f88614940b2ed112215699dd49.0",
+          "satoshis": 1,
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201146d76a91472383b4ce9f649519a5b153b33c581eccadc117088ac",
+          "basket": "p color 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331v0",
+          "customInstructions": "{\"version\":1,\"assetId\":\"42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0\",\"derivationPrefix\":\"YmNkZWZnaGlqa2xtbm9wcQ==\",\"derivationSuffix\":\"cnN0dXZ3eHl6e3x9fn+AgQ==\",\"senderIdentityKey\":\"02bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a5\"}",
+          "tags": [
+            "p color a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1"
+          ],
+          "txid": "adce3e54457fdc15d1855a310c0c8ed15a52d8f88614940b2ed112215699dd49"
+        }
+      },
+      {
+        "name": "D",
+        "amount": 50,
+        "custodyAsset": "42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0",
+        "prefix": "Y2RlZmdoaWprbG1ub3Bxcg==",
+        "suffix": "c3R1dnd4eXp7fH1+f4CBgg==",
+        "tag": "a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2",
+        "admitted": false,
+        "row": {
+          "outpoint": "f91a1f28eea1d1559fff5d4815fe4d09d56ad6a0eb72e883e435bd4b1e794d11.0",
+          "satoshis": 1,
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201326d76a91499a3cd242ca8ba58823b4c393fd04afd1dcb667188ac",
+          "basket": "p color 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331v0",
+          "customInstructions": "{\"version\":1,\"assetId\":\"42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0\",\"derivationPrefix\":\"Y2RlZmdoaWprbG1ub3Bxcg==\",\"derivationSuffix\":\"c3R1dnd4eXp7fH1+f4CBgg==\",\"senderIdentityKey\":\"02bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a5\"}",
+          "tags": [
+            "p color a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2"
+          ],
+          "txid": "f91a1f28eea1d1559fff5d4815fe4d09d56ad6a0eb72e883e435bd4b1e794d11"
+        }
+      },
+      {
+        "name": "E",
+        "amount": 80,
+        "custodyAsset": "abababababababababababababababababababababababababababababababab_1",
+        "prefix": "ZGVmZ2hpamtsbW5vcHFycw==",
+        "suffix": "dHV2d3h5ent8fX5/gIGCgw==",
+        "tag": "a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3",
+        "admitted": true,
+        "row": {
+          "outpoint": "e22bd8cfd1f29e3c9f9664def2d5501085f4ad5ed169559b105adbcaef235aa8.0",
+          "satoshis": 1,
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201506d76a914efaeb24bdf14df160512734c4a903a4b974312ce88ac",
+          "basket": "p color 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331v0",
+          "customInstructions": "{\"version\":1,\"assetId\":\"abababababababababababababababababababababababababababababababab_1\",\"derivationPrefix\":\"ZGVmZ2hpamtsbW5vcHFycw==\",\"derivationSuffix\":\"dHV2d3h5ent8fX5/gIGCgw==\",\"senderIdentityKey\":\"02bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a5\"}",
+          "tags": [
+            "p color a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3"
+          ],
+          "txid": "e22bd8cfd1f29e3c9f9664def2d5501085f4ad5ed169559b105adbcaef235aa8"
+        }
+      },
+      {
+        "name": "F",
+        "amount": 40,
+        "custodyAsset": "42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0",
+        "prefix": "ZWZnaGlqa2xtbm9wcXJzdA==",
+        "suffix": "dXZ3eHl6e3x9fn+AgYKDhA==",
+        "admitted": true,
+        "row": {
+          "outpoint": "e08f8ba599516a200b8f2f9ed1ff6de7823bd236be1be61ec34ee864e91a6be9.0",
+          "satoshis": 1,
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201286d76a914fd586ff5fd636f148c137e817f42d691fcc0971688ac",
+          "basket": "p color 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331v0",
+          "customInstructions": "{\"version\":1,\"assetId\":\"42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0\",\"derivationPrefix\":\"ZWZnaGlqa2xtbm9wcXJzdA==\",\"derivationSuffix\":\"dXZ3eHl6e3x9fn+AgYKDhA==\",\"senderIdentityKey\":\"02bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a5\"}",
+          "tags": [],
+          "txid": "e08f8ba599516a200b8f2f9ed1ff6de7823bd236be1be61ec34ee864e91a6be9"
+        }
+      }
+    ],
+    "sources": [
+      {
+        "name": [
+          "A",
+          "B"
+        ],
+        "hex": "01000000000201000000000000003d203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc42011e6d76a91457337d626beae19b2729690d5c7a95fc2751b8e488ac01000000000000003d203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201326d76a91469f013a71f0f0cb65bdbab1a658e32e37c20a45988ac00000000",
+        "txid": "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3"
+      },
+      {
+        "name": [
+          "C"
+        ],
+        "hex": "01000000000101000000000000003d203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201146d76a91472383b4ce9f649519a5b153b33c581eccadc117088ac00000000",
+        "txid": "adce3e54457fdc15d1855a310c0c8ed15a52d8f88614940b2ed112215699dd49"
+      },
+      {
+        "name": [
+          "D"
+        ],
+        "hex": "01000000000101000000000000003d203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201326d76a91499a3cd242ca8ba58823b4c393fd04afd1dcb667188ac00000000",
+        "txid": "f91a1f28eea1d1559fff5d4815fe4d09d56ad6a0eb72e883e435bd4b1e794d11"
+      },
+      {
+        "name": [
+          "E"
+        ],
+        "hex": "01000000000101000000000000003d203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201506d76a914efaeb24bdf14df160512734c4a903a4b974312ce88ac00000000",
+        "txid": "e22bd8cfd1f29e3c9f9664def2d5501085f4ad5ed169559b105adbcaef235aa8"
+      },
+      {
+        "name": [
+          "F"
+        ],
+        "hex": "01000000000101000000000000003d203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201286d76a914fd586ff5fd636f148c137e817f42d691fcc0971688ac00000000",
+        "txid": "e08f8ba599516a200b8f2f9ed1ff6de7823bd236be1be61ec34ee864e91a6be9"
+      }
+    ]
+  },
+  "cases": {
+    "pool70": {
+      "requested": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201466d61ab14c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d37551",
+          "satoshis": 1000,
+          "outputDescription": "AMM pool: TOK / BSV"
+        }
+      ],
+      "inputs": [
+        {
+          "outpoint": "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3.1",
+          "unlockingScriptLength": 108,
+          "inputDescription": "BRC-207 token input",
+          "held": "B"
+        },
+        {
+          "outpoint": "f91a1f28eea1d1559fff5d4815fe4d09d56ad6a0eb72e883e435bd4b1e794d11.0",
+          "unlockingScriptLength": 108,
+          "inputDescription": "BRC-207 token input",
+          "held": "D"
+        }
+      ],
+      "inputBEEFTxids": [
+        "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3",
+        "f91a1f28eea1d1559fff5d4815fe4d09d56ad6a0eb72e883e435bd4b1e794d11"
+      ],
+      "outputs": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201466d61ab14c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d37551",
+          "satoshis": 1000,
+          "outputDescription": "AMM pool: TOK / BSV"
+        },
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc42011e6d76a91454fd2221465973674fb1e92e83ad0e3de953a0f988ac",
+          "satoshis": 1,
+          "basket": "p color 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331v0",
+          "customInstructions": "{\"version\":1,\"assetId\":\"42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0\",\"derivationPrefix\":\"AAECAwQFBgcICQoLDA0ODw==\",\"derivationSuffix\":\"EBESExQVFhcYGRobHB0eHw==\",\"senderIdentityKey\":\"02bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a5\"}",
+          "tags": [
+            "p color 202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+          ],
+          "outputDescription": "BRC-207 token change"
+        }
+      ],
+      "labels": [
+        "p color plan 0 3 7b2276657273696f6e223a312c22617373657473223a5b22343262633364326230396461663237653837306435656662626233643662323763656232393835303334316231656264323930613637353639336238393333315f30225d2c226f776e65644f",
+        "p color plan 1 3 757470757473223a5b5d2c226f7065726174696f6e73223a5b7b2261737365744964223a22343262633364326230396461663237653837306435656662626233643662323763656232393835303334316231656264323930613637353639336238393333",
+        "p color plan 2 3 315f30222c226f7065726174696f6e223a227472616e73666572227d5d2c22696e707574506f736974696f6e73223a5b5d2c226368616e6765506f736974696f6e73223a5b5d2c22736967686173685479706573223a5b5d7d",
+        "amm-pool-deploy"
+      ],
+      "submissions": [
+        [
+          "tm_color_42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0"
+        ]
+      ]
+    },
+    "exact100": {
+      "requested": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201646d76a914d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e388ac",
+          "satoshis": 1,
+          "outputDescription": "1Color tokens"
+        }
+      ],
+      "inputs": [
+        {
+          "outpoint": "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3.1",
+          "unlockingScriptLength": 108,
+          "inputDescription": "BRC-207 token input",
+          "held": "B"
+        },
+        {
+          "outpoint": "f91a1f28eea1d1559fff5d4815fe4d09d56ad6a0eb72e883e435bd4b1e794d11.0",
+          "unlockingScriptLength": 108,
+          "inputDescription": "BRC-207 token input",
+          "held": "D"
+        }
+      ],
+      "inputBEEFTxids": [
+        "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3",
+        "f91a1f28eea1d1559fff5d4815fe4d09d56ad6a0eb72e883e435bd4b1e794d11"
+      ],
+      "outputs": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201646d76a914d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e388ac",
+          "satoshis": 1,
+          "outputDescription": "1Color tokens"
+        }
+      ],
+      "labels": [
+        "p color plan 0 3 7b2276657273696f6e223a312c22617373657473223a5b22343262633364326230396461663237653837306435656662626233643662323763656232393835303334316231656264323930613637353639336238393333315f30225d2c226f776e65644f",
+        "p color plan 1 3 757470757473223a5b5d2c226f7065726174696f6e73223a5b7b2261737365744964223a22343262633364326230396461663237653837306435656662626233643662323763656232393835303334316231656264323930613637353639336238393333",
+        "p color plan 2 3 315f30222c226f7065726174696f6e223a227472616e73666572227d5d2c22696e707574506f736974696f6e73223a5b5d2c226368616e6765506f736974696f6e73223a5b5d2c22736967686173685479706573223a5b5d7d",
+        "amm-pool-deploy"
+      ],
+      "submissions": [
+        [
+          "tm_color_42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0"
+        ]
+      ]
+    },
+    "allFour150": {
+      "requested": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc420296006d61ab14c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d37551",
+          "satoshis": 2000,
+          "outputDescription": "AMM pool: TOK / BSV"
+        }
+      ],
+      "inputs": [
+        {
+          "outpoint": "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3.1",
+          "unlockingScriptLength": 108,
+          "inputDescription": "BRC-207 token input",
+          "held": "B"
+        },
+        {
+          "outpoint": "f91a1f28eea1d1559fff5d4815fe4d09d56ad6a0eb72e883e435bd4b1e794d11.0",
+          "unlockingScriptLength": 108,
+          "inputDescription": "BRC-207 token input",
+          "held": "D"
+        },
+        {
+          "outpoint": "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3.0",
+          "unlockingScriptLength": 108,
+          "inputDescription": "BRC-207 token input",
+          "held": "A"
+        },
+        {
+          "outpoint": "adce3e54457fdc15d1855a310c0c8ed15a52d8f88614940b2ed112215699dd49.0",
+          "unlockingScriptLength": 108,
+          "inputDescription": "BRC-207 token input",
+          "held": "C"
+        }
+      ],
+      "inputBEEFTxids": [
+        "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3",
+        "adce3e54457fdc15d1855a310c0c8ed15a52d8f88614940b2ed112215699dd49",
+        "f91a1f28eea1d1559fff5d4815fe4d09d56ad6a0eb72e883e435bd4b1e794d11"
+      ],
+      "outputs": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc420296006d61ab14c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d37551",
+          "satoshis": 2000,
+          "outputDescription": "AMM pool: TOK / BSV"
+        }
+      ],
+      "labels": [
+        "p color plan 0 3 7b2276657273696f6e223a312c22617373657473223a5b22343262633364326230396461663237653837306435656662626233643662323763656232393835303334316231656264323930613637353639336238393333315f30225d2c226f776e65644f",
+        "p color plan 1 3 757470757473223a5b5d2c226f7065726174696f6e73223a5b7b2261737365744964223a22343262633364326230396461663237653837306435656662626233643662323763656232393835303334316231656264323930613637353639336238393333",
+        "p color plan 2 3 315f30222c226f7065726174696f6e223a227472616e73666572227d5d2c22696e707574506f736974696f6e73223a5b5d2c226368616e6765506f736974696f6e73223a5b5d2c22736967686173685479706573223a5b5d7d",
+        "amm-pool-deploy"
+      ],
+      "submissions": [
+        [
+          "tm_color_42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0"
+        ]
+      ]
+    },
+    "threeOutputs35": {
+      "requested": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201196d61ab14c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d37551",
+          "satoshis": 500,
+          "outputDescription": "AMM pool: TOK / BSV",
+          "tags": [
+            "pool",
+            "p color 101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f"
+          ]
+        },
+        {
+          "lockingScript": "006a0464617461",
+          "satoshis": 0,
+          "outputDescription": "note"
+        },
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc425a6d76a914d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e388ac",
+          "satoshis": 1,
+          "outputDescription": "1Color tokens"
+        }
+      ],
+      "inputs": [
+        {
+          "outpoint": "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3.1",
+          "unlockingScriptLength": 108,
+          "inputDescription": "BRC-207 token input",
+          "held": "B"
+        }
+      ],
+      "inputBEEFTxids": [
+        "7bf52f258fd411e463fd577380170d87aa069f0d2636ba34ef7b5a6bc2524cc3"
+      ],
+      "outputs": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc4201196d61ab14c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d37551",
+          "satoshis": 500,
+          "outputDescription": "AMM pool: TOK / BSV",
+          "tags": [
+            "pool",
+            "p color 101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f"
+          ]
+        },
+        {
+          "lockingScript": "006a0464617461",
+          "satoshis": 0,
+          "outputDescription": "note"
+        },
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc425a6d76a914d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e388ac",
+          "satoshis": 1,
+          "outputDescription": "1Color tokens"
+        },
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc425f6d76a91454fd2221465973674fb1e92e83ad0e3de953a0f988ac",
+          "satoshis": 1,
+          "basket": "p color 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331v0",
+          "customInstructions": "{\"version\":1,\"assetId\":\"42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0\",\"derivationPrefix\":\"AAECAwQFBgcICQoLDA0ODw==\",\"derivationSuffix\":\"EBESExQVFhcYGRobHB0eHw==\",\"senderIdentityKey\":\"02bd1e9f9470dad82f75c4ffd03ffe9a5ddc2c5a718084727c027b17e9b7cfd8a5\"}",
+          "tags": [
+            "p color 202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+          ],
+          "outputDescription": "BRC-207 token change"
+        }
+      ],
+      "labels": [
+        "p color plan 0 3 7b2276657273696f6e223a312c22617373657473223a5b22343262633364326230396461663237653837306435656662626233643662323763656232393835303334316231656264323930613637353639336238393333315f30225d2c226f776e65644f",
+        "p color plan 1 3 757470757473223a5b5d2c226f7065726174696f6e73223a5b7b2261737365744964223a22343262633364326230396461663237653837306435656662626233643662323763656232393835303334316231656264323930613637353639336238393333",
+        "p color plan 2 3 315f30222c226f7065726174696f6e223a227472616e73666572227d5d2c22696e707574506f736974696f6e73223a5b5d2c226368616e6765506f736974696f6e73223a5b5d2c22736967686173685479706573223a5b5d7d",
+        "amm-pool-deploy"
+      ],
+      "submissions": []
+    },
+    "short151": {
+      "requested": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc420297006d61ab14c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d37551",
+          "satoshis": 1000,
+          "outputDescription": "AMM pool: TOK / BSV"
+        }
+      ],
+      "error": "BRC-207: insufficient spendable balance of 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0",
+      "submissions": []
+    },
+    "destinationInBasket": {
+      "requested": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc425a6d76a914d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e388ac",
+          "satoshis": 1,
+          "outputDescription": "1Color tokens",
+          "basket": "p color 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331v0"
+        }
+      ],
+      "error": "BRC-207: only outputs in plan.ownedOutputs may enter a p color basket",
+      "submissions": []
+    },
+    "nonTokenInColorBasket": {
+      "requested": [
+        {
+          "lockingScript": "76a914d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e388ac",
+          "satoshis": 1,
+          "outputDescription": "plain",
+          "basket": "p color other"
+        }
+      ],
+      "error": "BRC-207: a p color basket can only receive BRC-162 token outputs",
+      "submissions": []
+    },
+    "otherAsset": {
+      "requested": [
+        {
+          "lockingScript": "24abababababababababababababababababababababababababababababababab010000005a6d76a914d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e388ac",
+          "satoshis": 1,
+          "outputDescription": "1Color tokens"
+        }
+      ],
+      "error": "BRC-207: an output asset is missing from plan.assets",
+      "submissions": []
+    },
+    "authorityDestination": {
+      "requested": [
+        {
+          "lockingScript": "203193b89356670a29bd1e1b345098b2ce276b3dbbfb5e0d877ef2da092b3dbc42006d76a914d0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e388ac",
+          "satoshis": 1,
+          "outputDescription": "authority"
+        }
+      ],
+      "error": "BRC-207: an authority output needs an authority input of the same asset",
+      "submissions": []
+    },
+    "noTokens": {
+      "requested": [
+        {
+          "lockingScript": "006a0464617461",
+          "satoshis": 0,
+          "outputDescription": "note"
+        }
+      ],
+      "error": "BRC-207: 42bc3d2b09daf27e870d5efbbb3d6b27ceb29850341b1ebd290a675693b89331_0 requires the operations [] but the plan declares [transfer]",
+      "submissions": []
+    }
+  }
+}
