@@ -21,6 +21,18 @@ public struct OpenExchangePoolRow: Equatable, Sendable {
     /// The token (P1).
     public let tokenId: String?
 
+    /// A row as given: for a copy of a pools read (a subset of its rows, say), not a read.
+    public init(
+        pool: AMMPoolState, poolId: String, lpPubKey: String, swaps: Double, validatorPeerId: String?, tokenId: String?
+    ) {
+        self.pool = pool
+        self.poolId = poolId
+        self.lpPubKey = lpPubKey
+        self.swaps = swaps
+        self.validatorPeerId = validatorPeerId
+        self.tokenId = tokenId
+    }
+
     /// `toPoolRow`: one wire row, nil when it is not one; throws where TS's `BigInt(...)` of a
     /// reserve or fee does.
     static func read(_ raw: JSONValue) throws -> OpenExchangePoolRow? {
@@ -66,6 +78,11 @@ public struct OpenExchangePools: Equatable, Sendable {
     public struct Market: Equatable, Sendable {
         public let identityKey: String?
         public let minCommissionBps: Int
+
+        public init(identityKey: String?, minCommissionBps: Int) {
+            self.identityKey = identityKey
+            self.minCommissionBps = minCommissionBps
+        }
     }
 
     /// `BeatingValidator`: a validator beating on the token's topic now, and the minimum leg its
@@ -74,11 +91,25 @@ public struct OpenExchangePools: Equatable, Sendable {
         public let identity: String
         public let peerId: String
         public let minLegSats: BigInt?
+
+        public init(identity: String, peerId: String, minLegSats: BigInt?) {
+            self.identity = identity
+            self.peerId = peerId
+            self.minLegSats = minLegSats
+        }
     }
 
     public let market: Market
     public let pools: [OpenExchangePoolRow]
     public let validators: [Validator]
+
+    /// An answer as given: for a copy of a read with some of its rows (drained pools left out,
+    /// say), which quotes as a read of those rows would.
+    public init(market: Market, pools: [OpenExchangePoolRow], validators: [Validator]) {
+        self.market = market
+        self.pools = pools
+        self.validators = validators
+    }
 
     public static let empty = OpenExchangePools(market: Market(identityKey: nil, minCommissionBps: 0), pools: [], validators: [])
 
