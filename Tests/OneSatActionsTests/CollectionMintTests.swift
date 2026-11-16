@@ -385,7 +385,7 @@ private actor MintTransport: AuthenticatedTransport {
         headers: [String: String],
         body: [UInt8]?
     ) async throws -> AuthenticatedResponse {
-        if let reply = ActiveStorageReply.reply(to: body) { return reply }
+        if let reply = ActiveStorageFixture.reply(to: body) { return reply }
         let object = try JSONSerialization.jsonObject(with: Data(body ?? [])) as? [String: Any]
         let rpcMethod = object?["method"] as? String ?? ""
         let id = object?["id"] as Any
@@ -518,7 +518,7 @@ private struct RejectURLTransport: AuthenticatedTransport {
         headers: [String: String],
         body: [UInt8]?
     ) async throws -> AuthenticatedResponse {
-        if let reply = ActiveStorageReply.reply(to: body) { return reply }
+        if let reply = ActiveStorageFixture.reply(to: body) { return reply }
         throw AuthTransportError.notImplemented("offline")
     }
 }

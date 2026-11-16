@@ -2,95 +2,119 @@
 
 # 1Sat SDK for Swift
 
-**Ordinals, tokens, and 1Sat-ecosystem actions above a generic BRC-100 wallet.**
+**Ordinals, tokens and 1Sat-ecosystem actions above a generic BRC-100 wallet.**
 
 <a href="https://www.swift.org/"><img src="https://img.shields.io/badge/Swift-6.1%2B-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift 6.1 or later"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License"></a>
 
 </div>
 
-## What this is
+The Swift counterpart of [`b-open-io/1sat-sdk`](https://github.com/b-open-io/1sat-sdk) and the
+`@1sat/*` packages. Locking scripts match `@1sat/templates` byte for byte, and a Swift wallet and a
+TypeScript wallet can share one storage account.
 
-The third Swift layer for BSV, above two that already exist:
+It is the third layer of the Swift BSV stack:
 
-| Layer | Repo | What it holds |
+| Layer | Repo | Provides |
 |---|---|---|
-| Primitives | [`swift-sdk`](https://github.com/opldotdev/swift-sdk) | keys, crypto, transactions, BEEF, the BRC-100 ABI |
-| Generic wallet | [`swift-wallet-toolbox`](https://github.com/opldotdev/swift-wallet-toolbox) | remote storage, the action lifecycle, `RemoteWallet` |
-| **1Sat ecosystem** | **this** | ordinals, BSV21 tokens, OpNS, MNEE, sweep — the protocol-specific actions |
+| Primitives | [`swift-sdk`](https://github.com/opldotdev/swift-sdk) | Keys, crypto, transactions, BEEF, the BRC-100 interface |
+| Wallet | [`swift-wallet-toolbox`](https://github.com/opldotdev/swift-wallet-toolbox) | Remote storage, the action lifecycle, permissions |
+| **1Sat** | **this repo** | Ordinals, tokens, names, handles and the actions that use them |
 
-It is the Swift counterpart of [`b-open-io/1sat-sdk`](https://github.com/b-open-io/1sat-sdk) and the
-`@1sat/*` packages. It depends on both layers below it.
+## Features
 
-## Status
+- **Ordinals and inscriptions:** inscribe, transfer, collections, and buy or cancel OrdLock v2 listings.
+- **BSV-21 tokens:** deploy, mint, send and purchase, gated on the overlay's output status, with overlay funding.
+- **1Color (BRC-162):** deploy, mint, send to a handle and receive, with BRC-207 custody compatible with `@bopen-io/color-permission-module`.
+- **Handles and delivery:** BRC-169 handle resolution, signed envelopes, BRC-232 transaction delivery, the messagebox relay, and the paymail payment inbox.
+- **OpNS:** register and resolve names through a signed PushDrop identity bind.
+- **ORDFS:** read content and metadata, and deploy directories with manifests and VCDIFF patches.
+- **Identity, locks and more:** BAP identity and SIGMA signing, time locks, MNEE, P1SAT deposit addresses, and sweeping legacy keys.
+- **Mainnet and testnet:** set per context.
 
-The tree now has more than sweep and read-only balances. **Sweep** still moves coins from a
-foreign or legacy key into a wallet's own address — generic over source, destination, and UTXO
-provider; the client still reads categorised owner outputs from the 1Sat indexer. Alongside that:
-P1SAT deposit addresses, 1Sat locking templates, MNEE and OpNS clients, and major
-`@1sat/actions` families (ordinals, inscriptions, token transfers, locks, collections, identity,
-OpNS, MNEE, and asset sweep onto P1SAT outputs). Actions also cover WalletPermissionsManager
-collection metadata/name handling.
-
-Sweep stays **partial by design**. Further `@1sat` surface lands as the wallet needs it.
-
-**OrdLock listing create is off** (`Ordinals.list` / `buildList`, OPL-4694). Buy and cancel of existing listings stay on, for OrdLock v2 (`OrdLockV2`, the Rúnar `OrdLockV2Batch` contract) only; v1 is dropped entirely, following b-open-io/1sat-sdk 8fb809d5 (which removed v1 detection and the v1 sweep cancel; TS buy/cancel still carry a vestigial v1 fallback that Swift does not). A purchase goes through `OrdLockV2Purchase`, which front-funds from the `1sat-deposit` basket under a short `hold:` tag. `OrdLockV2.lock` remains the script encoder for decode and spend-side tests.
+OrdLock listing create is off for now. Buying and cancelling existing v2 listings work.
 
 ## Modules
 
-| Module | Responsibility |
+| Module | Purpose |
 |---|---|
-| `OneSatClient` | Read-only ordinals and BSV-21 balances; MNEE and OpNS clients; 1sat-stack services |
-| `OneSatSweep` | Categorise an address, sweep its fundable BSV, report the rest |
-| `OneSatTemplates` | Locking scripts: inscription, OrdLock v2, BSV-20/21, 1Color (BRC-162), Cosign, TimeLock, BAP, BitCom, public `MAPTemplate` |
-| `OneSatCBOR` | Strict DAG-CBOR encode/decode, matching `@ipld/dag-cbor` as the TS stack uses it |
-| `OneSatAddresses` | P1SAT deposit addresses (`[0, "onesat"]`, keyID `"1sat <index>"`) |
-| `OneSatActions` | Major `@1sat/actions` families, spend-side unlock templates, WPM collection metadata/name handling |
-| `OneSat` | Umbrella, re-exporting the above |
+| `OneSatActions` | The `@1sat/actions` families: ordinals, tokens, inscriptions, OpNS, locks, identity, ORDFS deploy |
+| `OneSatColor` | 1Color actions and BRC-207 custody |
+| `OneSatAMM` | Open Exchange: token listing and paid enable on the 1Color AMM host |
+| `OneSatMetanet` | Handles, envelopes, transaction delivery, relay, paymail inbox |
+| `OneSatTemplates` | Locking scripts: inscription, OrdLock v2, BSV-20/21, 1Color, Cosign, TimeLock, BAP, MAP, B |
+| `OneSatClient` | Read clients for ordinals, BSV-21, OpNS, ORDFS and MNEE |
+| `OneSatPermissions` | Approval-time review data for 1Sat assets |
+| `OneSatAddresses` | P1SAT deposit addresses |
+| `OneSatCBOR` | Strict DAG-CBOR, matching `@ipld/dag-cbor` |
+| `OneSatSweep` | Sweep plain BSV from a legacy key and report the assets left behind |
+| `OneSat` | Umbrella that re-exports every module except `OneSatColor`, `OneSatAMM` and `OneSatMetanet` |
 
-## Sweep
-
-A sweep is **partial by nature**. A legacy address rarely holds only plain BSV — it may hold
-ordinals, BSV-21 tokens, and time-locked outputs. Sweeping all of them would burn a collectible as
-a fee or build an invalid transaction. So the safe flow categorises first, sweeps the fundable BSV,
-and **reports what remains** — keeping the source key while any asset is still there, exactly as
-Yours Wallet's migration does.
+## Install
 
 ```swift
-import OneSatSweep
-
-// 1. Categorise through the 1Sat indexer (the only provider that can tell an ordinal from a coin).
-let plan = try await Sweep.plan(forAddress: legacyAddress, scanner: OneSatScanner())
-
-// 2. Sweep only the fundable BSV.
-if !plan.fundable.isEmpty {
-    let result = try Sweep.build(fromWIF: legacyWIF, toAddress: myWalletAddress, utxos: plan.fundable)
-    // broadcast result.transaction
-}
-
-// 3. Keep the key while anything remains; re-sweep after the next lock unlocks.
-if !plan.remaining.isEmpty {
-    // preserve legacyWIF; plan.remaining.nextUnlockHeight tells you when to try again
-}
+dependencies: [
+    .package(url: "https://github.com/opldotdev/swift-1sat-sdk.git", branch: "main")
+],
+targets: [
+    .target(name: "MyWallet", dependencies: [
+        .product(name: "OneSat", package: "swift-1sat-sdk"),
+        .product(name: "OneSatColor", package: "swift-1sat-sdk"),
+    ])
+]
 ```
 
-### Two provider families
+Requires Swift 6.1 and iOS 16, macOS 13, tvOS 16, watchOS 9 or visionOS 1.
 
-| Family | Gives | Use for |
-|---|---|---|
-| **WhatsOnChain** | plain UTXOs, no asset tags | balance, plain-BSV-only sweep (`WhatsOnChainUTXOSource`) |
-| **1Sat / GorillaPool** (`api.1sat.app`, junglebus, Banana Blocks) | UTXOs **with** event tags (`bsv21:`, `lock:`, ordinal) | any sweep that could hold assets (`AssetScanner`) |
+## Usage
 
-A sweep that might touch assets **must** read from the 1Sat family — WhatsOnChain cannot tell a
-high-value ordinal from a coin. The wallet's provider setting selects which family answers. Both adapters are built and
-live-verified: `WhatsOnChainUTXOSource` and `OneSatScanner` (`api.1sat.app`).
+Actions run against a `OneSatContext`: the wallet's identity key plus a `swift-wallet-toolbox`
+storage client.
 
-## Building
+```swift
+import OneSat
+
+let ctx = OneSatContext(
+    identity: identityKey,
+    storage: storage,
+    auth: auth,
+    chain: .test,
+    bsv21: bsv21Services
+)
+
+// Send BSV-21 tokens to an address.
+let result = await Tokens.send(ctx, Tokens.SendRequest(
+    tokenId: tokenId,
+    recipients: [.init(amount: 1_000, destination: .address(recipientAddress))]
+))
+```
+
+1Color sends go to a handle and arrive through the recipient's transaction inbox:
+
+```swift
+import OneSatColor
+
+let colorCtx = OneColorContext(ctx, overlay: colorOverlay)
+
+// Sender
+let sent = await OneColorActions.send(colorCtx, assetID: "<txid>_<vout>", amount: 300, to: "@bob@1sat.app")
+
+// Recipient
+let inbox = await TransactionInbox.sync(colorCtx)
+let balance = try await OneColorActions.balance(colorCtx, assetID: ColorAssetID("<txid>_<vout>"))
+```
+
+Most actions return a result with a `txid` on success or an `error` string rather than throwing.
+
+## Development
 
 ```bash
 swift build
 swift test
 ```
+
+[`AGENTS.md`](AGENTS.md) lists the TypeScript references each change is checked against.
+[`docs/`](docs) holds design notes.
 
 ## License
 

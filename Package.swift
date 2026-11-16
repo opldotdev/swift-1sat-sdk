@@ -19,6 +19,7 @@ let publicModules = [
     "OneSatCBOR",
     "OneSatColor",
     "OneSatMetanet",
+    "OneSatAMM",
 ]
 
 let package = Package(
@@ -166,6 +167,25 @@ let package = Package(
             ]
         ),
 
+        // Open Exchange (the 1Color AMM): a native port of `@dcasegr/amm-client`, starting with
+        // the paid token listing. Reads over plain HTTP, the listing over BRC-104, the payment a
+        // BRC-177 protected noSend from the same wallet the 1Color actions use.
+        .target(
+            name: "OneSatAMM",
+            dependencies: [
+                "OneSatColor",
+                "OneSatTemplates",
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
+            ]
+        ),
+
         // Action families from `@1sat/actions`: tracked create/sign, ordinals, inscribe,
         // BSV-21 transfer, locks, and marketplace. Spend-side unlock templates live here.
         .target(
@@ -240,6 +260,23 @@ let package = Package(
                 .product(name: "BSVTransaction", package: "swift-sdk"),
             ],
             resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "OneSatAMMTests",
+            dependencies: [
+                "OneSatAMM",
+                "OneSatColor",
+                "OneSatTemplates",
+                .product(name: "BSVCore", package: "swift-sdk"),
+                .product(name: "BSVKeys", package: "swift-sdk"),
+                .product(name: "BSVScript", package: "swift-sdk"),
+                .product(name: "BSVTransaction", package: "swift-sdk"),
+                .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
+            ]
         ),
         .testTarget(
             name: "OneSatCBORTests",
