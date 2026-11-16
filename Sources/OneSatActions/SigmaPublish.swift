@@ -177,7 +177,9 @@ enum SigmaPublish {
         try await TrackedAction.execute(
             ctx,
             description: description,
-            inputBEEF: try AtomicBEEF(bytes: anchorTx, limits: WalletBEEFLimits.standard).beef,
+            inputBEEF: try AtomicBEEF(
+                bytes: anchorTx, limits: WalletBEEFLimits.standard, transactionOrder: .any
+            ).beef,
             inputs: [
                 try WalletCreateActionInput(
                     outpoint: try Outpoint("\(anchorTxid).0"),

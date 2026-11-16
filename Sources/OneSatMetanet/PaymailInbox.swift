@@ -153,7 +153,7 @@ public enum PaymailInbox {
             nested = Array(bytes.dropFirst(36))
         }
         do {
-            return try BEEF(bytes: nested, limits: beefLimits)
+            return try BEEF(bytes: nested, limits: beefLimits, transactionOrder: .any)
         } catch {
             throw PaymailInboxError("paymail beef is not valid BEEF")
         }

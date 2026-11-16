@@ -182,7 +182,7 @@ public enum OrdLockV2Purchase {
         guard let txid = result.txid, let tx = result.tx else {
             throw OneSatActionError.ordLockV2FrontFundingFailed(nil)
         }
-        let beef = try AtomicBEEF(bytes: tx, limits: WalletBEEFLimits.standard).beef
+        let beef = try AtomicBEEF(bytes: tx, limits: WalletBEEFLimits.standard, transactionOrder: .any).beef
         return (
             FundingCandidate(
                 outpoint: try Outpoint("\(txid).0"),

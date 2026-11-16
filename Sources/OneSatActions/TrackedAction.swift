@@ -93,10 +93,11 @@ public enum TrackedAction {
         return (tracked, labels)
     }
 
-    /// Parses caller BEEF bytes. Empty or absent is no graph.
+    /// Parses caller BEEF bytes. Empty or absent is no graph. Callers pass BEEF from services and
+    /// wallets written by `@bsv/sdk`, so records may arrive in any order (`Beef.fromBinary`).
     public static func parseInputBEEF(_ bytes: [UInt8]?) throws -> BEEF? {
         guard let bytes, !bytes.isEmpty else { return nil }
-        return try BEEF(bytes: bytes, limits: WalletBEEFLimits.standard)
+        return try BEEF(bytes: bytes, limits: WalletBEEFLimits.standard, transactionOrder: .any)
     }
 
     /// Builds the ABI request `createTrackedAction` would send (`signAndProcess: false`).

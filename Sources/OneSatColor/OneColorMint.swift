@@ -144,7 +144,7 @@ extension OneColorActions {
         var result = Mint1ColorResult()
         do {
             let overlay = try ctx.requireOverlay()
-            let atomic = try AtomicBEEF(bytes: tx, limits: beefLimits)
+            let atomic = try AtomicBEEF(bytes: tx, limits: beefLimits, transactionOrder: .any)
             guard let transaction = try atomic.beef.transaction(for: atomic.subjectTransactionID, limits: ColorModule.txLimits) else {
                 throw ColorError.invalid("mint transaction")
             }

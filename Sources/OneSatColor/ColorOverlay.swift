@@ -78,7 +78,7 @@ public enum ColorOverlay {
             let transaction: Transaction
             let txid: String
             do {
-                let beef = try BEEF(bytes: item.beef, limits: beefLimits)
+                let beef = try BEEF(bytes: item.beef, limits: beefLimits, transactionOrder: .any)
                 transaction = try ColorBEEF.subject(of: beef)
                 txid = try transaction.transactionID(limits: beefLimits.transactionLimits).displayHex
             } catch {

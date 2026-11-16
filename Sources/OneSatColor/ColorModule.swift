@@ -188,7 +188,7 @@ enum ColorModule {
     /// retried. The 0.2.3 module ignores the STEAK here and completes on any answer; `@1sat/actions`
     /// `receive` checks it the same way for a delivery (`<topic> did not admit <txid>.<i>`).
     static func submit(_ overlay: any ColorOverlayProvider, topics: [String], beef: [UInt8]) async throws {
-        let atomic = try AtomicBEEF(bytes: beef, limits: beefLimits)
+        let atomic = try AtomicBEEF(bytes: beef, limits: beefLimits, transactionOrder: .any)
         guard let transaction = try atomic.beef.transaction(for: atomic.subjectTransactionID, limits: txLimits) else {
             throw ColorError.invalid("submitted transaction")
         }

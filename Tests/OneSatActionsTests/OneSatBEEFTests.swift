@@ -99,6 +99,32 @@ final class OneSatBEEFTests: XCTestCase {
         XCTAssertEqual(graph, fixture.beef)
     }
 
+    /// `Beef.toBinary()` in `@bsv/sdk` 4.1.0 wrote this: a transaction spending a proven parent
+    /// and an input whose parent is absent, ahead of that proven parent. `Beef.fromBinary` reads
+    /// it; so does the graph reader, which returns it parents-first.
+    func test_graphReadsChildFirstBEEFFromTheTypeScriptWriter() throws {
+        let hex = [
+            "0200beef01fe00350c0001020002b6b78c136a6fd3e17704045c487c1dc1805ac2b300ae47bd8c26d271d2aed8",
+            "c80100cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc02000100000002b6b78c",
+            "136a6fd3e17704045c487c1dc1805ac2b300ae47bd8c26d271d2aed8c8000000000151ffffffffeeeeeeeeeeee",
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee000000000151ffffffff01a00f000000000000",
+            "1976a914111111111111111111111111111111111111111188ac0000000001000100000001aaaaaaaaaaaaaaaa",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa000000000151ffffffff0188130000000000001976",
+            "a914111111111111111111111111111111111111111188ac00000000",
+        ].joined()
+        let bytes = try Hex.decode(hex, maximumDecodedByteCount: limits.maximumByteCount)
+        XCTAssertThrowsError(try BEEF(bytes: bytes, limits: limits)) { error in
+            guard case BEEFError.parentAfterChild = error else {
+                return XCTFail("expected parentAfterChild, got \(error)")
+            }
+        }
+        let graph = try OneSatBEEF.graph(bytes)
+        XCTAssertEqual(graph.transactions.map(\.merklePathIndex), [0, nil])
+        let child = try XCTUnwrap(graph.transactions.last).transactionID(limits: limits.transactionLimits)
+        let envelope = [0x01, 0x01, 0x01, 0x01] + child.wireBytes + bytes
+        XCTAssertEqual(try OneSatBEEF.graph(envelope), graph)
+    }
+
     private struct Chain {
         let parentID: TransactionID
         let childID: TransactionID
