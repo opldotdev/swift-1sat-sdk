@@ -911,7 +911,7 @@ final class SwapSellTests: XCTestCase {
                 let left = try await OpenExchangeSwapLeg.basketRows(h.w.ctx)
                 XCTAssertEqual(OpenExchangeSwapLeg.satsRows(left).count, 0, "sats left in the basket")
             case let .error(text):
-                XCTAssertEqual(OpenExchangeError.errorText(error), filing + "; moving the basket's sats back failed: \(text)")
+                XCTFail("the move back failed: \(text)")
             }
         }
         XCTAssertEqual(log.phases, ["staging", "returning", "failed"])
