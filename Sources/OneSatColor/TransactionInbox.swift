@@ -287,7 +287,7 @@ public enum TransactionInbox {
                 }
             }
             for insertion in insertions {
-                let custody = try await ColorModule.verifyReceipt(
+                _ = try await ColorModule.verifyReceipt(
                     ctx, overlay: overlay, transaction: subject, txid: txidHex, outputIndex: insertion.index,
                     basket: insertion.basket, customInstructions: insertion.instructions
                 )
@@ -295,7 +295,7 @@ public enum TransactionInbox {
                 remittances[insertion.index] = try WalletBasketInsertion(
                     basket: insertion.basket,
                     customInstructions: try await ColorMetadata.encrypt(insertion.instructions, identity: ctx.identity),
-                    tags: ColorModule.withSuffixTag(insertion.tags, custody)
+                    tags: ColorModule.withSuffixTag(insertion.tags)
                 )
             }
         }

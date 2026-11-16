@@ -18,6 +18,14 @@ struct HarnessError: Error, CustomStringConvertible {
 }
 
 let harnessTxLimits = WalletTransactionLimits.standard
+
+/// Module 0.2.3 files one suffix tag per output: `p color ` and 64 lowercase hex, drawn at random.
+func assertOneSuffixTag(_ tags: [String], _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertEqual(tags.count, 1, message, file: file, line: line)
+    for tag in tags {
+        XCTAssertTrue(ColorIdentifiers.isDerivationSuffixTag(tag), "\(message): \(tag)", file: file, line: line)
+    }
+}
 let harnessBEEFLimits = WalletBEEFLimits.standard
 
 /// The transactions behind `roots`, parents first, from `pool`.

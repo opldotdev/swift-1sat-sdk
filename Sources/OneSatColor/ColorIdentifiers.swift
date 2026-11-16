@@ -3,7 +3,7 @@ import BSVCore
 import BSVCrypto
 import BSVKeys
 
-/// BRC-207 identifiers, byte-for-byte with `@bopen-io/color-permission-module` 0.2.2
+/// BRC-207 identifiers, byte-for-byte with `@bopen-io/color-permission-module` 0.2.3
 /// `identifiers.ts`: asset IDs, wire tags, `p color` protocol IDs, baskets, suffix tags and
 /// overlay topics. A Swift wallet and a TS wallet sharing one storage account file and find
 /// the same outputs only because these strings match exactly.
@@ -85,17 +85,26 @@ public enum ColorIdentifiers {
         return try parseTagged(Array(parts.dropFirst(3)))
     }
 
-    /// `p color ` and the hex SHA-256 of the UTF-8 derivation suffix: the tag filed on every
-    /// managed output, so coin selection can find an output without storage keeping the suffix.
-    public static func derivationSuffixTag(_ derivationSuffix: String) -> String {
-        "\(basketNamespace) \(Hex.encode(BSVHashing.sha256(Array(derivationSuffix.utf8)).bytes))"
+    /// The tag filed on a managed output: `p color ` and 32 random bytes as lowercase hex, drawn
+    /// for each output the module files (module 0.2.3, ts-stack#1567). The module lists the
+    /// output's transaction by it; the tag says nothing of the output's key derivation.
+    public static func derivationSuffixTag() -> String {
+        var generator = SystemRandomNumberGenerator()
+        return derivationSuffixTag(random: (0..<32).map { _ in UInt8.random(in: 0...255, using: &generator) })
+    }
+
+    /// The suffix tag of these 32 bytes.
+    static func derivationSuffixTag(random bytes: [UInt8]) -> String {
+        "\(basketNamespace) \(Hex.encode(bytes))"
     }
 
     public static func isDerivationSuffixTag(_ tag: String) -> Bool {
         let prefix = "\(basketNamespace) "
         guard tag.hasPrefix(prefix) else { return false }
-        let hex = tag.dropFirst(prefix.count)
-        return hex.count == 64 && hex.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
+        // TS `/^p color [0-9a-f]{64}$/`: compare bytes, not graphemes, so a combining mark
+        // after the last hex digit does not pass.
+        let hex = tag.utf8.dropFirst(prefix.utf8.count)
+        return hex.count == 64 && hex.allSatisfy { (0x30...0x39).contains($0) || (0x61...0x66).contains($0) }
     }
 
     /// A remittance string is nonempty strict UTF-8 without whitespace. Swift strings are always

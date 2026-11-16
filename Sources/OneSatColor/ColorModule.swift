@@ -7,10 +7,13 @@ import BSVInterpreter
 import ToolboxActions
 import OneSatTemplates
 
-/// The parts of `@bopen-io/color-permission-module` 0.2.2 (no processing profiles) that a Swift
+/// The parts of `@bopen-io/color-permission-module` 0.2.3 (no processing profiles) that a Swift
 /// wallet runs itself, since it has no permissions manager in front of storage: input selection
-/// against the overlay, resubmission of held outputs, the exact split before a handoff, the
-/// source BEEF of token inputs, submission, and receipt verification.
+/// against the overlay, resubmission of held outputs, token change, the exact split before a
+/// handoff, the source BEEF of token inputs, submission, and receipt verification.
+///
+/// Not ported: the module's in-memory hold on outputs a concurrent action is choosing (`selected`,
+/// `staged`). A Swift wallet runs one color action at a time per account.
 enum ColorModule {
     static let beefLimits = WalletBEEFLimits.standard
     static let txLimits = WalletBEEFLimits.standard.transactionLimits
@@ -82,7 +85,9 @@ enum ColorModule {
                 if total >= target { break }
                 if rejected.contains(candidate.output.outpoint.description) { continue }
                 chosen.append(candidate)
-                total += role == .value ? candidate.token.amount : 1
+                // TS sums in bigint; once the sum passes UInt64 it is past any target.
+                let (sum, overflow) = total.addingReportingOverflow(role == .value ? candidate.token.amount : 1)
+                total = overflow ? .max : sum
             }
             guard total >= target else {
                 throw ColorError.custody("insufficient spendable \(role == .value ? "balance" : "authority") of \(assetID)")
@@ -324,7 +329,10 @@ enum ColorModule {
         return beef
     }
 
-    /// The selected inputs' transactions, listed by suffix tag with `tagQueryMode: any`.
+    /// The selected inputs' source transactions, listed by the suffix tag each input's row carries,
+    /// with `tagQueryMode: any`. Several rows may carry the same tag, so matching rows are paged
+    /// within the first result's count; counts must be stable, rows unique, and every page within
+    /// its limit and the rows left.
     static func sourceTransactions(_ ctx: OneColorContext, basket: String, selected: [ColorManagedInput]) async throws -> BEEF {
         let wanted = Set(selected.map(\.outpoint))
         var seen: Set<String> = []
@@ -342,6 +350,10 @@ enum ColorModule {
                 throw ColorError.custody("the matching output count changed during listing")
             }
             total = page.totalOutputs
+            // `offset` never passes the count: the loop continues only while `offset < total`.
+            if page.outputs.count > Int(limit) || page.outputs.count > Int(page.totalOutputs) - Int(offset) {
+                throw ColorError.custody("the listing exceeded its bounds")
+            }
             for output in page.outputs {
                 let outpoint = output.outpoint.description
                 guard seen.insert(outpoint).inserted else { throw ColorError.custody("the listing repeated an output") }
@@ -359,13 +371,14 @@ enum ColorModule {
 
     // MARK: - Split
 
-    /// A new token output this wallet keeps (TS `ownedOutput`): a value output of `amount`, or an
-    /// authority output (`amount` must be 0), in the asset's basket for that role, with its custody
-    /// encrypted and one suffix tag. `custody` defaults to new random derivation for this wallet.
+    /// A new token output this wallet keeps (TS `newManagedOutput`, or `ownedOutput` for a given
+    /// custody): a value output of `amount`, or an authority output (`amount` must be 0), in the
+    /// asset's basket for that role, with its custody encrypted and one new random suffix tag.
+    /// `custody` defaults to new random derivation for this wallet.
     static func newManagedOutput(
         _ ctx: OneColorContext, assetID: ColorAssetID, amount: UInt64, role: ColorTokenRole = .value,
         custody given: ColorCustody? = nil, outputDescription: String = "BRC-207 token change"
-    ) async throws -> (output: WalletCreateActionOutput, custody: ColorCustody, script: Script) {
+    ) async throws -> (output: WalletCreateActionOutput, custody: ColorCustody, script: Script, suffixTag: String) {
         let custody = try given ?? ColorCustody(
             asset: .asset(assetID), derivationPrefix: ColorExecutor.randomBase64(),
             derivationSuffix: ColorExecutor.randomBase64(), senderIdentityKey: ctx.identityKey
@@ -383,14 +396,25 @@ enum ColorModule {
             guard amount == 0 else { throw ColorError.invalid("authority output amount") }
             script = try OneColor.authority(tokenID: assetID.description, lock: lock).lock()
         }
+        let suffixTag = ColorIdentifiers.derivationSuffixTag()
         let output = try WalletCreateActionOutput(
             lockingScript: script.bytes, satoshis: OneColorConstants.carrierSatoshis,
             outputDescription: outputDescription,
             basket: ColorIdentifiers.basket(assetID, role: role),
             customInstructions: try await ColorMetadata.encrypt(custody.json, identity: ctx.identity),
-            tags: [custody.suffixTag]
+            tags: [suffixTag]
         )
-        return (output, custody, script)
+        return (output, custody, script, suffixTag)
+    }
+
+    /// The selected inputs' total. TS sums in bigint; a total past UInt64 cannot be filed as one
+    /// change output here, so it is refused rather than trapping.
+    static func sumAmounts(_ selected: [ColorManagedInput]) throws -> UInt64 {
+        try selected.reduce(UInt64(0)) { total, input in
+            let (sum, overflow) = total.addingReportingOverflow(input.amount)
+            if overflow { throw ColorError.custody("the selected token inputs exceed the largest amount") }
+            return sum
+        }
     }
 
     /// Splits the selected inputs into an output of exactly `amount` and token change, broadcast
@@ -403,7 +427,7 @@ enum ColorModule {
         _ ctx: OneColorContext, overlay: any ColorOverlayProvider, assetID: ColorAssetID,
         selected: [ColorManagedInput], amount: UInt64
     ) async throws -> ColorManagedInput {
-        let change = selected.reduce(0) { $0 + $1.amount } - amount
+        let change = try ColorModule.sumAmounts(selected) - amount
         let exact = try await newManagedOutput(ctx, assetID: assetID, amount: amount)
         let rest = try await newManagedOutput(ctx, assetID: assetID, amount: change)
         let plan = ColorPlan(
@@ -430,7 +454,7 @@ enum ColorModule {
         return ColorManagedInput(
             outpoint: "\(signed.transactionID.displayHex).0", lockingScript: exact.script,
             satoshis: OneColorConstants.carrierSatoshis, assetID: assetID, role: .value, amount: amount,
-            custody: exact.custody, suffixTag: exact.custody.suffixTag,
+            custody: exact.custody, suffixTag: exact.suffixTag,
             sourceBEEF: try AtomicBEEF(bytes: atomic, limits: beefLimits).beef
         )
     }
@@ -524,10 +548,14 @@ enum ColorModule {
         return assets
     }
 
-    /// `withSuffixTag`: the caller's tags plus the custody's suffix tag, each once.
-    static func withSuffixTag(_ tags: [String]?, _ custody: ColorCustody) -> [String] {
+    /// TS `withSuffixTag`: the caller's tags without any tag of the suffix tag form, each once, plus
+    /// a new suffix tag. Other `p color ` tags are kept.
+    static func withSuffixTag(_ tags: [String]?, suffixTag: String = ColorIdentifiers.derivationSuffixTag()) -> [String] {
         var result: [String] = []
-        for tag in (tags ?? []) + [custody.suffixTag] where !result.contains(tag) { result.append(tag) }
+        for tag in (tags ?? []).filter({ !ColorIdentifiers.isDerivationSuffixTag($0) }) + [suffixTag]
+        where !result.contains(tag) {
+            result.append(tag)
+        }
         return result
     }
 }

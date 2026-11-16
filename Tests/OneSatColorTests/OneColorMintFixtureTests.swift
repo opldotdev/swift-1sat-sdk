@@ -41,7 +41,7 @@ final class OneColorMintFixtureTests: XCTestCase {
             try await party.wallet.hold(
                 deploy, vout: 0, basket: ColorIdentifiers.basket(assetID, role: .authority),
                 customInstructions: try await ColorMetadata.encrypt(deployCustody.json, identity: identity),
-                tags: [deployCustody.suffixTag]
+                tags: [ColorIdentifiers.derivationSuffixTag()]
             )
             await world.overlay.admit(try graph([deploy]).serialized(limits: harnessBEEFLimits), outpoint: "\(deployID.displayHex).0", vout: 0)
             let valueCustody = try custody("valueCustody", .asset(assetID), party.key)
@@ -99,8 +99,7 @@ final class OneColorMintFixtureTests: XCTestCase {
                 let plaintext = await ColorMetadata.decrypt(try XCTUnwrap(output.customInstructions, label), identity: identity)
                 XCTAssertEqual(plaintext, theirs["customInstructions"] as? String, label)
                 XCTAssertEqual(plaintext, custodies[index == 0 ? "value" : "authority"] as? String, label)
-                let mine = index == 0 ? valueCustody : authorityCustody
-                XCTAssertEqual(output.tags, [mine.suffixTag], label)
+                assertOneSuffixTag(output.tags, label)
                 let theirTags = try XCTUnwrap(theirs["tags"] as? [String])
                 XCTAssertEqual(theirTags.count, 1, label)
                 for tag in output.tags + theirTags {

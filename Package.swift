@@ -44,7 +44,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "a6e9da4e216caa39bb946a841b3fe864a982398a"
+            revision: "6f603aed67f7b8806923a58b78da0ce11b2e45d3"
         ),
         // Open Exchange's engine works in exact integers as the TS does in `bigint`. The version
         // swift-sdk pins (exact 5.7.0); SwiftPM resolves the two to the same checkout.
@@ -128,7 +128,7 @@ let package = Package(
 
         // BRC-207 color custody for 1Color (BRC-162): identifiers, action plans, receipts, overlay
         // admission and spendability. Wire-compatible with `@bopen-io/color-permission-module`
-        // 0.2.2, so a Swift wallet and a TS wallet can share one storage account.
+        // 0.2.3, so a Swift wallet and a TS wallet can share one storage account.
         // Metanet delivery: BRC-169 handles and signed envelopes, BRC-78 framing, BRC-232
         // transaction delivery, and the BRC-231 DAG-CBOR message relay. Ported from
         // `@1sat/actions` `metanet/` and `@1sat/client` handles.
