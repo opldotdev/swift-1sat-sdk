@@ -239,4 +239,8 @@ for (const c of [relayCase, ownCase]) {
   out.resolve = { spendsAsked, taken: big(r.taken), stuck: r.stuck, internalize: calls.map((x) => ({ description: x.description, labels: x.labels, outputs: x.outputs })) };
 }
 
+// executeSwap's leg: the commission key derived from the market identity per pool outpoint (0.49.0), the whole
+// amount in one leg (last), 5,000 sats over the need.
+out.loop = (await satsIn("the swap loop's leg", { commissionPkh: deriveCommissionPkh(v.identity, { txid: deployTxid, vout: 0 }), extra: [5_000], last: true })).out;
+
 console.log(JSON.stringify(out, null, 1));
