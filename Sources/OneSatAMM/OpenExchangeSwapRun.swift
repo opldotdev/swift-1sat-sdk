@@ -191,6 +191,16 @@ extension OpenExchange {
                 ctx, sats: sats, tokens: lackTokens > 0 ? (tokenId, lackTokens) : nil, sym: sym, submit: submitter
             )
             event(.staged(txid: staged.txid, sats: sats, tokens: lackTokens, submitted: staged.submitted, errors: staged.errors))
+            // Not in the TS (which carries on and stops at `fees`, no leg able to spend the
+            // unfiled row): a sell whose staged token row was not filed fails with why.
+            if lackTokens > 0, !staged.filed {
+                let prefix = "internalizeAction: "
+                let why = staged.errors.first { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+                    ?? "the wallet did not accept it"
+                throw OpenExchangeError.failed(
+                    "the staged \(sym) \(staged.txid).0 could not be filed in the swap basket: \(why) (settleSwaps files it later)"
+                )
+            }
         }
 
         // 2. The loop.

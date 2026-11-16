@@ -29,6 +29,24 @@ public struct OpenExchangeSteak: Equatable, Sendable {
     public let entries: [Entry]
 }
 
+/// What `settleSwaps` met while filing staged token outputs, for the caller's log (not in the TS:
+/// its client drops these). Each is logged too.
+public enum OpenExchangeSettleEvent: Equatable, Sendable {
+    /// The staging history (`listActions`) could not be read; `kept` staged outputs read before
+    /// the failure are still filed.
+    case historyUnread(error: String, kept: Int)
+    /// The host served no transaction for a staged output (404): left unfiled for the next load.
+    case notServed(outpoint: String)
+    /// The host's read of a staged output's transaction failed: left unfiled.
+    case unread(outpoint: String, error: String)
+    /// A staged output filed in `amm-swap`.
+    case filed(outpoint: String)
+    /// The wallet answered the filing with `accepted: false`: left unfiled.
+    case notAccepted(outpoint: String)
+    /// The filing threw: left unfiled.
+    case notFiled(outpoint: String, error: String)
+}
+
 /// `UnfiledStaged`: a staged token output the swap basket lacks.
 public struct OpenExchangeUnfiledStaged: Equatable, Sendable {
     public let txid: String
@@ -248,8 +266,11 @@ extension OpenExchangeSwapLeg {
 
     /// `unfiledStagedTokens`: every output of an action labelled `amm-swap-stage` whose description
     /// names a staged key and whose script is a 1Color value output, its basket not `amm-swap`. A
-    /// wallet that refuses the read: none (logged).
-    public static func unfiledStagedTokens(_ ctx: OneColorContext) async -> [OpenExchangeUnfiledStaged] {
+    /// read that fails keeps what it collected before the failure, as the TS does; the failure is
+    /// logged and told to `onEvent` (`historyUnread`), never dropped.
+    public static func unfiledStagedTokens(
+        _ ctx: OneColorContext, onEvent: (@Sendable (OpenExchangeSettleEvent) -> Void)? = nil
+    ) async -> [OpenExchangeUnfiledStaged] {
         var out: [OpenExchangeUnfiledStaged] = []
         do {
             let r = try await ctx.storage.colorListActions(ctx.auth, try WalletListActionsRequest(
@@ -268,8 +289,8 @@ extension OpenExchangeSwapLeg {
                 }
             }
         } catch {
-            OneSatLog.error(error, "OpenExchange: the staging history could not be read", category: OpenExchange.logCategory)
-            return []
+            OneSatLog.error(error, "OpenExchange: the staging history could not be read (\(out.count) staged outputs read before)", category: OpenExchange.logCategory)
+            onEvent?(.historyUnread(error: OpenExchangeError.errorText(error), kept: out.count))
         }
         return out
     }
@@ -338,6 +359,13 @@ extension OpenExchangeSwapLeg {
 
         var submitted = "not submitted"
         var errors: [String] = []
+        // Not in the TS (its module throws there and the txid is lost): the module's own overlay
+        // submit failed after the broadcast; the tokens moved and were filed, so the move back
+        // stands, with the failure reported.
+        if let moduleError = done.submitError {
+            errors.append("module submit: \(moduleError)")
+            OneSatLog.error("OpenExchange move back \(done.txid) was broadcast, then the module's submit failed: \(moduleError)", category: OpenExchange.logCategory)
+        }
         if let submit {
             do {
                 submitted = OpenExchange.steakText(try await submit("tm_color_\(canonical)", done.atomicBEEF))

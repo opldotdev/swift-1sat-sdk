@@ -4,6 +4,7 @@ import BSVScript
 import BSVTransaction
 import BSVWallet
 import ToolboxActions
+import OneSatSweep
 
 /// A `p color plan` transfer whose token inputs the caller holds outside the module and signs
 /// itself, its token outputs the wallet's own (plan `ownedOutputs`): `@bsv/color-permission-module`
@@ -17,7 +18,9 @@ import ToolboxActions
 /// not admitted and unspent in its overlay"), any other input passes through; the operations the
 /// inputs and outputs imply must be the plan's. Before signing, the token inputs are asked again
 /// ("a <asset> input is no longer spendable"); after the broadcast the transaction is submitted to
-/// `tm_color_<asset>`, a failure there thrown as the module's `onResponse` throws it.
+/// `tm_color_<asset>`. The module's `onResponse` throws a failure there; this port returns it as
+/// `submitError` with the txid instead (deliberate: the tokens moved and were filed, so the
+/// caller must still learn the transaction), and logs it.
 ///
 /// This port selects no token inputs of the wallet's own: the explicit inputs must cover the token
 /// outputs (a move back spends every row it moves). An explicit input that is one of the wallet's
@@ -41,7 +44,7 @@ package enum ColorAppSignedTransfer {
         _ ctx: OneColorContext, assetID: ColorAssetID, description: String, inputBEEF: BEEF,
         inputs: [WalletCreateActionInput], outputs requested: [WalletCreateActionOutput], owned: [Owned],
         labels: [String], signCallerInputs: (Transaction) throws -> [Int: Script]
-    ) async throws -> (txid: String, atomicBEEF: [UInt8], transaction: Transaction) {
+    ) async throws -> (txid: String, atomicBEEF: [UInt8], transaction: Transaction, submitError: String?) {
         for label in labels where label.hasPrefix("\(ColorIdentifiers.basketNamespace) ") {
             throw ColorError.custody("unknown p color label")
         }
@@ -166,8 +169,25 @@ package enum ColorAppSignedTransfer {
             }
         }
         let signed = try await ColorExecutor.execute(ctx, request: request, signCallerInputs: signCallerInputs)
-        let atomic = try signed.atomicBEEF()
-        try await ColorModule.submit(overlay, topics: [ColorIdentifiers.topic(assetID)], beef: atomic)
-        return (signed.transactionID.displayHex, atomic, signed.transaction)
+        // Broadcast, the owned outputs filed: from here the txid is reported whatever fails.
+        let txid = signed.transactionID.displayHex
+        let atomic: [UInt8]
+        do {
+            atomic = try signed.atomicBEEF()
+        } catch {
+            OneSatLog.error(error, "1Color app-signed transfer \(txid) was broadcast, then its Atomic BEEF could not be built", category: "OneSatColor")
+            throw error
+        }
+        // The module's `onResponse` throws a failed submit to the page (skein-amm's `moveBack` then
+        // reports no txid); here it is the result's `submitError`, the txid kept, because the
+        // tokens already moved.
+        var submitError: String?
+        do {
+            try await ColorModule.submit(overlay, topics: [ColorIdentifiers.topic(assetID)], beef: atomic)
+        } catch {
+            OneSatLog.error(error, "1Color app-signed transfer \(txid) was broadcast, then the overlay submit failed", category: "OneSatColor")
+            submitError = (error as? LocalizedError)?.errorDescription ?? OneSatLog.message(error)
+        }
+        return (txid, atomic, signed.transaction, submitError)
     }
 }

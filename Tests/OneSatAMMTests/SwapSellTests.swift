@@ -555,6 +555,28 @@ final class SwapSellTests: XCTestCase {
         XCTAssertEqual(moved.errors, ["submit: POST https://ex.test/submit: 500 down"])
     }
 
+    /// The module's own overlay submit fails after the broadcast: the move back stands, its txid
+    /// reported, the tokens filed in the wallet's basket, the failure in `errors` (the TS throws
+    /// and loses the txid).
+    func testAMoveBackWhoseModuleSubmitFailsKeepsItsTxid() async throws {
+        let w = try await SellWorld(SellFixture.legs[2])
+        try await w.admitTokenRows()
+        // No `admitSubmissions`: the overlay refuses every submit.
+        let moved = try await OpenExchangeSwapLeg.moveBack(w.ctx, tokenId: SwapFixture.tokenId, sym: "TST", submit: { _, _ in
+            OpenExchange.steak(SellFixture.steakJSON())
+        })
+        let processed = await w.storage.processed
+        let tx = try Transaction(bytes: try XCTUnwrap(processed.last?.rawTX), limits: txLimits)
+        XCTAssertEqual(moved.txid, try tx.transactionID(limits: txLimits).displayHex)
+        XCTAssertEqual(moved.amount, 50_000)
+        XCTAssertEqual(moved.submitted, "admitted under \(SellFixture.topic) (outputs 0)")
+        XCTAssertEqual(moved.errors, ["module submit: a swap leg submits nothing to the overlay"])
+        let back = await w.storage.basketRecords(SellFixture.basket)
+        XCTAssertEqual(back.count, 1)
+        let rows = await w.storage.basketRecords("amm-swap")
+        XCTAssertTrue(rows.isEmpty)
+    }
+
     // MARK: - unfiledStagedTokens, fileStagedToken, settleSwaps
 
     static func action(_ a: [String: Any]) throws -> WalletAction {
@@ -590,9 +612,12 @@ final class SwapSellTests: XCTestCase {
         XCTAssertEqual(asked.first.map { Int($0.pagination.effectiveLimit) }, want["limit"] as? Int)
 
         await storage.setActions([], error: "no")
-        let refused = await OpenExchangeSwapLeg.unfiledStagedTokens(ctx)
+        let events = SettleLog()
+        let refused = await OpenExchangeSwapLeg.unfiledStagedTokens(ctx, onEvent: { events.add($0) })
         XCTAssertEqual(refused, [])
         XCTAssertEqual((u["refused"] as! [Any]).count, 0)
+        // Not dropped: reported.
+        XCTAssertEqual(events.all, [.historyUnread(error: "no", kept: 0)])
     }
 
     func testFilingAStagedTokenIsTheTypeScriptInternalize() async throws {
@@ -632,21 +657,35 @@ final class SwapSellTests: XCTestCase {
         let output: [String: Any] = ["outputIndex": 0, "satoshis": 1, "lockingScript": Hex.encode(script), "outputDescription": description, "basket": ""]
         let storage = try MemoryStorage(identity: SwapFixture.walletRoot)
         await storage.setFilesInternalized(true)
-        await storage.setActions([try Self.action(["txid": txid, "outputs": [output]]), try Self.action(["txid": unreadID, "outputs": [output]])])
+        let unserved = try SellFixture.tokenTx(script, marker: 3)
+        let unservedID = try unserved.transactionID(limits: txLimits).displayHex
+        await storage.setActions([
+            try Self.action(["txid": txid, "outputs": [output]]), try Self.action(["txid": unreadID, "outputs": [output]]),
+            try Self.action(["txid": unservedID, "outputs": [output]]),
+        ])
         let ctx = SellFixture.context(storage, try StubOverlay())
         let http = StubHTTP()
         let exchange = try OpenExchange(origin: "https://ex.test", http: http)
         let tokenBase = try exchange.tokenBase(SwapFixture.tokenId)
         await http.route("\(tokenBase)/tx?id=\(txid)", 200, try SellFixture.atomic(tx))
         await http.json("\(tokenBase)/tx?id=\(unreadID)", "down", status: 500)
-        let taken = await exchange.settleSwaps(ctx)
+        await http.json("\(tokenBase)/tx?id=\(unservedID)", "not found", status: 404)
+        let events = SettleLog()
+        let taken = await exchange.settleSwaps(ctx, onEvent: { events.add($0) })
         XCTAssertEqual(taken, [])
+        // Each staged output's fate is told, the read that failed and the one not served included.
+        XCTAssertEqual(events.all.count, 3)
+        XCTAssertEqual(events.all.first, .filed(outpoint: "\(txid).0"))
+        guard case .unread(let unreadAt, let error)? = events.all.dropFirst().first else { return XCTFail("\(events.all)") }
+        XCTAssertEqual(unreadAt, "\(unreadID).0")
+        XCTAssertTrue(error.contains("500"), error)
+        XCTAssertEqual(events.all.last, .notServed(outpoint: "\(unservedID).0"))
         let held = try await OpenExchangeSwapLeg.tokenHoldings(ctx, tokenId: SwapFixture.tokenId)
         XCTAssertEqual(held.map(\.outpoint), ["\(txid).0"])
         let calls = await storage.internalized
         XCTAssertEqual(calls.map(\.description), ["AMM swap: a staged token filed"])
         let urls = await http.urls
-        XCTAssertEqual(Array(urls.prefix(2)), ["\(tokenBase)/tx?id=\(txid)", "\(tokenBase)/tx?id=\(unreadID)"])
+        XCTAssertEqual(Array(urls.prefix(3)), ["\(tokenBase)/tx?id=\(txid)", "\(tokenBase)/tx?id=\(unreadID)", "\(tokenBase)/tx?id=\(unservedID)"])
         // The pass ran over the basket after the filing.
         XCTAssertTrue(urls.contains("\(exchange.base)/spends?outpoint=\(txid).0"))
     }
@@ -823,6 +862,31 @@ final class SwapSellTests: XCTestCase {
         XCTAssertEqual(posts, 0)
     }
 
+    /// The staged token row was not filed in the swap basket: the sell fails with the filing's
+    /// error (the TS carries on and stops at `fees`), the staging reported first.
+    func testASellWhoseStagedTokensWereNotFiledFailsWithTheFilingError() async throws {
+        let h = try await Host(SellFixture.loop)
+        _ = try await SellFixture.holdColor(h.w.ctx, h.w.storage, h.w.overlay, amount: 10_000)
+        await h.w.storage.setInternalizeError("the wallet is locked")
+        let log = ProgressLog()
+        let events = EventLog()
+        do {
+            let result = try await h.run(log, quote: try h.quote(60_000), events: events)
+            return XCTFail("the sell ran on: \(result)")
+        } catch {
+            guard case let .staged(txid, _, tokens, _, errors) = events.notable.first else { return XCTFail("nothing staged: \(events.notable)") }
+            XCTAssertEqual(tokens, 10_000)
+            XCTAssertEqual(errors, ["internalizeAction: the wallet is locked"])
+            XCTAssertEqual(
+                OpenExchangeError.errorText(error),
+                "the staged TST \(txid).0 could not be filed in the swap basket: the wallet is locked (settleSwaps files it later)"
+            )
+        }
+        XCTAssertEqual(log.phases, ["staging", "failed"])
+        let posts = await h.posts
+        XCTAssertEqual(posts, 0)
+    }
+
     /// No answer, but the overlay shows the token row spent: the sell landed, and the pass takes
     /// it in and accounts it.
     func testNoAnswerButTheTokenRowSpentIsASellTakenInByThePass() async throws {
@@ -946,4 +1010,13 @@ final class SubmitLog: @unchecked Sendable {
 
     func add(_ topic: String, _ beef: [UInt8]) { lock.withLock { entries.append((topic, beef)) } }
     var all: [(topic: String, beef: [UInt8])] { lock.withLock { entries } }
+}
+
+/// `settleSwaps`'s events, in order.
+final class SettleLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [OpenExchangeSettleEvent] = []
+
+    func add(_ e: OpenExchangeSettleEvent) { lock.withLock { entries.append(e) } }
+    var all: [OpenExchangeSettleEvent] { lock.withLock { entries } }
 }

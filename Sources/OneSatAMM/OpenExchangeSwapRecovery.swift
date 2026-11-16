@@ -351,24 +351,34 @@ extension OpenExchange {
 
     /// `settleSwaps` (client.ts:1716): on load, each labelled staged token output the swap basket
     /// lacks filed from its action's description (its BEEF `GET /@<token>/amm/tx?id=`), then the
-    /// overlay pass; the txids taken in. Never throws: a read or a filing that fails is logged and
-    /// left for the next load, as the TS leaves it.
-    public func settleSwaps(_ ctx: OneColorContext) async -> [String] {
-        for u in await OpenExchangeSwapLeg.unfiledStagedTokens(ctx) {
+    /// overlay pass; the txids taken in. Never throws: a read or a filing that fails is left for
+    /// the next load, as the TS leaves it, and logged and told to `onEvent` (the TS drops it).
+    public func settleSwaps(_ ctx: OneColorContext, onEvent: (@Sendable (OpenExchangeSettleEvent) -> Void)? = nil) async -> [String] {
+        for u in await OpenExchangeSwapLeg.unfiledStagedTokens(ctx, onEvent: onEvent) {
+            let outpoint = "\(u.txid).\(u.vout)"
             let beef: [UInt8]?
             do {
                 beef = try await readTx(tokenId: u.tokenId, txid: u.txid)
             } catch {
-                OneSatLog.error(error, "Open Exchange: the staged token \(u.txid).\(u.vout) could not be read to file it", category: Self.logCategory)
+                OneSatLog.error(error, "Open Exchange: the staged token \(outpoint) could not be read to file it", category: Self.logCategory)
+                onEvent?(.unread(outpoint: outpoint, error: OpenExchangeError.errorText(error)))
                 continue
             }
-            guard let beef else { continue }
+            guard let beef else {
+                OneSatLog.error("Open Exchange: the host served no transaction for the staged token \(outpoint): not filed", category: Self.logCategory)
+                onEvent?(.notServed(outpoint: outpoint))
+                continue
+            }
             do {
-                if !(try await OpenExchangeSwapLeg.fileStagedToken(ctx, u, beef: beef)) {
-                    OneSatLog.error("Open Exchange: the wallet did not accept the filing of the staged token \(u.txid).\(u.vout)", category: Self.logCategory)
+                if try await OpenExchangeSwapLeg.fileStagedToken(ctx, u, beef: beef) {
+                    onEvent?(.filed(outpoint: outpoint))
+                } else {
+                    OneSatLog.error("Open Exchange: the wallet did not accept the filing of the staged token \(outpoint)", category: Self.logCategory)
+                    onEvent?(.notAccepted(outpoint: outpoint))
                 }
             } catch {
-                OneSatLog.error(error, "Open Exchange: the staged token \(u.txid).\(u.vout) could not be filed", category: Self.logCategory)
+                OneSatLog.error(error, "Open Exchange: the staged token \(outpoint) could not be filed", category: Self.logCategory)
+                onEvent?(.notFiled(outpoint: outpoint, error: OpenExchangeError.errorText(error)))
             }
         }
         return await resolveSwaps(ctx).taken.map(\.txid)

@@ -14,7 +14,35 @@ public protocol ColorWalletStorage: NoSendExpiryStorage {
     func colorListOutputs(_ auth: AuthID, _ request: WalletListOutputsRequest) async throws -> WalletListOutputsResult
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult
     /// The wallet's actions (`listActions`): an AMM swap reads its labelled staging actions back.
+    /// Real storage implements it (`StorageClient` does); the default throws
+    /// `ColorStorageCallUnimplemented`, so a conformer that predates it (a test stand-in) still
+    /// compiles and fails loudly if it is ever called.
     func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult
+}
+
+/// A `ColorWalletStorage` call the conformer does not implement.
+public struct ColorStorageCallUnimplemented: Error, Equatable, Sendable, LocalizedError {
+    /// The conformer's type.
+    public let storage: String
+    /// The requirement it lacks.
+    public let call: String
+
+    public init(storage: String, call: String) {
+        self.storage = storage
+        self.call = call
+    }
+
+    public var errorDescription: String? {
+        "\(storage) does not implement ColorWalletStorage.\(call): real wallet storage must implement it"
+    }
+}
+
+extension ColorWalletStorage {
+    /// Not implemented by this conformer: throws, never answers an empty list (an empty answer
+    /// would read as "no staged tokens" and hide them).
+    public func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult {
+        throw ColorStorageCallUnimplemented(storage: String(describing: Self.self), call: "colorListActions")
+    }
 }
 
 extension StorageClient: ColorWalletStorage {
