@@ -205,7 +205,7 @@ public enum Identity {
             return PublishResult(txid: txid, tx: result.tx, bapId: bapId)
         } catch {
             OneSatLog.error(error, "BAP identity publish failed", category: "OneSatActions")
-            return PublishResult(error: error.localizedDescription)
+            return PublishResult(error: OneSatLog.localizedMessage(error))
         }
     }
 
@@ -258,7 +258,7 @@ public enum Identity {
             return PublishResult(txid: txid, tx: result.tx, bapId: bapId)
         } catch {
             OneSatLog.error(error, "BAP identity publish failed", category: "OneSatActions")
-            return PublishResult(error: error.localizedDescription)
+            return PublishResult(error: OneSatLog.localizedMessage(error))
         }
     }
 
@@ -362,7 +362,7 @@ public enum Identity {
             return ProfileResult(bapId: bap.idKey ?? "", profileJSON: bap.profileJSON)
         } catch {
             OneSatLog.error(error, "BAP profile update failed", category: "OneSatActions")
-            return ProfileResult(error: error.localizedDescription)
+            return ProfileResult(error: OneSatLog.localizedMessage(error))
         }
     }
 

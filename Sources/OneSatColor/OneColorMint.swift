@@ -83,7 +83,7 @@ extension OneColorActions {
             return result
         } catch {
             OneSatLog.error(error, "1Color mint failed", category: "OneSatColor")
-            result.error = error.localizedDescription
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }
@@ -179,7 +179,7 @@ extension OneColorActions {
             return result
         } catch {
             OneSatLog.error(error, "1Color resubmit mint failed", category: "OneSatColor")
-            result.error = error.localizedDescription
+            result.error = OneSatLog.localizedMessage(error)
             return result
         }
     }

@@ -47,8 +47,16 @@ public struct HandleResolver: Sendable {
         self.fetch = fetch
     }
 
-    public static let urlSessionFetch: Fetch = { url in
-        let (data, response) = try await URLSession.shared.data(from: url)
+    /// One GET with `URLSession.shared`. A URL loading error is thrown without its URL's query
+    /// string (``OneSatLog/urlFree(thrown:)``), as every SDK transport throws it.
+    public static let urlSessionFetch: Fetch = { (url: URL) async throws -> (status: Int, body: [UInt8]) in
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(from: url)
+        } catch {
+            throw OneSatLog.urlFree(thrown: error)
+        }
         return ((response as? HTTPURLResponse)?.statusCode ?? 0, Array(data))
     }
 

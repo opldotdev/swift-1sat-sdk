@@ -361,7 +361,7 @@ public enum Mnee {
             return SendResult(error: error.wireMessage)
         } catch {
             OneSatLog.error(error, "MNEE send failed", category: "OneSatActions")
-            return SendResult(error: error.localizedDescription)
+            return SendResult(error: OneSatLog.localizedMessage(error))
         }
     }
 

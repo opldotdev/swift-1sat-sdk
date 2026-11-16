@@ -311,7 +311,7 @@ extension Tokens {
             return .failure(error)
         } catch {
             OneSatLog.error(error, "BSV-21 deploy+mint failed", category: "OneSatActions")
-            return DeployResult(error: error.localizedDescription)
+            return DeployResult(error: OneSatLog.localizedMessage(error))
         }
     }
 
@@ -333,7 +333,7 @@ extension Tokens {
             return .failure(error)
         } catch {
             OneSatLog.error(error, "BSV-21 deploy+auth failed", category: "OneSatActions")
-            return DeployResult(error: error.localizedDescription)
+            return DeployResult(error: OneSatLog.localizedMessage(error))
         }
     }
 
@@ -357,7 +357,9 @@ extension Tokens {
     static func submitFailure(_ error: any Error) -> String {
         OneSatLog.error(error, "overlay submit failed after the action succeeded", category: "OneSatActions")
         if let error = error as? OneSatActionError { return error.wireMessage }
-        if let error = error as? LocalizedError, let description = error.errorDescription { return description }
+        if let error = error as? LocalizedError, let description = error.errorDescription {
+            return OneSatLog.redactingQueries(description)
+        }
         return OneSatLog.message(error)
     }
 
@@ -415,7 +417,7 @@ extension Tokens {
             return .failure(error)
         } catch {
             OneSatLog.error(error, "BSV-21 deploy failed", category: "OneSatActions")
-            return DeployResult(error: error.localizedDescription)
+            return DeployResult(error: OneSatLog.localizedMessage(error))
         }
     }
 
@@ -699,7 +701,7 @@ extension Tokens {
             return .failure(error)
         } catch {
             OneSatLog.error(error, "BSV-21 mint failed", category: "OneSatActions")
-            return MintResult(error: error.localizedDescription)
+            return MintResult(error: OneSatLog.localizedMessage(error))
         }
     }
 

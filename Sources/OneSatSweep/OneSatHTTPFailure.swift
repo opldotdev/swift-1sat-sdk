@@ -104,20 +104,32 @@ public struct OneSatHTTPFailure: Error, Equatable, Sendable, CustomStringConvert
 }
 
 /// The 1Sat SDK's log: subsystem `dev.opl.1sat-sdk`, one category per module. Never pass a key,
-/// a recovery phrase, a token or an auth header.
+/// a recovery phrase, a token or an auth header. Every line also goes through
+/// ``redactingQueries(_:)`` before it is written, as a second guard.
 public enum OneSatLog {
     public static let subsystem = "dev.opl.1sat-sdk"
 
     public static func error(_ message: String, category: String) {
-        #if canImport(os)
-        Logger(subsystem: subsystem, category: category).error("\(message, privacy: .public)")
-        #endif
+        write(.error, redactingQueries(message), category: category)
     }
 
     /// A note, not a failure: something the SDK worked around.
     public static func notice(_ message: String, category: String) {
+        write(.notice, redactingQueries(message), category: category)
+    }
+
+    private enum Level { case error, notice }
+
+    /// Writes `message` as it is. Only ``error(_:category:)`` and ``notice(_:category:)`` call
+    /// it, after redacting, and the redactions' own compile check, which cannot redact with
+    /// patterns that are still being compiled.
+    private static func write(_ level: Level, _ message: String, category: String) {
         #if canImport(os)
-        Logger(subsystem: subsystem, category: category).notice("\(message, privacy: .public)")
+        let logger = Logger(subsystem: subsystem, category: category)
+        switch level {
+        case .error: logger.error("\(message, privacy: .public)")
+        case .notice: logger.notice("\(message, privacy: .public)")
+        }
         #endif
     }
 
@@ -177,11 +189,25 @@ public enum OneSatLog {
         return redactingQueries(String(describing: error))
     }
 
+    /// `error.localizedDescription` with every URL's query string and every secret value
+    /// removed (``redactingQueries(_:)``): for a result's `error` or a thrown message, where a
+    /// user reads the error's own localized words.
+    public static func localizedMessage(_ error: any Error) -> String {
+        redactingQueries(error.localizedDescription)
+    }
+
     /// `text` with the query string (and fragment) of every `scheme://` URL removed, and every
-    /// secret value left elsewhere replaced by `<redacted>`: a parameter, JSON member or reflected
-    /// property named `key`, or ending in `token`, `password`, `passwd`, `secret`, `wif`,
-    /// `authorization` or `api_key` / `apiKey` (so `mnee_token=` and `"auth_token":"…"` too),
-    /// an `Authorization:` header, and a bare `Bearer` credential.
+    /// secret value left elsewhere replaced by `<redacted>`.
+    ///
+    /// A secret is the value of a parameter, JSON member, reflected property or header whose name
+    /// ends in `password`, `passwd`, `secret`, `wif`, `mnemonic`, `phrase`, `seed`, `authorization`,
+    /// `api_key` / `apiKey` (and `access`, `auth`, `secret`, `signing`, `priv`, `private` keys), or in
+    /// `token` after a prefix (`auth_token`, `mnee_token`, `accessToken`); a `key` or `token` value
+    /// that is quoted, a parameter, or a header's (at the start of a line or list item), unless it
+    /// is a token ID (`<txid>_<vout>`) or, quoted, a plain word, since this SDK names token IDs and
+    /// labels that way; an `Authorization:` header's credential (a plain word
+    /// such as `denied` with no scheme is prose); a `Bearer` credential that looks like one (it
+    /// holds a digit, or is 24 characters or more); a recovery phrase; and a mainnet WIF private key.
     public static func redactingQueries(_ text: String) -> String {
         var result = text
         for redaction in redactions {
@@ -199,33 +225,91 @@ public enum OneSatLog {
         let template: String
     }
 
-    /// A parameter or member name whose value is a secret.
+    /// A parameter or member name whose value is always a secret.
     private static let secretName =
-        #"(?:[A-Za-z0-9_.-]*(?:token|password|passwd|secret|wif|authorization|(?:api|access|secret|priv|private)[_-]?key)|key)"#
+        #"(?:[A-Za-z0-9_.-]*(?:password|passwd|secret|wif|mnemonic|phrase|seed|authorization|(?:api|access|auth|secret|signing|priv|private)[_-]?key)|[A-Za-z0-9_.-]+token)"#
+    /// The same names but `authorization`, whose unquoted value has its own rule.
+    private static let secretNameButAuthorization =
+        #"(?:[A-Za-z0-9_.-]*(?:password|passwd|secret|wif|mnemonic|phrase|seed|(?:api|access|auth|secret|signing|priv|private)[_-]?key)|[A-Za-z0-9_.-]+token)"#
+    /// A name this SDK also gives to token IDs and labels (`token: "<txid>_0"`, `key: "Legendary"`).
+    private static let ambiguousName = #"(?:token|key)"#
     /// Not part of a longer name: `monkey=` and `xkey=` are not `key=`.
     private static let nameStart = #"(?<![A-Za-z0-9_.-])"#
+    /// A BSV-21 token ID or an outpoint: a txid, `_` or `.`, and an output index.
+    private static let tokenID = #"[0-9a-fA-F]{64}[_.][0-9]{1,10}"#
+    /// One word of prose: a lowercase or capitalized word, never a mix with digits or inner
+    /// capitals. Case-sensitive inside a case-insensitive pattern.
+    private static let plainWord = #"(?-i:[A-Za-z][a-z]{0,31})"#
+    /// The characters of an unquoted value: not a quote, escaped or not, so a quoted value
+    /// already redacted is left alone.
+    private static let bareValue = #"[^\s"'\\,;)}\]<>(]"#
+    /// The separator between a name and its quoted value: JSON, a reflected property or a
+    /// quoted assignment, with an optional `Optional(`.
+    private static let quotedSeparator = #"(\\?["']?\s*[:=]\s*(?:Optional\()?)(\\?["'])"#
+    /// The separator between a name and an unquoted value on one line (`token: abc`,
+    /// `"api_key": 12345`).
+    private static let bareSeparator = #"(\\?["']?[ \t]*:[ \t]*)"#
+    private static let base58 = "1-9A-HJ-NP-Za-km-z"
 
     /// The redactions as pattern and template, applied in order.
     private static let redactionSources: [(pattern: String, template: String)] = [
         // A URL's query and fragment, whatever its values hold (`,`, `;` and `)` included).
         (##"([A-Za-z][A-Za-z0-9+.-]*://[^\s?#"'<>]*)[?#][^\s"'<>]*"##, "$1"),
-        // A quoted value: JSON (`"auth_token":"…"`, escaped or not), a reflected property
-        // (`apiKey: "…"`, `token: Optional("…")`), or a quoted assignment (`password='…'`).
-        (#"(?i)\#(nameStart)(\#(secretName))(\\?["']?\s*[:=]\s*(?:Optional\()?)(\\?["'])(?:\\.|[^\\])*?\3"#, "$1$2$3<redacted>$3"),
-        // An authorization header, with or without its scheme.
-        (#"(?i)\#(nameStart)((?:proxy-)?authorization\s*[:=]\s*)(?:(?:bearer|basic|token)\s+)?[^\s"'<>]+"#, "$1<redacted>"),
+        // A mainnet WIF private key, wherever it stands: `5H…`/`5J…`/`5K…` (51 characters) or
+        // `K…`/`L…` (52). Not testnet's `9…`/`c…`: those letters are hex, and a txid can hold
+        // such a run.
+        (#"(?<![\#(base58)])(?:5[HJK][\#(base58)]{49}|[KL][\#(base58)]{51})(?![\#(base58)])"#,
+         "<redacted>"),
+        // A quoted secret value: JSON (`"auth_token":"…"`, escaped or not), a reflected property
+        // (`apiKey: "…"`, `authToken: Optional("…")`), or a quoted assignment (`password='…'`).
+        (#"(?i)\#(nameStart)(\#(secretName))\#(quotedSeparator)(?:\\.|[^\\])*?\3"#, "$1$2$3<redacted>$3"),
+        // A quoted `key` or `token` value, unless it is a token ID or a plain word.
+        (#"(?i)\#(nameStart)(\#(ambiguousName))\#(quotedSeparator)(?!(?:\#(tokenID)|\#(plainWord))\3)(?:\\.|[^\\])*?\3"#,
+         "$1$2$3<redacted>$3"),
+        // An authorization header: a credential after a scheme, or one with no scheme unless it
+        // is one plain word of prose (`authorization: denied.`).
+        (#"(?i)\#(nameStart)((?:proxy-)?authorization\s*[:=]\s*)(?:(?:bearer|basic|token|digest|negotiate|ntlm)\s+[^\s"'<>]+|(?!\#(plainWord)[.,;:!?]?(?:[\s"'<>)\]}]|$))[^\s"'<>]+)"#,
+         "$1<redacted>"),
+        // A recovery phrase, unquoted: three or more lowercase words after the name.
+        (#"(?i)\#(nameStart)([A-Za-z0-9_.-]*(?:mnemonic|phrase|seed)[ \t]*[:=][ \t]*)(?-i:[a-z]+(?:[ \t]+[a-z]+){2,})"#,
+         "$1<redacted>"),
+        // An unquoted value after a colon, as in a header (`X-Api-Key: abc`) or a JSON number;
+        // not a reflected value such as `nil`, `Optional(…)` or `Type(…)`.
+        (#"(?i)\#(nameStart)(\#(secretNameButAuthorization))\#(bareSeparator)(?!nil\b)\#(bareValue)++(?!\()"#,
+         "$1$2<redacted>"),
+        // A bare `key` or `token` only where a header or a list item starts (`token: abc` on its
+        // own line, `{token: abc`), so prose such as "this token: no pool" is left alone.
+        (#"(?im)(^|[,;{(\[])([ \t]*\\?["']?)(\#(ambiguousName))\#(bareSeparator)(?!nil\b|\#(tokenID)(?!\#(bareValue)))\#(bareValue)++(?!\()"#,
+         "$1$2$3$4<redacted>"),
         // A query or form parameter (`key=`, `mnee_token=`), up to the next `&` or space.
-        (#"(?i)\#(nameStart)(\#(secretName))=[^&\s"'<>]+"#, "$1=<redacted>"),
-        // A bare bearer credential.
-        (#"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}"#, "$1 <redacted>"),
+        (#"(?i)\#(nameStart)(\#(secretName)|\#(ambiguousName))=[^&\s"'<>]+"#, "$1=<redacted>"),
+        // A bare bearer credential: one that holds a digit, or is 24 characters or more, so the
+        // word in prose ("the bearer certificate") is left alone.
+        (#"(?i)\b(bearer)\s+(?:(?=[A-Za-z._~+/=-]*[0-9])[A-Za-z0-9._~+/=-]{8,}|[A-Za-z0-9._~+/=-]{24,})"#,
+         "$1 <redacted>"),
     ]
 
-    /// The redactions, compiled once. Every pattern is fixed; a test checks that all of them
-    /// compile.
-    static let redactions: [Redaction] = redactionSources.compactMap { source in
-        guard let pattern = try? NSRegularExpression(pattern: source.pattern) else { return nil }
-        return Redaction(pattern: pattern, template: source.template)
-    }
+    /// The redactions, compiled once. Every pattern is fixed and a test checks that all of them
+    /// compile; one that does not is left out and logged, once, as unredacted.
+    static let redactions: [Redaction] = {
+        var compiled: [Redaction] = []
+        for (index, source) in redactionSources.enumerated() {
+            do {
+                let pattern = try NSRegularExpression(pattern: source.pattern)
+                compiled.append(Redaction(pattern: pattern, template: source.template))
+            } catch {
+                // Written as it is: redacting it would use these very patterns, still compiling.
+                let reason = FoundationError(error).map { "\($0.domain) \($0.code)" } ?? "\(type(of: error))"
+                write(
+                    .error,
+                    "OneSatLog: redaction \(index + 1) of \(redactionSources.count) does not compile (\(reason)) "
+                        + "and is skipped, so what it would redact is logged as it is",
+                    category: "OneSatLog"
+                )
+            }
+        }
+        return compiled
+    }()
 
     /// How many redactions there are to compile.
     static var redactionCount: Int { redactionSources.count }
@@ -239,6 +323,39 @@ public enum OneSatLog {
         components.user = nil
         components.password = nil
         return components.url
+    }
+
+    /// `error` rebuilt without the failing URL's query string: the same code and description,
+    /// the failing URL as scheme, host and path, and the error under it as its domain, code and
+    /// description only. Some services take an API key in the query (MNEE's `auth_token`), and
+    /// URLSession's error carries the full URL to every caller and log.
+    public static func urlFree(_ error: URLError) -> URLError {
+        var info: [String: Any] = [NSLocalizedDescriptionKey: redactingQueries(error.localizedDescription)]
+        let original = FoundationError(error)
+        if let failing = original?.failingURL, let bare = withoutQuery(failing) {
+            info[failingURLKey] = bare
+            info[failingURLStringKey] = bare.absoluteString
+        }
+        if let underlying = original?.underlying {
+            let inner = FoundationError(underlying)
+            info[NSUnderlyingErrorKey] = NSError(
+                domain: inner?.domain ?? String(describing: type(of: underlying)), code: inner?.code ?? 0,
+                userInfo: [NSLocalizedDescriptionKey: redactingQueries(underlying.localizedDescription)]
+            )
+        }
+        return URLError(error.code, userInfo: info)
+    }
+
+    /// What a `URLSession` call threw, ready to throw on: a URL loading error rebuilt by
+    /// ``urlFree(_:)``, anything else (a `CancellationError`, say) as it is. On Linux URLSession
+    /// throws an `NSError` in the URL domain, which does not cast to `URLError` there; it carries
+    /// the same full URL and is rebuilt the same way.
+    public static func urlFree(thrown error: any Error) -> any Error {
+        if let urlError = error as? URLError { return urlFree(urlError) }
+        guard let foundation = FoundationError(error), foundation.domain == "NSURLErrorDomain" else { return error }
+        // `URLError.Code(rawValue:)` is failable in corelibs Foundation and not on Darwin.
+        let code: URLError.Code? = URLError.Code(rawValue: foundation.code)
+        return urlFree(URLError(code ?? .unknown, userInfo: foundation.userInfo))
     }
 
     public static let failingURLKey = "NSErrorFailingURLKey"

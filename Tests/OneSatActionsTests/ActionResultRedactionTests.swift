@@ -29,4 +29,12 @@ final class ActionResultRedactionTests: XCTestCase {
         XCTAssertFalse((result.diagnostic ?? "").contains("SECRET"), result.diagnostic ?? "")
         XCTAssertEqual(result.error, OneSatActionError.tokenNotFound.wireMessage)
     }
+
+    func test_failureDescribingKeepsTheErrorsWordsWithoutItsSecrets() {
+        struct Refused: LocalizedError {
+            var errorDescription: String? { "GET https://proxy-api.mnee.net/v1/tx/abc?auth_token=SECRET was refused" }
+        }
+        let result = ActionResult.failure(describing: Refused())
+        XCTAssertEqual(result.error, "GET https://proxy-api.mnee.net/v1/tx/abc was refused")
+    }
 }
