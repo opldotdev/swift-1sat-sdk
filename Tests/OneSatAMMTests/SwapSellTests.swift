@@ -887,6 +887,74 @@ final class SwapSellTests: XCTestCase {
         XCTAssertEqual(posts, 0)
     }
 
+    /// A sell whose basket covers the quote's fee sats but not the leg's own: the vectors' 60,000
+    /// token row and 1,362-sat row (one token input's exact need), and 10,000 more tokens staged
+    /// for a 70,000 sell, so the leg spends two token rows and its sats lack a few dozen. The
+    /// shortfall is staged in sats alone (a second stage, no token moved, no token row spent) and
+    /// the leg is sent (here refused, so everything goes back).
+    func testASellsSatsShortfallIsStagedInSatsAloneAndTheLegSent() async throws {
+        let h = try await Host(SellFixture.legs[0])
+        await h.w.storage.setFilesInternalized(true)
+        await h.http.json(h.swapURL, #"{"ok":false,"reason":"below_minimum"}"#)
+        _ = try await SellFixture.holdColor(h.w.ctx, h.w.storage, h.w.overlay, amount: 10_000)
+        let quote = try h.quote(70_000)
+        XCTAssertEqual(quote.legs.map(\.amountIn), [70_000])
+        XCTAssertLessThanOrEqual(quote.stage.feeSats, 1_362)
+        let log = ProgressLog()
+        let events = EventLog()
+        let result = try await h.run(log, quote: quote, events: events)
+        XCTAssertEqual(result.stop, .noPool, "\(events.all)")
+        XCTAssertEqual(log.phases.filter { $0 == "staging" }.count, 2)
+        XCTAssertEqual(log.all.first, .staging(sats: 0, tokens: 10_000))
+        let created = await h.w.storage.created
+        XCTAssertEqual(created.map(\.description), ["AMM swap: TST into the swap basket", "AMM swap: sats into the swap basket", "AMM move back: TST"])
+        let topUp = created[1]
+        let lack = try XCTUnwrap(topUp.outputs?.first?.satoshis)
+        XCTAssertGreaterThan(lack, 0)
+        XCTAssertLessThanOrEqual(BigInt(lack), quote.legMinerFeeSats)
+        XCTAssertEqual(topUp.outputs?.count, 1)
+        XCTAssertNil(topUp.outputs?.first.flatMap { AMMPool.decodeOneColor($0.lockingScript) })
+        XCTAssertTrue((topUp.inputs ?? []).isEmpty, "the top-up spent \(topUp.inputs ?? [])")
+        XCTAssertEqual(log.all[1], .staging(sats: BigInt(lack), tokens: 0))
+        let staged = events.all.compactMap { if case let .staged(_, sats, tokens, _, _) = $0 { (sats, tokens) } else { nil } }
+        XCTAssertEqual(staged.map(\.0), [0, lack])
+        XCTAssertEqual(staged.map(\.1), [10_000, 0])
+        XCTAssertTrue(events.all.allSatisfy { if case .stageFailed = $0 { false } else { true } }, "\(events.all)")
+        // The leg sent spends both token rows and the sats rows, the top-up's among them.
+        let posts = await h.posts
+        XCTAssertEqual(posts, 1)
+        try await h.assertAllBack(70_000)
+    }
+
+    /// The same basket with the 10,000 tokens left unstaged (a quote staging 60,000): the token
+    /// rows are short of the 70,000 leg, so its sats lack is not topped up. No stage, nothing
+    /// sent, stop `fees`, the rows go back.
+    func testASellsTokenRowsShortStageNothingAndStopFees() async throws {
+        let h = try await Host(SellFixture.legs[0])
+        await h.w.storage.setFilesInternalized(true)
+        _ = try await SellFixture.holdColor(h.w.ctx, h.w.storage, h.w.overlay, amount: 10_000)
+        let q = try h.quote(70_000)
+        let quote = OpenExchangeQuote(
+            request: q.request, legs: q.legs, amountOut: q.amountOut, minAmountOut: q.minAmountOut, effectivePrice: q.effectivePrice,
+            marginalPrice: q.marginalPrice, impactBps: q.impactBps, stage: OpenExchangeQuoteStage(amount: 60_000, feeSats: q.stage.feeSats),
+            legMinerFeeSats: q.legMinerFeeSats, plan: q.plan, view: q.view
+        )
+        let log = ProgressLog()
+        let events = EventLog()
+        let result = try await h.run(log, quote: quote, events: events)
+        XCTAssertEqual(result.stop, .fees, "\(events.all)")
+        XCTAssertEqual(result.legs, [])
+        XCTAssertFalse(log.phases.contains("staging"), "\(log.phases)")
+        let created = await h.w.storage.created
+        XCTAssertEqual(created.map(\.description), ["AMM move back: TST"])
+        XCTAssertTrue(events.all.allSatisfy {
+            switch $0 { case .staged, .stageFailed: false; default: true }
+        }, "\(events.all)")
+        let posts = await h.posts
+        XCTAssertEqual(posts, 0)
+        guard case .moved(_, 60_000)? = result.returned else { return XCTFail("not moved back: \(String(describing: result.returned))") }
+    }
+
     /// The staged token row was not filed in the swap basket: the basket's sats are moved back,
     /// as the TS does at its `fees` stop, then the sell fails with the filing's error and the
     /// move back.

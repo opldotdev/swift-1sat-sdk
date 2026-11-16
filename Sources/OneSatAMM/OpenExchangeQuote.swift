@@ -458,7 +458,12 @@ public struct OpenExchangeQuote: Equatable, Sendable {
     public let marginalPrice: Double
     /// |effective − marginal| / marginal, basis points, rounded; 0 without a marginal price.
     public let impactBps: Double
-    /// What a swap would stage.
+    /// What a swap would stage. Not a ceiling on what it spends: when a leg's own miner fee
+    /// comes out above the ~13 kB estimate in `feeSats`, `executeSwap` stages the shortfall in
+    /// sats, up to `legMinerFeeSats` for each leg it attempts, so a swap can spend up to that much
+    /// more sats than it stages here (`amount + feeSats` on a buy, `feeSats` on a sell), plus
+    /// each top-up's own miner fee (about 20 sats): each is its own wallet transaction. A top-up
+    /// reports `.staging` again, which can then come after `.relaying` (not in the TS).
     public let stage: OpenExchangeQuoteStage
     /// One leg's miner fee estimate, sats.
     public let legMinerFeeSats: BigInt

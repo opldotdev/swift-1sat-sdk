@@ -409,18 +409,8 @@ public enum OpenExchangeSwapLeg {
         _ i: LegInput, sats: [OpenExchangeSatsRow], tokens: [OpenExchangeTokenRow] = []
     ) throws -> (sats: [OpenExchangeSatsRow], tokens: [OpenExchangeTokenRow], need: OpenExchangeLegNeed)? {
         let (utxo, _) = try poolUtxo(i)
-        var pickedTokens: [OpenExchangeTokenRow] = []
-        if !i.bsvIn {
-            var held = BigInt(0)
-            for row in tokens.sorted(by: { a, b in a.amount != b.amount ? a.amount > b.amount : a.outpoint < b.outpoint }) {
-                if held >= i.leg.amountIn { break }
-                pickedTokens.append(row)
-                held += row.amount
-            }
-            if held < i.leg.amountIn { return nil }
-        }
-        let tokenChange = pickedTokens.reduce(BigInt(0)) { $0 + $1.amount } - (i.bsvIn ? 0 : i.leg.amountIn)
-        let plan = try legPlan(i, utxo, userPkh: zeroPkh, commissionPkh: try pkhBytes(i.commissionPkh), tokenChange: tokenChange, tokenChangePkh: zeroPkh)
+        guard let pickedTokens = legTokens(i, tokens) else { return nil }
+        let plan = try tokenLegPlan(i, utxo, pickedTokens)
         var picked: [OpenExchangeSatsRow] = []
         var held: Int64 = 0
         let ordered = sats.sorted { a, b in a.satoshis != b.satoshis ? a.satoshis > b.satoshis : a.outpoint < b.outpoint }
@@ -431,6 +421,46 @@ public enum OpenExchangeSwapLeg {
             if held >= need.need { return (picked, pickedTokens, need) }
         }
         return nil
+    }
+
+    /// A sell's token rows for the leg, largest first (ties by outpoint), as many as cover the
+    /// amount in; nil when they do not. None on a buy.
+    static func legTokens(_ i: LegInput, _ tokens: [OpenExchangeTokenRow]) -> [OpenExchangeTokenRow]? {
+        if i.bsvIn { return [] }
+        var picked: [OpenExchangeTokenRow] = []
+        var held = BigInt(0)
+        for row in tokens.sorted(by: { a, b in a.amount != b.amount ? a.amount > b.amount : a.outpoint < b.outpoint }) {
+            if held >= i.leg.amountIn { break }
+            picked.append(row)
+            held += row.amount
+        }
+        return held < i.leg.amountIn ? nil : picked
+    }
+
+    /// The leg's plan with placeholder keys, its token change the picked token rows less a sell's
+    /// amount in.
+    static func tokenLegPlan(_ i: LegInput, _ utxo: AMMPoolUtxo, _ pickedTokens: [OpenExchangeTokenRow]) throws -> AMMSwapPlan {
+        let tokenChange = pickedTokens.reduce(BigInt(0)) { $0 + $1.amount } - (i.bsvIn ? 0 : i.leg.amountIn)
+        return try legPlan(i, utxo, userPkh: zeroPkh, commissionPkh: try pkhBytes(i.commissionPkh), tokenChange: tokenChange, tokenChangePkh: zeroPkh)
+    }
+
+    /// The sats that `sats` lack of the leg's need with one more sats row (the staged shortfall),
+    /// when that lack is no more than `allowance` (the quote's per-leg miner fee estimate); nil
+    /// otherwise. On a sell the need is the sats one: the leg's outputs and fee less the picked
+    /// token rows' sats, sized with those token inputs; token rows short of the amount in are no
+    /// shortfall a sats top-up covers (nil). Not in the TS. `runSwap` asks it only once
+    /// `selectInputs` has found the rows short of the leg.
+    static func feeShortfall(
+        _ i: LegInput, sats: [OpenExchangeSatsRow], tokens: [OpenExchangeTokenRow] = [], allowance: BigInt
+    ) throws -> UInt64? {
+        let (utxo, _) = try poolUtxo(i)
+        guard let pickedTokens = legTokens(i, tokens) else { return nil }
+        let plan = try tokenLegPlan(i, utxo, pickedTokens)
+        let held = sats.reduce(BigInt(0)) { $0 + BigInt($1.satoshis) }
+        let need = try legNeed(plan, tokenInputs: pickedTokens, inputs: sats.count + 1 + pickedTokens.count, satsPerKb: i.satsPerKb)
+        let lack = BigInt(need.need) - held
+        guard lack > 0, lack <= allowance else { return nil }
+        return UInt64(lack)
     }
 
     /// `keyInputOf`: the leg's own key input, its first token input on a sell, its first sats
@@ -731,10 +761,37 @@ public enum OpenExchangeSwapLeg {
             done.insert(extra)
             txidOnly.append(.transactionID(try TransactionID(displayHex: extra)))
         }
-        let out = try BEEF(version: .v2, merklePaths: paths, transactions: txidOnly + proven + entries, limits: beefLimits)
+        let out = try BEEF(version: .v2, merklePaths: paths, transactions: txidOnly + parentsFirst(proven + entries), limits: beefLimits)
         let body = try out.serialized(limits: beefLimits)
         guard let atomic else { return body }
         return [0x01, 0x01, 0x01, 0x01] + (try TransactionID(displayHex: atomic)).wireBytes + body
+    }
+
+    /// The walk's raw entries (the proven, then the rest) in that order, except that one spending
+    /// another listed entry comes after it. The walk stops at a proven transaction without visiting
+    /// its inputs, and the wallet's storage can hold a transaction's proof before its parent's, so
+    /// a proven child can meet the walk ahead of its parent (a stage and the move back that spent
+    /// it, mined together; or a proven stage whose parent storage still holds unproven). @bsv/sdk
+    /// writes that order as it is; a BEEF that lists a child before its parent does not serialize
+    /// here (`parentAfterChild`). Entries already parents-first keep the walk's order exactly.
+    static func parentsFirst(_ entries: [BEEFTransaction]) throws -> [BEEFTransaction] {
+        var pending: [(id: String, entry: BEEFTransaction, parents: Set<String>)] = []
+        for entry in entries {
+            guard let tx = entry.transaction else { pending.append(("", entry, [])); continue }
+            pending.append((try tx.transactionID(limits: txLimits).displayHex, entry, Set(tx.inputs.map { $0.previousOutput.transactionID.displayHex })))
+        }
+        let ids = Set(pending.map(\.id))
+        var placed = Set<String>()
+        var out: [BEEFTransaction] = []
+        while !pending.isEmpty {
+            guard let next = pending.firstIndex(where: { $0.parents.intersection(ids).isSubset(of: placed) }) else {
+                throw fail("the BEEF's transactions spend each other in a cycle")
+            }
+            let item = pending.remove(at: next)
+            placed.insert(item.id)
+            out.append(item.entry)
+        }
+        return out
     }
 
     // MARK: - The validator's transaction
