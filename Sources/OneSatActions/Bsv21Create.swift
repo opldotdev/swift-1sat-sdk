@@ -338,7 +338,7 @@ extension Tokens {
     /// Checks that output 0 of the subject transaction is a BSV-21 deploy before sending it.
     public static func submitDeploy(_ ctx: OneSatContext, tx: [UInt8]) async throws {
         guard let bsv21 = ctx.bsv21 else { throw OneSatActionError.servicesRequired }
-        let atomic = try AtomicBEEF(bytes: tx, limits: WalletBEEFLimits.standard)
+        let atomic = try AtomicBEEF(bytes: tx, limits: WalletBEEFLimits.standard, transactionOrder: .any)
         guard let subject = try atomic.beef.transaction(
             for: atomic.subjectTransactionID,
             limits: WalletBEEFLimits.standard.transactionLimits

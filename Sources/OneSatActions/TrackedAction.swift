@@ -23,6 +23,11 @@ public enum TrackedAction {
         /// step for its anchor). The remote `StorageClient` in swift-wallet-toolbox 5d8f781 does
         /// not put it on the wire yet, so both also send the full BEEF of what they spend.
         public var trustSelf: WalletTrustSelf?
+        /// The caller hands the result on as Atomic BEEF, so a funded graph that cannot prove the
+        /// transaction stops the action before it is processed, with its inputs released, as a
+        /// noSend action always does. Without it a sent action whose BEEF cannot be built is still
+        /// processed, as in TS, and returns `tx` nil.
+        public var requiresBEEF: Bool
 
         public init(
             bypassP1Sat: Bool = false,
@@ -32,7 +37,8 @@ public enum TrackedAction {
             noSendChange: [String] = [],
             knownTxids: [String] = [],
             sendWith: [String] = [],
-            trustSelf: WalletTrustSelf? = nil
+            trustSelf: WalletTrustSelf? = nil,
+            requiresBEEF: Bool = false
         ) {
             self.bypassP1Sat = bypassP1Sat
             self.randomizeOutputs = randomizeOutputs
@@ -42,6 +48,7 @@ public enum TrackedAction {
             self.knownTxids = knownTxids
             self.sendWith = sendWith
             self.trustSelf = trustSelf
+            self.requiresBEEF = requiresBEEF
         }
     }
 
@@ -93,10 +100,11 @@ public enum TrackedAction {
         return (tracked, labels)
     }
 
-    /// Parses caller BEEF bytes. Empty or absent is no graph.
+    /// Parses caller BEEF bytes. Empty or absent is no graph. Callers pass BEEF from services and
+    /// wallets written by `@bsv/sdk`, so records may arrive in any order (`Beef.fromBinary`).
     public static func parseInputBEEF(_ bytes: [UInt8]?) throws -> BEEF? {
         guard let bytes, !bytes.isEmpty else { return nil }
-        return try BEEF(bytes: bytes, limits: WalletBEEFLimits.standard)
+        return try BEEF(bytes: bytes, limits: WalletBEEFLimits.standard, transactionOrder: .any)
     }
 
     /// Builds the ABI request `createTrackedAction` would send (`signAndProcess: false`).
@@ -192,7 +200,7 @@ public enum TrackedAction {
                 funded = try await ctx.storage.createAction(ctx.auth, createRequest)
             }
         } catch {
-            return ActionResult.failure(error.localizedDescription, actionId: actionID)
+            return ActionResult.failure(describing: error, actionId: actionID)
         }
 
         do {
@@ -221,6 +229,11 @@ public enum TrackedAction {
             )
 
             let signed = try SignedAction(funded: funded, transaction: transaction)
+            // A noSend action is held for a later one to spend, and its Atomic BEEF is how that
+            // action reaches it; a `requiresBEEF` caller hands the BEEF on. Either way a funded
+            // graph that cannot prove the transaction stops here, before storage is asked to
+            // process it, with the BEEF error as the reason and the action aborted below.
+            let heldBEEF = options.noSend || options.requiresBEEF ? try signed.atomicBEEF() : nil
             // TS completeSignedAction: signAction runs with acceptDelayedBroadcast false and
             // noSend carried over from createAction, so a noSend action is held for its batch.
             let processed: StorageProcessActionResult
@@ -244,9 +257,13 @@ public enum TrackedAction {
             } else {
                 changeOutpoints = nil
             }
+            // A sent action is processed and may be broadcast by now. TS returns its Atomic BEEF
+            // without checking it; here a graph that cannot prove the transaction leaves `tx`
+            // nil rather than aborting an action storage already holds. Callers that hand the
+            // BEEF on check for it.
             return ActionResult(
                 txid: signed.transactionID.displayHex,
-                tx: try signed.atomicBEEF(),
+                tx: heldBEEF ?? (try? signed.atomicBEEF()),
                 actionId: actionID,
                 noSendChange: changeOutpoints
             )
@@ -263,7 +280,7 @@ public enum TrackedAction {
             if let actionError = error as? OneSatActionError {
                 return ActionResult.failure(actionError, actionId: actionID)
             }
-            return ActionResult.failure(error.localizedDescription, actionId: actionID)
+            return ActionResult.failure(describing: error, actionId: actionID)
         }
     }
 

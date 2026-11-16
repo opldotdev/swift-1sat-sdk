@@ -113,7 +113,7 @@ enum SigmaPublish {
         )
         if let error = anchor.error {
             await batch.abort(ctx.auth)
-            return ActionResult(error: error)
+            return ActionResult(error: error, diagnostic: anchor.diagnostic)
         }
         // Storage without an action batch took the anchor through processAction and holds it as
         // nosend. If the publish never sends it, abort it so its change is not left locked.
@@ -177,7 +177,9 @@ enum SigmaPublish {
         try await TrackedAction.execute(
             ctx,
             description: description,
-            inputBEEF: try AtomicBEEF(bytes: anchorTx, limits: WalletBEEFLimits.standard).beef,
+            inputBEEF: try AtomicBEEF(
+                bytes: anchorTx, limits: WalletBEEFLimits.standard, transactionOrder: .any
+            ).beef,
             inputs: [
                 try WalletCreateActionInput(
                     outpoint: try Outpoint("\(anchorTxid).0"),

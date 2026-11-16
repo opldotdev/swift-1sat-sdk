@@ -349,6 +349,104 @@ final class SigmaPublishTests: XCTestCase {
         XCTAssertEqual(methods, ["getCapabilities", "beginActionBatch", "abortActionBatch"])
     }
 
+    // MARK: A funded graph that cannot prove the transaction
+
+    /// A sent action needs only the reference and raw transaction to be processed, as in TS. When
+    /// its Atomic BEEF cannot be built, it is still processed and reported by txid, not aborted.
+    func test_aSentActionWhoseBEEFCannotBeBuiltIsStillProcessed() async throws {
+        let transport = PublishTransport(omitsFundingSource: true)
+        let result = try await TrackedAction.execute(
+            try context(transport),
+            description: "sent action",
+            outputs: [try WalletCreateActionOutput(lockingScript: [0x51], satoshis: 1, outputDescription: "out")],
+            options: TrackedAction.Options(bypassP1Sat: true)
+        )
+        XCTAssertNil(result.error)
+        XCTAssertNotNil(result.txid)
+        XCTAssertNil(result.tx)
+        let methods = await transport.methods
+        XCTAssertEqual(methods, ["createAction", "processAction"])
+    }
+
+    /// A noSend action is spent later through its Atomic BEEF, so one that cannot be built stops
+    /// before storage holds it, and reads as the plain BEEF sentence.
+    func test_aHeldActionWhoseBEEFCannotBeBuiltFailsInPlainWords() async throws {
+        let transport = PublishTransport(omitsFundingSource: true)
+        let result = try await TrackedAction.execute(
+            try context(transport),
+            description: "held action",
+            outputs: [try WalletCreateActionOutput(lockingScript: [0x51], satoshis: 1, outputDescription: "out")],
+            options: TrackedAction.Options(bypassP1Sat: true, noSend: true)
+        )
+        XCTAssertEqual(
+            result.error,
+            "The transaction data is incomplete: a transaction it depends on is missing."
+        )
+        XCTAssertNil(result.txid)
+        let methods = await transport.methods
+        XCTAssertFalse(methods.contains("processAction"))
+    }
+
+    /// A caller that hands the BEEF on (`requiresBEEF`) gets the same check as a held action:
+    /// the transaction is never processed when the BEEF cannot be built.
+    func test_aSentActionThatRequiresItsBEEFIsNotProcessedWithoutIt() async throws {
+        let transport = PublishTransport(omitsFundingSource: true)
+        let result = try await TrackedAction.execute(
+            try context(transport),
+            description: "sent action",
+            outputs: [try WalletCreateActionOutput(lockingScript: [0x51], satoshis: 1, outputDescription: "out")],
+            options: TrackedAction.Options(bypassP1Sat: true, requiresBEEF: true)
+        )
+        XCTAssertEqual(
+            result.error,
+            "The transaction data is incomplete: a transaction it depends on is missing."
+        )
+        XCTAssertNil(result.txid)
+        let methods = await transport.methods
+        XCTAssertFalse(methods.contains("processAction"))
+    }
+
+    /// OrdLock v2 front funding is spent through its BEEF by the purchase built right after. A
+    /// deposit whose BEEF cannot be built is never broadcast, so a retry does not leave a second
+    /// deposit on chain.
+    func test_ordLockFrontFundingWithoutBEEFIsNeverBroadcast() async throws {
+        let transport = PublishTransport(omitsFundingSource: true)
+        do {
+            _ = try await OrdLockV2Purchase.prepareFrontFunding(
+                try context(transport), keyID: "front-funding", satoshis: 1_000, nowMilliseconds: 0
+            )
+            XCTFail("front funding without BEEF")
+        } catch let error as OneSatActionError {
+            XCTAssertEqual(
+                error,
+                .ordLockV2FrontFundingFailed(
+                    "The transaction data is incomplete: a transaction it depends on is missing."
+                )
+            )
+        }
+        let processed = await transport.processed
+        XCTAssertTrue(processed.isEmpty)
+    }
+
+    /// The inscribe the app runs with Sign with identity on: the held anchor's BEEF cannot be
+    /// built, and the user reads the plain sentence rather than a BEEFError case number.
+    func test_inscribeWithSigmaReportsAnUnbuildableAnchorInPlainWords() async throws {
+        let transport = PublishTransport(omitsFundingSource: true)
+        let result = await Inscriptions.inscribe(
+            try context(transport),
+            Inscriptions.Request(content: Array("hi".utf8), contentType: "text/plain")
+        )
+        XCTAssertEqual(
+            result.error,
+            "The transaction data is incomplete: a transaction it depends on is missing."
+        )
+        XCTAssertNil(result.txid)
+        // The log keeps the case and the transaction IDs the sentence leaves out.
+        XCTAssertEqual(result.diagnostic?.hasPrefix("BEEFError.missingAncestor(transaction: "), true)
+        let processed = await transport.processed
+        XCTAssertTrue(processed.isEmpty)
+    }
+
     // MARK: Collections (collections/index.ts mintWithSigma)
 
     func test_mintCollectionMatchesTheApplyStep() async throws {

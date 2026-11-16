@@ -126,6 +126,10 @@ enum ColorExecutor {
             for (index, script) in spends { transaction.inputs[index].unlockingScript = script }
             try signFundingInputs(&transaction, funded: funded, identity: ctx.identity, alreadySigned: Set(spends.keys))
             let signed = try SignedAction(funded: funded, transaction: transaction)
+            // Every caller hands the result on as Atomic BEEF (overlay submission, delivery), so
+            // a funded graph that cannot prove it stops here, before it is processed, and the
+            // action is aborted below.
+            _ = try signed.atomicBEEF()
             let processed = try await ctx.storage.processAction(ctx.auth, try signed.processRequest())
             if let failed = processed.sendWithResults.first(where: { $0.status != .unproven }) {
                 throw ColorError.custody("broadcast \(failed.status.rawValue)")

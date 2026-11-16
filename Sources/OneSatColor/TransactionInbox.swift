@@ -157,11 +157,15 @@ public enum TransactionInbox {
         }
         let beef: BEEF
         let txid: TransactionID
-        if let atomic = try? AtomicBEEF(bytes: beefBytes, limits: beefLimits) {
+        if let atomic = try? AtomicBEEF(bytes: beefBytes, limits: beefLimits, transactionOrder: .any) {
             beef = atomic.beef
             txid = atomic.subjectTransactionID
         } else {
-            beef = try BEEF(bytes: beefBytes, limits: beefLimits)
+            // Read in any order and reordered parents-first, so `last` is a transaction nothing
+            // else in the payment spends. TS `Transaction.fromBEEF` takes the record last on the
+            // wire instead; the two differ when the sender's writer put a parent last. This keeps
+            // the reordered choice.
+            beef = try BEEF(bytes: beefBytes, limits: beefLimits, transactionOrder: .any)
             guard let last = beef.transactions.last else { throw Skip(reason: "payment beef has no transaction") }
             txid = try last.transactionID(limits: beefLimits.transactionLimits)
         }
@@ -197,7 +201,7 @@ public enum TransactionInbox {
     ) async throws -> (txid: String, received: [(ColorAssetID, [UInt32])]) {
         let delivery = try TransactionDelivery.decode(body)
         let txidHex = Hex.encode(delivery.txid)
-        let beef = try BEEF(bytes: delivery.beef, limits: beefLimits)
+        let beef = try BEEF(bytes: delivery.beef, limits: beefLimits, transactionOrder: .any)
         let txLimits = beefLimits.transactionLimits
         guard let subjectID = try? TransactionID(displayHex: txidHex),
               let entry = try beef.entry(for: subjectID, limits: txLimits),

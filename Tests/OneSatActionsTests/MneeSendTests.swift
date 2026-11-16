@@ -721,6 +721,7 @@ private struct OfflineTransport: AuthenticatedTransport {
         headers: [String: String],
         body: [UInt8]?
     ) async throws -> AuthenticatedResponse {
+        if let reply = ActiveStorageFixture.reply(to: body) { return reply }
         throw AuthTransportError.notImplemented("offline")
     }
 }

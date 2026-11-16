@@ -220,10 +220,13 @@ extension OpenExchange {
         return try merged.serialized(limits: beefLimits)
     }
 
-    /// `Beef.fromBinary`: an Atomic BEEF's inner BEEF, or a BEEF.
+    /// `Beef.fromBinary`: an Atomic BEEF's inner BEEF, or a BEEF, in any transaction order as
+    /// that reader accepts it.
     static func readBEEF(_ bytes: [UInt8]) throws -> BEEF {
-        if let atomic = try? AtomicBEEF(bytes: bytes, limits: beefLimits) { return atomic.beef }
-        return try BEEF(bytes: bytes, limits: beefLimits)
+        if let atomic = try? AtomicBEEF(bytes: bytes, limits: beefLimits, transactionOrder: .any) {
+            return atomic.beef
+        }
+        return try BEEF(bytes: bytes, limits: beefLimits, transactionOrder: .any)
     }
 
     /// `createNonce(wallet, "self")` of `@bsv/sdk`: 16 random bytes, then their HMAC under

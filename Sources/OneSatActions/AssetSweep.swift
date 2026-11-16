@@ -123,7 +123,7 @@ public enum AssetSweep {
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {
-            return ActionResult.failure(error.localizedDescription)
+            return ActionResult.failure(describing: error)
         }
     }
 
@@ -227,7 +227,7 @@ public enum AssetSweep {
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {
-            return ActionResult.failure(error.localizedDescription)
+            return ActionResult.failure(describing: error)
         }
     }
 
@@ -247,6 +247,8 @@ public enum AssetSweep {
         public var tx: [UInt8]? { result.tx }
         public var actionId: String? { result.actionId }
         public var error: String? { result.error }
+        /// Why the overlay was not told about a broadcast sweep (`ActionResult.submitError`).
+        public var submitError: String? { result.submitError }
 
         static func failure(_ error: OneSatActionError) -> Self {
             Self(result: ActionResult.failure(error))
@@ -355,15 +357,15 @@ public enum AssetSweep {
                     try signLegacyInputs(transaction: tx, keysByOutpoint: prepared.keysByOutpoint, inputBEEF: inputBEEF)
                 }
             )
-            if let tx = result.tx {
-                try? await overlay.submitTransfer(tx: tx, tokenId: tokenID)
+            let submitted = await ActionResult.submitting(result) {
+                try await overlay.submitTransfer(tx: $0, tokenId: tokenID)
             }
-            guard result.error == nil else { return SweepBsv21Result(result: result) }
-            return SweepBsv21Result(result: result, spentOutpoints: spending.map(\.outpoint))
+            guard submitted.error == nil else { return SweepBsv21Result(result: submitted) }
+            return SweepBsv21Result(result: submitted, spentOutpoints: spending.map(\.outpoint))
         } catch let error as OneSatActionError {
             return .failure(error)
         } catch {
-            return .failure(error.localizedDescription)
+            return SweepBsv21Result(result: ActionResult.failure(describing: error))
         }
     }
 

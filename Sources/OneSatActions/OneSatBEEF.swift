@@ -10,6 +10,10 @@ import ToolboxActions
 /// `getBeefForTxid` accepts both. Parsing the response with `BEEF(bytes:)` alone fails on the
 /// prefix with `invalidVersion(0x01010101)`.
 ///
+/// `Beef.fromBinary` also takes transactions in any order: `Beef.toBinary()` writes one that does
+/// not chain to a proof ahead of its own parents. The graph is read with `transactionOrder: .any`
+/// and comes back parents-first.
+///
 /// `Beef.fromBinary` does not hold an envelope to its subject: it keeps whatever transactions the
 /// server sent, and `toBinaryAtomic(txid)` cuts them back when the BEEF is handed on. Swift's
 /// `AtomicBEEF(bytes:)` refuses an envelope carrying anything outside the subject's ancestry, so
@@ -35,7 +39,7 @@ public enum OneSatBEEF {
         limits: BEEFLimits = WalletBEEFLimits.standard
     ) throws -> BEEF {
         guard isAtomic(bytes) else {
-            return try BEEF(bytes: bytes, limits: limits)
+            return try BEEF(bytes: bytes, limits: limits, transactionOrder: .any)
         }
         guard bytes.count >= atomicHeaderByteCount else {
             throw BEEFError.malformed(
@@ -44,7 +48,9 @@ public enum OneSatBEEF {
                 cause: .truncatedInput(expected: 32, remaining: bytes.count - 4)
             )
         }
-        return try BEEF(bytes: Array(bytes[atomicHeaderByteCount...]), limits: limits)
+        return try BEEF(
+            bytes: Array(bytes[atomicHeaderByteCount...]), limits: limits, transactionOrder: .any
+        )
     }
 
     /// `bytes` as Atomic BEEF for `subject`: `Beef.fromBinary(bytes).toBinaryAtomic(subject)`.

@@ -150,7 +150,7 @@ public enum OneColorActions {
         var result = Deploy1ColorResult()
         do {
             let overlay = try ctx.requireOverlay()
-            let atomic = try AtomicBEEF(bytes: tx, limits: beefLimits)
+            let atomic = try AtomicBEEF(bytes: tx, limits: beefLimits, transactionOrder: .any)
             guard let deployTx = try atomic.beef.transaction(for: atomic.subjectTransactionID, limits: ColorModule.txLimits),
                   let first = deployTx.outputs.first else {
                 throw ColorError.invalid("deploy transaction")
