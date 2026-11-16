@@ -31,7 +31,7 @@ package enum ColorInternalize {
         let (subjectID, beef, subject) = try ColorBEEF.open(atomicBEEF)
         let txid = subjectID.displayHex
         let colored = outputs.compactMap { output -> (UInt32, String, String)? in
-            guard case let .basketInsertion(index, basket, instructions) = output, basket.hasPrefix("p color ") else { return nil }
+            guard case let .basketInsertion(index, basket, instructions) = output, basket.utf8.starts(with: "p color ".utf8) else { return nil }
             return (index, basket, instructions)
         }
         var remittances: [UInt32: WalletBasketInsertion] = [:]

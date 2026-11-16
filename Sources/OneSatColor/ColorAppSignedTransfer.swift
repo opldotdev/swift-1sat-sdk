@@ -45,10 +45,10 @@ package enum ColorAppSignedTransfer {
         inputs: [WalletCreateActionInput], outputs requested: [WalletCreateActionOutput], owned: [Owned],
         labels: [String], signCallerInputs: (Transaction) throws -> [Int: Script]
     ) async throws -> (txid: String, atomicBEEF: [UInt8], transaction: Transaction, submitError: String?) {
-        for label in labels where label.hasPrefix("\(ColorIdentifiers.basketNamespace) ") {
+        for label in labels where label.utf8.starts(with: "\(ColorIdentifiers.basketNamespace) ".utf8) {
             throw ColorError.custody("unknown p color label")
         }
-        for label in labels where label.hasPrefix("p nosend expiry ") {
+        for label in labels where label.utf8.starts(with: "p nosend expiry ".utf8) {
             throw ColorError.custody("a transfer is not a handoff; send hands tokens over")
         }
         let plan = ColorPlan(
@@ -82,7 +82,7 @@ package enum ColorAppSignedTransfer {
             }
             guard let token = try ColorTokenOutput.read(script, txid: String(repeating: "0", count: 64), vout: UInt32(index)) else {
                 if custody != nil { throw ColorError.custody("plan.ownedOutputs names a non-token output") }
-                if output.basket?.hasPrefix("\(ColorIdentifiers.basketNamespace) ") == true {
+                if output.basket?.utf8.starts(with: "\(ColorIdentifiers.basketNamespace) ".utf8) == true {
                     throw ColorError.custody("a p color basket can only receive BRC-162 token outputs")
                 }
                 outputs.append(output)

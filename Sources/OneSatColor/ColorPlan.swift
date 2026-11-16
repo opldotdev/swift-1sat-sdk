@@ -128,19 +128,21 @@ public struct ColorPlan: Equatable, Sendable {
 
     /// Reassembles the plan from its labels; nil when no plan label is present.
     public static func fromLabels(_ labels: [String]) throws -> ColorPlan? {
-        let parts = labels.filter { $0.hasPrefix(labelPrefix) }
+        // TS `startsWith` and `PLAN_LABEL` read code units, not graphemes: a combining mark after
+        // the prefix or a field still selects the label, and fails it.
+        let parts = labels.filter { $0.utf8.starts(with: labelPrefix.utf8) }
         guard !parts.isEmpty else { return nil }
         var count: Int?
         var chunks: [Int: String] = [:]
         for label in parts {
-            let fields = label.dropFirst(labelPrefix.count).split(separator: " ", omittingEmptySubsequences: false)
+            let fields = label.utf8.dropFirst(labelPrefix.utf8.count).split(separator: 0x20, omittingEmptySubsequences: false)
             guard fields.count == 3,
                   let index = canonicalInt(fields[0], allowZero: true),
                   let partCount = canonicalInt(fields[1], allowZero: false),
-                  !fields[2].isEmpty, fields[2].allSatisfy({ ("0"..."9").contains($0) || ("a"..."f").contains($0) }) else {
+                  !fields[2].isEmpty, fields[2].allSatisfy(ColorIdentifiers.isLowerHexByte) else {
                 throw ColorError.invalid("p color plan label")
             }
-            let hex = String(fields[2])
+            let hex = String(decoding: fields[2], as: UTF8.self)
             if partCount > maxPlanParts { throw ColorError.planTooLarge }
             if let count, count != partCount { throw ColorError.invalid("inconsistent plan part counts") }
             count = partCount
@@ -157,11 +159,11 @@ public struct ColorPlan: Equatable, Sendable {
     }
 
     /// `(0|[1-9]\d{0,9})` / `([1-9]\d{0,9})`.
-    private static func canonicalInt(_ text: Substring, allowZero: Bool) -> Int? {
-        guard !text.isEmpty, text.count <= 10, text.allSatisfy({ ("0"..."9").contains($0) }) else { return nil }
-        if text == "0" { return allowZero ? 0 : nil }
-        guard !text.hasPrefix("0") else { return nil }
-        return Int(text)
+    private static func canonicalInt(_ digits: Substring.UTF8View, allowZero: Bool) -> Int? {
+        guard !digits.isEmpty, digits.count <= 10, digits.allSatisfy({ (0x30...0x39).contains($0) }) else { return nil }
+        if digits.elementsEqual([0x30]) { return allowZero ? 0 : nil }
+        guard digits.first != 0x30 else { return nil }
+        return Int(String(decoding: digits, as: UTF8.self))
     }
 
     // MARK: - Validation (parsePlan)
