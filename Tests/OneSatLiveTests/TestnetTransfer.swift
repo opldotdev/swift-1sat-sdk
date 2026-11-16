@@ -64,7 +64,12 @@ final class TestnetTransfer: LiveTestCase {
         let txid = try await Funding.pay(
             from: from, to: address.description, satoshis: sats, description: "QA transfer")
         assertTxid(txid, "transfer")
-        let after = try await from.balance()
-        print("SENT \(sats) sats from \(from.name) to \(address.description): \(txid). \(from.name) now holds \(after).")
+        print("SENT \(sats) sats from \(from.name) to \(address.description): \(txid)")
+        // The coins have moved; a failed balance read afterwards is reported, not a failed transfer.
+        do {
+            print("BALANCE \(from.name) \(try await from.balance())")
+        } catch {
+            print("BALANCE \(from.name) could not be read after the send: \(error)")
+        }
     }
 }

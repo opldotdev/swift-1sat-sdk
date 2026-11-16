@@ -26,10 +26,13 @@ esac
 
 if [[ -z "${ONESAT_QA_ROOT:-}" ]]; then
 	if [[ "$(uname)" == "Darwin" ]]; then
-		ONESAT_QA_ROOT="$(security find-generic-password -s onesat-qa-root -w)" || {
-			echo "ONESAT_QA_ROOT is unset and the keychain has no onesat-qa-root item" >&2
+		keychain_error="$(mktemp)"
+		if ! ONESAT_QA_ROOT="$(security find-generic-password -s onesat-qa-root -w 2>"$keychain_error")"; then
+			echo "ONESAT_QA_ROOT is unset and reading the keychain item onesat-qa-root failed: $(cat "$keychain_error")" >&2
+			rm -f "$keychain_error"
 			exit 66
-		}
+		fi
+		rm -f "$keychain_error"
 	else
 		echo "ONESAT_QA_ROOT is unset" >&2
 		exit 66
