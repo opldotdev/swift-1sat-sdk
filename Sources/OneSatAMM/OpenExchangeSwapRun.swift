@@ -103,10 +103,22 @@ extension OpenExchange {
         onEvent: (@Sendable (OpenExchangeSwapEvent) -> Void)? = nil
     ) async throws -> OpenExchangeSwapResult {
         let progress: (OpenExchangeSwapProgress) -> Void = { onProgress?($0) }
+        // TS `s.swapping`: one swap at a time. Swift has no client object holding it, so the gate is
+        // per wallet identity, process-wide.
+        let gateKey = ctx.identityKey
+        guard OpenExchangeSwapGate.shared.enter(gateKey) else {
+            throw OpenExchangeError.failed("A swap is already running: one at a time")
+        }
+        defer { OpenExchangeSwapGate.shared.leave(gateKey) }
+        let floor = floor ?? quote.minAmountOut
+        // Addition to TS (which always uses the quote's minimum): a caller's floor may only be stricter.
+        guard floor >= quote.minAmountOut else {
+            throw OpenExchangeError.failed("the floor is below the quote's minimum received")
+        }
         let result: OpenExchangeSwapResult
         do {
             result = try await runSwap(
-                ctx, quote: quote, sym: sym, floor: floor ?? quote.minAmountOut, feeRate: feeRateSatsPerKb, patienceMs: patienceMs,
+                ctx, quote: quote, sym: sym, floor: floor, feeRate: feeRateSatsPerKb, patienceMs: patienceMs,
                 isCancelled: isCancelled, progress: progress, event: { onEvent?($0) }
             )
         } catch {
@@ -345,14 +357,14 @@ extension OpenExchangeSwapLeg {
         }.count
     }
 
-    /// `moveBack` with only sats in the swap basket: `moveBackSats` over every sats row. The
-    /// module's transfer plan that takes token rows back is not here: with a token row of
-    /// `tokenId` it throws.
+    /// `moveBack`, sats side: `moveBackSats` over every sats row. The module's transfer plan that
+    /// takes token rows back is not here, so a token row of `tokenId` (left by a sell on the same
+    /// seed) stays in the basket and the sats still go back; with token rows and no sats it throws.
     static func moveBack(_ ctx: OneColorContext, tokenId: String, sym: String) async throws -> OpenExchangeMovedBack {
         let rows = try await basketRows(ctx)
         let tokens = try tokenRowCount(rows, tokenId: tokenId)
         let sats = satsRows(rows)
-        if tokens == 0, !sats.isEmpty { return try await moveBackSats(ctx, sym: sym, rows: sats) }
+        if !sats.isEmpty { return try await moveBackSats(ctx, sym: sym, rows: sats) }
         if tokens == 0 { throw fail("the swap basket holds no \(sym)") }
         throw fail("moving \(sym) back from the swap basket is not supported here")
     }
@@ -394,5 +406,25 @@ extension OpenExchangeSwapLeg {
         }
         let sats = satsRows(rows)
         return OpenExchangeSwapBasketTotals(sats: sats.reduce(0) { $0 + $1.satoshis }, satsOutputs: sats.count, tokens: tokens)
+    }
+}
+
+/// TS `s.swapping`, per wallet identity: two overlapping runs would stage twice and race for the
+/// same sats rows, and one run's move back could sweep a row the other's leg is spending.
+final class OpenExchangeSwapGate: @unchecked Sendable {
+    static let shared = OpenExchangeSwapGate()
+    private let lock = NSLock()
+    private var running: Set<String> = []
+
+    func enter(_ key: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return running.insert(key).inserted
+    }
+
+    func leave(_ key: String) {
+        lock.lock()
+        running.remove(key)
+        lock.unlock()
     }
 }

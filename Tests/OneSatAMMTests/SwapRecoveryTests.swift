@@ -596,6 +596,60 @@ final class SwapRecoveryTests: XCTestCase {
         XCTAssertEqual(filled.status, .filled)
     }
 
+    /// A caller's floor may only be stricter than the quote's minimum: a lower one is refused
+    /// before anything is staged or sent.
+    func testAFloorBelowTheQuotesMinimumIsRefused() async throws {
+        let h = try await Host(Self.loop)
+        let quote = try h.quote()
+        do {
+            _ = try await h.run(ProgressLog(), quote: quote, floor: quote.minAmountOut - 1)
+            XCTFail("a floor below the minimum ran")
+        } catch {
+            XCTAssertEqual(OpenExchangeError.errorText(error), "the floor is below the quote's minimum received")
+        }
+        let created = await h.w.storage.created
+        XCTAssertTrue(created.isEmpty)
+        let posts = await h.posts
+        XCTAssertEqual(posts, 0)
+    }
+
+    /// TS `s.swapping`: a second swap on the same wallet while one runs is refused, and the gate
+    /// opens again when the first ends.
+    func testOneSwapAtATimePerWallet() async throws {
+        let h = try await Host(Self.loop)
+        let key = h.w.ctx.identityKey
+        XCTAssertTrue(OpenExchangeSwapGate.shared.enter(key))
+        do {
+            _ = try await h.run(ProgressLog())
+            XCTFail("a second swap ran")
+        } catch {
+            XCTAssertEqual(OpenExchangeError.errorText(error), "A swap is already running: one at a time")
+        }
+        let posts = await h.posts
+        XCTAssertEqual(posts, 0)
+        OpenExchangeSwapGate.shared.leave(key)
+        try await h.w.overlay.unspent(try h.w.signed, vout: 1)
+        try await h.accepts()
+        let filled = try await h.run(ProgressLog())
+        XCTAssertEqual(filled.status, .filled)
+        // A finished run leaves the gate open.
+        XCTAssertTrue(OpenExchangeSwapGate.shared.enter(key))
+        OpenExchangeSwapGate.shared.leave(key)
+    }
+
+    /// A token row in the basket (a sell's, from another wallet on the same seed) does not hold
+    /// back the sats of an early stop: they go back, the token row stays.
+    func testAnEarlyStopMovesTheSatsBackPastATokenRow() async throws {
+        let h = try await Host(SwapFixture.legs[0])
+        let signed = try h.w.signed
+        try await h.w.storage.hold(signed, vout: 1, basket: "amm-swap", customInstructions: OpenExchangeSwapNames.swapInstructions(keyID: "amm-swap-t"), sources: [])
+        let result = try await h.run(ProgressLog(), cancelled: true, quote: try h.quote(25_000))
+        guard case .moved? = result.returned else { return XCTFail("the sats did not go back: \(String(describing: result.returned))") }
+        let totals = try await OpenExchangeSwapLeg.swapBasketTotals(h.w.ctx)
+        XCTAssertEqual(totals.sats, 0)
+        XCTAssertEqual(totals.tokens[SwapFixture.tokenId]?.outputs, 1)
+    }
+
     // MARK: - The basket's totals
 
     func testTheBasketTotalsAreItsSatsAndEachTokensRows() async throws {
