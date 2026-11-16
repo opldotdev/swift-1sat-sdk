@@ -116,13 +116,23 @@ enum ColorExecutor {
     static func execute(
         _ ctx: OneColorContext, request: WalletCreateActionRequest, tokenInputs: [ColorManagedInput]
     ) async throws -> SignedAction {
+        try await execute(ctx, request: request) { transaction in
+            try unlocks(transaction, inputs: tokenInputs, identity: ctx.identity)
+        }
+    }
+
+    /// `execute` with the caller's own inputs signed by `signCallerInputs` (input index → unlock).
+    static func execute(
+        _ ctx: OneColorContext, request: WalletCreateActionRequest,
+        signCallerInputs: (Transaction) throws -> [Int: Script]
+    ) async throws -> SignedAction {
         let funded = try await ctx.storage.colorCreateAction(ctx.auth, request)
         do {
             try ActionAssembler.requireFeeWithin(ctx.maximumFee, for: funded)
             var transaction = try ActionAssembler.assemble(
                 funded, requested: request.outputs ?? [], changeKey: ctx.identity
             )
-            let spends = try unlocks(transaction, inputs: tokenInputs, identity: ctx.identity)
+            let spends = try signCallerInputs(transaction)
             for (index, script) in spends { transaction.inputs[index].unlockingScript = script }
             try signFundingInputs(&transaction, funded: funded, identity: ctx.identity, alreadySigned: Set(spends.keys))
             let signed = try SignedAction(funded: funded, transaction: transaction)
