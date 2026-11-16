@@ -13,6 +13,8 @@ class LiveTestCase: XCTestCase {
     private(set) var backend: Backend!
     /// When the test began, for reading the local stack's call log from here on.
     private(set) var startedAt = Date()
+    /// Requests HostGuard had seen to storage when the test began.
+    private var storageSeenAtStart = 0
 
     override func setUp() async throws {
         try await super.setUp()
@@ -21,6 +23,7 @@ class LiveTestCase: XCTestCase {
         HostGuard.install(allowedHosts: backend.allowedHosts)
         _ = try await Preflight.shared.check(backend)
         self.backend = backend
+        storageSeenAtStart = HostGuard.hostsSeen[backend.storage.host?.lowercased() ?? ""] ?? 0
         startedAt = Date()
     }
 
@@ -34,12 +37,14 @@ class LiveTestCase: XCTestCase {
             let seen = HostGuard.hostsSeen
             let strays = Set(seen.keys).subtracting(backend.allowedHosts)
             XCTAssertTrue(strays.isEmpty, "requests went to hosts outside the allowlist: \(strays.sorted())")
-            // The guard must actually see this process's traffic, or its silence proves nothing. A
-            // test that failed before reaching storage has already said why.
+            // The guard must see this test's own traffic, or its silence proves nothing (the
+            // preflight's requests are counted before setUp's snapshot). A test that failed before
+            // reaching storage has already said why.
             if testRun?.hasSucceeded == true {
-                XCTAssertNotNil(
-                    seen[backend.storage.host?.lowercased() ?? ""],
-                    "HostGuard saw no request to storage \(backend.storage.absoluteString); hosts seen: \(seen)"
+                let storageSeen = seen[backend.storage.host?.lowercased() ?? ""] ?? 0
+                XCTAssertGreaterThan(
+                    storageSeen, storageSeenAtStart,
+                    "HostGuard saw none of this test's requests to storage \(backend.storage.absoluteString); hosts seen: \(seen)"
                 )
             }
             print("HOSTS \(seen.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
@@ -183,25 +188,6 @@ extension LiveWallet {
             throw LiveSetupError("\(basket) basket changed order between reads: expected \(listed[index].outpoint) at \(index), got \(page.outputs.map(\.outpoint))")
         }
         return output
-    }
-
-    /// The outpoints `txid` spends, as storage lists its inputs.
-    func inputs(of txid: String) async throws -> [Outpoint] {
-        var offset: UInt32 = 0
-        while true {
-            let page = try await wallet.listActions(try WalletListActionsRequest(
-                labels: [],
-                includeInputs: true,
-                pagination: try WalletPagination(limit: 1_000, offset: offset)
-            ))
-            if let action = page.actions.first(where: { $0.transactionID.displayHex == txid }) {
-                return (action.inputs ?? []).map(\.sourceOutpoint)
-            }
-            offset += UInt32(page.actions.count)
-            if page.actions.isEmpty || offset >= page.totalActions {
-                throw LiveSetupError("storage lists no action \(txid) for \(name)")
-            }
-        }
     }
 
     /// Txids of every action storage lists for this wallet.

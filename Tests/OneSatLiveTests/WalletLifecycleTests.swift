@@ -54,7 +54,7 @@ final class WalletLifecycleTests: LiveTestCase {
 
         // The restored client spends; the first client sees it. The coins go to A.
         let a = try await qa(.A)
-        XCTAssertGreaterThan(restoredBalance, 1_000, "the restored client holds \(restoredBalance)")
+        guard restoredBalance > 1_000 else { throw LiveSetupError("the restored client holds \(restoredBalance)") }
         let back = UInt64(restoredBalance - 1_000)
         let spendTxid = try await Funding.pay(from: restored, to: try a.receiveAddress(), satoshis: back, description: "QA restore return")
         assertTxid(spendTxid, "restored spend")

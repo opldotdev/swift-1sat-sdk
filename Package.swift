@@ -190,6 +190,7 @@ let package = Package(
                 .product(name: "BSVWallet", package: "swift-sdk"),
                 .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
+                .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
             ]
@@ -308,6 +309,7 @@ let package = Package(
                 .product(name: "BSVScript", package: "swift-sdk"),
                 .product(name: "BSVTransaction", package: "swift-sdk"),
                 .product(name: "BSVWallet", package: "swift-sdk"),
+                .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),

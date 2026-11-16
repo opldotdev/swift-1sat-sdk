@@ -81,10 +81,20 @@ enum Funding {
         var last: SyncAddresses.Result?
         var lastFailure: String?
         while true {
-            let result = try await sync(wallet)
+            let result: SyncAddresses.Result
+            do {
+                result = try await sync(wallet)
+            } catch {
+                // One failed pass (chain tip, owner sync, storage) is not the end of the wait.
+                lastFailure = "sync failed: \(String(describing: error))"
+                print("RETRY \(wallet.name) sync failed while waiting for \(txid): \(error)")
+                guard Date() < deadline else { break }
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+                continue
+            }
             last = result
             if let failure = result.failures.first(where: { $0.txid == txid }) {
-                lastFailure = failure.message
+                lastFailure = "internalize: \(failure.message)"
                 print("RETRY \(wallet.name) could not internalize \(txid) yet: \(failure.message)")
             }
             if try await wallet.processed.has(txid) {
@@ -100,7 +110,7 @@ enum Funding {
         throw LiveSetupError(
             "\(wallet.name) never saw \(txid) at \(try wallet.receiveAddress()) through owner sync at "
                 + "\(wallet.backend.services.absoluteString)"
-                + (lastFailure.map { "; last internalize failure: \($0)" } ?? "")
+                + (lastFailure.map { "; last failure: \($0)" } ?? "")
                 + "; last sync: \(String(describing: last))")
     }
 

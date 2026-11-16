@@ -7,6 +7,7 @@ import BSVTransaction
 import BSVWallet
 import Foundation
 import OneSatActions
+import ToolboxActions
 import XCTest
 
 /// Inscribe a ~180 KB image and a short text, with SIGMA identity signing on and off, through
@@ -85,7 +86,7 @@ final class InscribeFlowTests: LiveTestCase {
         let sigma = Self.sigmaFields(pushes)
         XCTAssertEqual(sigma != nil, signed, "SIGMA tape present=\(sigma != nil), signed=\(signed)")
         if signed, let sigma {
-            try await assertSigma(sigma, script: script, txid: txid, wallet: a)
+            try await assertSigma(sigma, script: script, tx: try XCTUnwrap(result.tx, "inscribe returned no transaction"), wallet: a)
         }
 
         if backend.kind == .local {
@@ -143,8 +144,9 @@ final class InscribeFlowTests: LiveTestCase {
 
     /// The tape names A's current BAP signing address and its BSM signature verifies over
     /// `sha256(sha256(anchor txid ‖ vout LE) ‖ sha256(script before the tape))`, the message
-    /// `Sigma.applyWithCreator` signs, against one of the transaction's inputs (the anchor).
-    private func assertSigma(_ sigma: SigmaFields, script: Script, txid: String, wallet: LiveWallet) async throws {
+    /// `Sigma.applyWithCreator` signs, against the input the tape names (the anchor), read from the
+    /// Atomic BEEF the inscribe returned.
+    private func assertSigma(_ sigma: SigmaFields, script: Script, tx: [UInt8], wallet: LiveWallet) async throws {
         XCTAssertEqual(sigma.algorithm, "BSM")
         XCTAssertEqual(sigma.vin, "0")
         XCTAssertEqual(sigma.signature.count, Sigma.compactSignatureLength)
@@ -178,20 +180,28 @@ final class InscribeFlowTests: LiveTestCase {
         let dataHash = BSVHashing.sha256(Array(bytes.dropLast(tapeBytes.count))).bytes
         let signature = try BitcoinMessageSignature(sigma.signature)
 
-        let inputs = try await wallet.inputs(of: txid)
-        XCTAssertFalse(inputs.isEmpty, "storage lists no inputs for \(txid)")
-        let verified = try inputs.contains { input in
-            let vout = input.outputIndex
-            let inputHash = BSVHashing.sha256(
-                try Hex.decode(input.transactionID.displayHex, maximumDecodedByteCount: 32) + [
-                    UInt8(truncatingIfNeeded: vout), UInt8(truncatingIfNeeded: vout >> 8),
-                    UInt8(truncatingIfNeeded: vout >> 16), UInt8(truncatingIfNeeded: vout >> 24),
-                ]
-            ).bytes
-            let message = BSVHashing.sha256(inputHash + dataHash).bytes
-            return try signature.verifies(message: message, address: expected)
+        let atomic = try AtomicBEEF(bytes: tx, limits: WalletBEEFLimits.standard, transactionOrder: .any)
+        let subject = try XCTUnwrap(
+            try atomic.beef.transaction(for: atomic.subjectTransactionID, limits: WalletBEEFLimits.standard.transactionLimits),
+            "the inscribe's Atomic BEEF lacks its subject transaction"
+        )
+        let vin = try XCTUnwrap(Int(sigma.vin), "SIGMA vin \(sigma.vin) is not a number")
+        guard subject.inputs.indices.contains(vin) else {
+            throw LiveSetupError("SIGMA names input \(vin); the transaction has \(subject.inputs.count)")
         }
-        XCTAssertTrue(verified, "the SIGMA signature verifies against none of \(txid)'s inputs \(inputs)")
+        let anchor = subject.inputs[vin].previousOutput
+        let vout = anchor.outputIndex
+        let inputHash = BSVHashing.sha256(
+            try Hex.decode(anchor.transactionID.displayHex, maximumDecodedByteCount: 32) + [
+                UInt8(truncatingIfNeeded: vout), UInt8(truncatingIfNeeded: vout >> 8),
+                UInt8(truncatingIfNeeded: vout >> 16), UInt8(truncatingIfNeeded: vout >> 24),
+            ]
+        ).bytes
+        let message = BSVHashing.sha256(inputHash + dataHash).bytes
+        XCTAssertTrue(
+            try signature.verifies(message: message, address: expected),
+            "the SIGMA signature does not verify against input \(vin) (\(anchor))"
+        )
     }
 
     /// `key` then `value` as consecutive pushes.
