@@ -466,10 +466,12 @@ enum ColorModule {
 
     // MARK: - Receipts
 
-    /// Every input unlocks its source in the BEEF.
+    /// Every input unlocks its source in the BEEF. The module's `Spend` is built with no verify
+    /// flags, which runs the Chronicle opcodes (OP_2MUL and the rest an AMM pool's contract uses),
+    /// so this runs the Chronicle rules.
     static func assertUnlocks(_ transaction: Transaction, in beef: BEEF) throws {
         let configuration = try ScriptExecutionConfiguration(
-            era: .afterGenesis, flags: [.enableForkID], resourceLimits: .standard
+            era: .afterChronicle, flags: [.enableForkID], resourceLimits: .standard
         )
         for (index, input) in transaction.inputs.enumerated() {
             let previous = input.previousOutput

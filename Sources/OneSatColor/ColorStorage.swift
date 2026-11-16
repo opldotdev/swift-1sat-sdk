@@ -61,7 +61,7 @@ public enum ColorBEEF {
     }
 
     /// The transaction of an Atomic BEEF and its plain BEEF.
-    static func open(_ atomicBytes: [UInt8]) throws -> (txid: TransactionID, beef: BEEF, transaction: Transaction) {
+    package static func open(_ atomicBytes: [UInt8]) throws -> (txid: TransactionID, beef: BEEF, transaction: Transaction) {
         let atomic = try AtomicBEEF(bytes: atomicBytes, limits: limits, transactionOrder: .any)
         guard let transaction = try atomic.beef.transaction(for: atomic.subjectTransactionID, limits: limits.transactionLimits) else {
             throw ColorError.custody("Atomic BEEF lacks its subject")

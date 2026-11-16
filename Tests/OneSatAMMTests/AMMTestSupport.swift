@@ -45,6 +45,19 @@ func deployTransaction(_ marker: UInt8 = 1) throws -> Transaction {
     )
 }
 
+/// `graph` of `transactions`, with each parent they name but do not hold as a txid-only entry
+/// first (the boundary a wallet's BEEF would prove).
+func boundedGraph(_ transactions: [Transaction]) throws -> BEEF {
+    let held = Set(try transactions.map { try $0.transactionID(limits: txLimits) })
+    var boundary: [TransactionID] = []
+    for transaction in transactions {
+        for input in transaction.inputs where !held.contains(input.previousOutput.transactionID) && !boundary.contains(input.previousOutput.transactionID) {
+            boundary.append(input.previousOutput.transactionID)
+        }
+    }
+    return try BEEF(version: .v2, merklePaths: [], transactions: boundary.map { .transactionID($0) } + transactions.map { .raw($0) }, limits: beefLimits)
+}
+
 func atomicBytes(_ transaction: Transaction) throws -> [UInt8] {
     let id = try transaction.transactionID(limits: txLimits)
     return try AtomicBEEF(subjectTransactionID: id, beef: try graph([transaction]), limits: beefLimits).serialized(limits: beefLimits)
@@ -60,12 +73,14 @@ actor MemoryStorage: ColorWalletStorage {
         var basket: String
         var fundingSuffix: String?
         var reserved = false
+        var customInstructions: String?
     }
 
     struct Pending {
         let funded: StorageCreateActionResult
         let reserved: [String]
         let anchorVout: UInt32?
+        var requested: [WalletCreateActionOutput] = []
     }
 
     static let fundingPrefix = Data("funding-prefix".utf8).base64EncodedString()
@@ -82,6 +97,11 @@ actor MemoryStorage: ColorWalletStorage {
     private(set) var processed: [StorageProcessActionRequest] = []
     private(set) var aborted: [String] = []
     private(set) var listed: [WalletListOutputsRequest] = []
+    /// Plain createActions, as asked.
+    private(set) var created: [WalletCreateActionRequest] = []
+    /// internalizeActions, as asked; each answers `internalizeAccepts`.
+    private(set) var internalized: [WalletInternalizeActionRequest] = []
+    var internalizeAccepts = true
     var noSendSupported = true
 
     init(identity: PrivateKey) throws {
@@ -104,6 +124,17 @@ actor MemoryStorage: ColorWalletStorage {
     }
 
     func setNoSendSupported(_ value: Bool) { noSendSupported = value }
+    func setInternalizeAccepts(_ value: Bool) { internalizeAccepts = value }
+
+    /// Holds output `vout` of `transaction` in `basket` with `customInstructions`, its source
+    /// transactions with it.
+    func hold(_ transaction: Transaction, vout: UInt32, basket: String, customInstructions: String?, sources: [Transaction]) throws {
+        for source in sources { transactions[try source.transactionID(limits: txLimits)] = source }
+        try hold(transaction, vout: vout, basket: basket)
+        records[records.count - 1].customInstructions = customInstructions
+    }
+
+    func basketRecords(_ basket: String) -> [Record] { records.filter { $0.basket == basket } }
 
     /// Holds output `vout` of `transaction` in `basket`, as an earlier action would.
     func hold(_ transaction: Transaction, vout: UInt32, basket: String) throws {
@@ -128,30 +159,85 @@ actor MemoryStorage: ColorWalletStorage {
     }
 
     private func inputBEEF(_ roots: [TransactionID]) throws -> [UInt8] {
-        try graph(ancestry(roots, pool: transactions)).serialized(limits: beefLimits)
+        try boundedGraph(ancestry(roots, pool: transactions)).serialized(limits: beefLimits)
     }
 
     // MARK: - ColorWalletStorage
 
+    /// A plain createAction: the caller's inputs (unsigned, theirs to sign), the requested
+    /// outputs at their places, one BRC-29 funding input when those inputs do not cover the
+    /// outputs and the fee, and a change output.
     func colorCreateAction(_ auth: AuthID, _ request: WalletCreateActionRequest) async throws -> StorageCreateActionResult {
-        throw TestError("the paid enable makes no plain createAction")
+        created.append(request)
+        var inputs: [StorageActionInput] = []
+        var reserved: [String] = []
+        var held: UInt64 = 0
+        for input in request.inputs ?? [] {
+            guard let index = records.firstIndex(where: { $0.outpoint == input.outpoint && !$0.reserved }) else {
+                throw TestError("unknown input \(input.outpoint)")
+            }
+            records[index].reserved = true
+            let record = records[index]
+            held += record.satoshis
+            reserved.append(record.outpoint.description)
+            let length: UInt32 = if case .scriptLength(let n) = input.unlocking { n } else { 108 }
+            inputs.append(StorageActionInput(
+                sourceTXID: record.outpoint.transactionID.displayHex, sourceVout: record.outpoint.outputIndex,
+                sourceSatoshis: Int64(record.satoshis), sourceLockingScript: record.script, unlockingScriptLength: length,
+                derivationPrefix: nil, derivationSuffix: nil
+            ))
+        }
+        let requested = request.outputs ?? []
+        let out = requested.reduce(UInt64(0)) { $0 + $1.satoshis }
+        if held < out + Self.fee {
+            let funding = try takeFunding()
+            held += funding.satoshis
+            reserved.append(funding.outpoint.description)
+            inputs.append(StorageActionInput(
+                sourceTXID: funding.outpoint.transactionID.displayHex, sourceVout: funding.outpoint.outputIndex,
+                sourceSatoshis: Int64(funding.satoshis), sourceLockingScript: funding.script, unlockingScriptLength: 107,
+                derivationPrefix: Self.fundingPrefix, derivationSuffix: funding.fundingSuffix
+            ))
+        }
+        guard held >= out + Self.fee else { throw TestError("insufficient funds") }
+        var outputs = requested.enumerated().map { index, output in
+            StorageActionOutput(vout: UInt32(index), satoshis: output.satoshis, lockingScript: output.lockingScript,
+                                providedBy: .you, purpose: nil, derivationSuffix: nil)
+        }
+        if held - out - Self.fee > 0 {
+            outputs.append(StorageActionOutput(vout: UInt32(requested.count), satoshis: held - out - Self.fee, lockingScript: [0x00],
+                                               providedBy: .storage, purpose: .change, derivationSuffix: next("change")))
+        }
+        let reference = next("plain")
+        let roots = try inputs.map { try TransactionID(displayHex: $0.sourceTXID) }
+        let funded = StorageCreateActionResult(
+            reference: reference, version: 1, lockTime: 0, outputs: outputs, inputs: inputs,
+            inputBEEF: try inputBEEF(roots), derivationPrefix: Self.fundingPrefix
+        )
+        pending[reference] = Pending(funded: funded, reserved: reserved, anchorVout: nil, requested: requested)
+        return funded
     }
 
     func colorListOutputs(_ auth: AuthID, _ request: WalletListOutputsRequest) async throws -> WalletListOutputsResult {
         listed.append(request)
         let page = records.filter { $0.basket == request.basket && !$0.reserved }
         let outputs = try page.map {
-            try WalletOutput(satoshis: $0.satoshis, spendable: true, outpoint: $0.outpoint)
+            try WalletOutput(
+                satoshis: $0.satoshis, lockingScript: request.include == .lockingScripts ? $0.script : nil, spendable: true,
+                customInstructions: request.includeCustomInstructions == true ? $0.customInstructions : nil,
+                tags: request.includeTags == true ? [] : nil, outpoint: $0.outpoint
+            )
         }
         var beef: BEEF?
         if request.include == .entireTransactions, !page.isEmpty {
-            beef = try graph(ancestry(page.map(\.outpoint.transactionID), pool: transactions))
+            beef = try boundedGraph(ancestry(page.map(\.outpoint.transactionID), pool: transactions))
         }
         return try WalletListOutputsResult(totalOutputs: UInt32(page.count), beef: beef, outputs: outputs)
     }
 
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {
-        throw TestError("the paid enable internalizes nothing")
+        internalized.append(request)
+        return WalletInternalizeActionResult(accepted: internalizeAccepts)
     }
 
     // MARK: - NoSendExpiryStorage
@@ -219,6 +305,11 @@ actor MemoryStorage: ColorWalletStorage {
         transactions[id] = transaction
         let spent = Set(transaction.inputs.map(\.previousOutput.description))
         records.removeAll { spent.contains($0.outpoint.description) }
+        for (index, output) in action.requested.enumerated() {
+            guard let basket = output.basket else { continue }
+            records.append(Record(outpoint: Outpoint(transactionID: id, outputIndex: UInt32(index)), satoshis: output.satoshis,
+                                  script: output.lockingScript, basket: basket, customInstructions: output.customInstructions))
+        }
         for output in action.funded.outputs where output.isChange && output.vout != action.anchorVout {
             let actual = transaction.outputs[Int(output.vout)]
             records.append(Record(outpoint: Outpoint(transactionID: id, outputIndex: output.vout), satoshis: actual.satoshis,
@@ -239,16 +330,25 @@ actor MemoryStorage: ColorWalletStorage {
 /// Answers GETs by URL, 404 otherwise, and records each request.
 actor StubHTTP: HTTPTransport {
     private var routes: [String: (Int, [UInt8])] = [:]
+    private var queued: [String: [(Int, [UInt8])]] = [:]
     private(set) var requests: [HTTPRequest] = []
 
     init(_ routes: [String: (Int, [UInt8])] = [:]) { self.routes = routes }
 
     func route(_ url: String, _ status: Int, _ body: [UInt8]) { routes[url] = (status, body) }
     func json(_ url: String, _ text: String, status: Int = 200) { routes[url] = (status, Array(text.utf8)) }
+    /// Answers `url` once with `text`, ahead of its route.
+    func once(_ url: String, _ text: String, status: Int = 200) { queued[url, default: []].append((status, Array(text.utf8))) }
 
     func send(_ request: HTTPRequest) async throws -> HTTPResponse {
         requests.append(request)
-        let (status, body) = routes[request.url.absoluteString] ?? (404, Array("no".utf8))
+        let url = request.url.absoluteString
+        if var first = queued[url], !first.isEmpty {
+            let (status, body) = first.removeFirst()
+            queued[url] = first
+            return HTTPResponse(statusCode: status, body: body)
+        }
+        let (status, body) = routes[url] ?? (404, Array("no".utf8))
         return HTTPResponse(statusCode: status, body: body)
     }
 
