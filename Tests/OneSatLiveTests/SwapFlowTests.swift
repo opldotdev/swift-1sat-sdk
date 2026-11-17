@@ -16,11 +16,12 @@ import FoundationNetworking
 ///
 /// 1. The exchange preflight (once per process): a hosted token with a live pool, and the
 ///    smallest round trip its validators take, under `maxLegSats`. Nothing is spent before it.
-/// 2. A funded through the shared top-up (`fundedA`, `TopUpBudget`); anything an interrupted run
-///    left in A's swap basket moved back.
+/// 2. S, the swap's own QA wallet, funded through the shared top-up (`funded(.S)`, `TopUpBudget`);
+///    anything an interrupted run left in S's swap basket moved back. S, not A: A's unconfirmed
+///    inscriptions would ride in every leg's funding BEEF (`QAWallets.Role`).
 /// 3. A swap cancelled before any leg is sent: the sats are staged and moved back.
 /// 4. A buy of the round trip's size, quoted after funding.
-/// 5. A sell of every unit of the token A holds, so the bought tokens do not pile up and the sats
+/// 5. A sell of every unit of the token S holds, so the bought tokens do not pile up and the sats
 ///    come back.
 /// 6. The recovery pass (`settleSwaps`, `resolveSwaps`) leaves the swap basket empty.
 ///
@@ -64,7 +65,7 @@ final class SwapFlowTests: LiveTestCase {
                 let done = try await Self.moveBackLeftovers(cleanup.ox, cleanup.ctx)
                 print("TEARDOWN swap basket: \(done)")
             } catch {
-                XCTFail("teardown could not move A's swap basket back: \(String(describing: error))")
+                XCTFail("teardown could not move S's swap basket back: \(String(describing: error))")
             }
         }
         try await super.tearDown()
@@ -82,7 +83,7 @@ final class SwapFlowTests: LiveTestCase {
         OneColorContext(wallet.context, overlay: LiveColorOverlay.testnet)
     }
 
-    /// Prints A, B and T (identity, deposit address, balance) without spending: what to fund.
+    /// Prints every QA wallet (identity, deposit address, balance) without spending: what to fund.
     func testQAWalletAddresses() async throws {
         for role in QAWallets.Role.allCases {
             let wallet = try await qa(role)
@@ -97,7 +98,7 @@ final class SwapFlowTests: LiveTestCase {
         let market = try await ExchangePreflight.shared.check(ox, origin: origin)
         let token = market.token
 
-        let a = try await fundedA()
+        let a = try await funded(.S)
         let ctx = colorContext(a)
         cleanup = (ox, ctx)
         print("LEFTOVERS before the round trip: \(try await Self.moveBackLeftovers(ox, ctx))")
@@ -151,11 +152,11 @@ final class SwapFlowTests: LiveTestCase {
         try await assertBasketEmpty(ctx, "after the move back")
         let after = try await a.balance()
         let cost = before - after
-        print("CANCEL staged \(staged.first?.0 ?? "-") moved back \(back); A \(before) -> \(after) (\(cost) sats in fees)")
+        print("CANCEL staged \(staged.first?.0 ?? "-") moved back \(back); S \(before) -> \(after) (\(cost) sats in fees)")
         XCTAssertTrue((1...Self.actionFees).contains(cost), "the cancelled swap cost \(cost) sats")
     }
 
-    /// (a) Buy with A, quoted fresh: done, the tokens in A's 1Color basket, the sats spent within
+    /// (a) Buy with S, quoted fresh: done, the tokens in S's 1Color basket, the sats spent within
     /// the quote and fees, each leg's txid recorded. Its result, or nil when it stopped cleanly twice.
     func buy(_ ox: OpenExchange, _ ctx: OneColorContext, _ a: LiveWallet, _ token: OpenExchangeHostedToken, origin: String) async throws -> OpenExchangeSwapResult? {
         guard let filled = try await swapWithRetry("buy", ox, ctx, a, token, quote: {
@@ -168,19 +169,19 @@ final class SwapFlowTests: LiveTestCase {
         XCTAssertEqual(result.stop, .filled)
         XCTAssertEqual(result.totalIn, quote.request.amountIn)
         XCTAssertGreaterThanOrEqual(result.totalOut, quote.minAmountOut)
-        XCTAssertEqual(BigInt(after.tokens) - BigInt(before.tokens), result.totalOut, "A's \(token.sym) went \(before.tokens) -> \(after.tokens)")
+        XCTAssertEqual(BigInt(after.tokens) - BigInt(before.tokens), result.totalOut, "S's \(token.sym) went \(before.tokens) -> \(after.tokens)")
         let spent = before.sats - after.sats
-        XCTAssertGreaterThanOrEqual(spent, Int64(quote.request.amountIn), "A spent \(spent) sats on a \(quote.request.amountIn) sat buy")
-        XCTAssertLessThanOrEqual(spent, Self.most(quote), "A spent \(spent) sats; the quote allows \(Self.most(quote))")
+        XCTAssertGreaterThanOrEqual(spent, Int64(quote.request.amountIn), "S spent \(spent) sats on a \(quote.request.amountIn) sat buy")
+        XCTAssertLessThanOrEqual(spent, Self.most(quote), "S spent \(spent) sats; the quote allows \(Self.most(quote))")
         print("BUY \(token.sym) \(token.tokenId): legs \(result.legs.map(\.txid)), \(result.totalIn) sats in, \(result.totalOut) out "
-            + "(quoted \(quote.amountOut), min \(quote.minAmountOut)); A sats \(before.sats) -> \(after.sats) (\(spent) spent), "
+            + "(quoted \(quote.amountOut), min \(quote.minAmountOut)); S sats \(before.sats) -> \(after.sats) (\(spent) spent), "
             + "\(token.sym) \(before.tokens) -> \(after.tokens)")
         return result
     }
 
-    /// Sells every unit of the token A holds (this run's buy and any an earlier run left), quoted
-    /// fresh: done, the tokens gone from A's 1Color basket, the payout in A's sats. False when it
-    /// stopped cleanly twice, or A holds none to sell. After a buy that filled, it first checks the
+    /// Sells every unit of the token S holds (this run's buy and any an earlier run left), quoted
+    /// fresh: done, the tokens gone from S's 1Color basket, the payout in S's sats. False when it
+    /// stopped cleanly twice, or S holds none to sell. After a buy that filled, it first checks the
     /// pool math: selling the bought tokens back into the buy's own pool must return less than the
     /// buy paid in (`assertSamePoolLoses`). The best-priced sell can still pay more, when another of
     /// the token's pools prices it higher; that is the pools' price gap, and the log says so.
@@ -211,15 +212,15 @@ final class SwapFlowTests: LiveTestCase {
         XCTAssertEqual(result.totalIn, quote.request.amountIn)
         XCTAssertGreaterThan(result.totalOut, 0, "the sell paid out no sats")
         XCTAssertGreaterThanOrEqual(result.totalOut, quote.minAmountOut)
-        XCTAssertEqual(BigInt(before.tokens) - BigInt(after.tokens), result.totalIn, "A's \(token.sym) went \(before.tokens) -> \(after.tokens)")
-        // The payout came back into A's sats, less at most the sell's own fees.
+        XCTAssertEqual(BigInt(before.tokens) - BigInt(after.tokens), result.totalIn, "S's \(token.sym) went \(before.tokens) -> \(after.tokens)")
+        // The payout came back into S's sats, less at most the sell's own fees.
         let gained = after.sats - before.sats
         let payout = Int64(result.totalOut)
-        XCTAssertLessThanOrEqual(gained, payout, "A gained \(gained) sats on a sell that paid out \(payout)")
+        XCTAssertLessThanOrEqual(gained, payout, "S gained \(gained) sats on a sell that paid out \(payout)")
         XCTAssertGreaterThanOrEqual(gained, payout - Self.mostFees(quote),
-            "A gained \(gained) sats on a sell that paid out \(payout); its fees may take at most \(Self.mostFees(quote))")
+            "S gained \(gained) sats on a sell that paid out \(payout); its fees may take at most \(Self.mostFees(quote))")
         print("SELL \(token.sym) \(token.tokenId): legs \(result.legs.map(\.txid)), \(result.totalIn) \(token.sym) in, \(result.totalOut) sats out "
-            + "(quoted \(quote.amountOut), min \(quote.minAmountOut)); A sats \(before.sats) -> \(after.sats) (\(gained) gained), "
+            + "(quoted \(quote.amountOut), min \(quote.minAmountOut)); S sats \(before.sats) -> \(after.sats) (\(gained) gained), "
             + "\(token.sym) \(before.tokens) -> \(after.tokens)")
         if let buy {
             let samePool = Set(result.legs.map(\.poolId)) == Set(buy.legs.map(\.poolId))
@@ -283,7 +284,7 @@ final class SwapFlowTests: LiveTestCase {
 
     // MARK: - Running a swap
 
-    /// A's sats (with its swap basket) and its units of the swapped token.
+    /// S's sats (with its swap basket) and its units of the swapped token.
     struct Holdings: Sendable {
         let sats: Int64
         let tokens: UInt64
@@ -294,7 +295,7 @@ final class SwapFlowTests: LiveTestCase {
     }
 
     /// Runs a swap on `quote()`, and once more on a fresh quote when the first stops in
-    /// `retryStops` with nothing filled and everything moved back. The run that filled, with A's
+    /// `retryStops` with nothing filled and everything moved back. The run that filled, with S's
     /// holdings around it; nil when the last run stopped cleanly with nothing filled (accepted).
     /// Fails on anything else: a deadline, a stop that left rows, a move back that failed.
     func swapWithRetry(
@@ -317,7 +318,7 @@ final class SwapFlowTests: LiveTestCase {
                 XCTAssertNil(result.stuck, "the \(side) left rows the pass could not take in")
                 return (run, before, after)
             }
-            // Nothing filled: it must have stopped cleanly, everything back in A.
+            // Nothing filled: it must have stopped cleanly, everything back in S.
             if result.stop == .cancelled {
                 XCTFail("the \(side) of \(token.sym) reached its \(Int(Self.softDeadline)) s deadline before a leg filled; events: \(run.events)")
                 throw LiveSetupError("the \(side) ran out of time")
@@ -331,7 +332,7 @@ final class SwapFlowTests: LiveTestCase {
                 throw LiveSetupError("the \(side) left stuck rows")
             }
             try await assertBasketEmpty(ctx, "after the \(side) stopped \(result.stop.rawValue)")
-            XCTAssertEqual(after.tokens, before.tokens, "a \(side) that filled nothing moved A's \(token.sym)")
+            XCTAssertEqual(after.tokens, before.tokens, "a \(side) that filled nothing moved S's \(token.sym)")
             XCTAssertTrue((0...Self.actionFees).contains(before.sats - after.sats),
                 "a \(side) that filled nothing cost \(before.sats - after.sats) sats")
             guard Self.retryStops.contains(result.stop) else {
@@ -395,7 +396,7 @@ final class SwapFlowTests: LiveTestCase {
 
     // MARK: - Quotes and sizes
 
-    /// What a buy of `quote` can take out of A: the staged amount and fee sats, one leg's miner
+    /// What a buy of `quote` can take out of S: the staged amount and fee sats, one leg's miner
     /// fee top-up (`OpenExchangeQuote.stage`), and the actions' miner fees.
     static func most(_ quote: OpenExchangeQuote) -> Int64 {
         Int64(quote.stage.amount + quote.stage.feeSats + quote.legMinerFeeSats) + actionFees
@@ -421,7 +422,7 @@ final class SwapFlowTests: LiveTestCase {
 
     // MARK: - The swap basket
 
-    /// A's balance and what its swap basket holds: the sats a swap can draw on.
+    /// S's balance and what its swap basket holds: the sats a swap can draw on.
     func held(_ wallet: LiveWallet) async throws -> Int64 {
         let basket = try await OpenExchangeSwapLeg.swapBasketTotals(colorContext(wallet))
         return try await wallet.balance() + Int64(basket.sats)

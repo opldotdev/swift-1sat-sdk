@@ -58,10 +58,15 @@ class LiveTestCase: XCTestCase {
 
     /// A funded A, and the T that funds it.
     func fundedA() async throws -> LiveWallet {
-        let a = try await qa(.A)
+        try await funded(.A)
+    }
+
+    /// A funded `role`, topped up from T.
+    func funded(_ role: QAWallets.Role) async throws -> LiveWallet {
+        let wallet = try await qa(role)
         let t = try await qa(.T)
-        try await Funding.ensureFunded(a, treasury: t)
-        return a
+        try await Funding.ensureFunded(wallet, treasury: t)
+        return wallet
     }
 
     func assertTxid(_ txid: String?, _ what: String, file: StaticString = #filePath, line: UInt = #line) {
