@@ -75,7 +75,7 @@ public indirect enum StrictJSON: Equatable, Sendable {
     /// Strict UTF-8 then strict JSON, as `parseStrictJsonBytes`: no BOM, no duplicate members,
     /// no unpaired surrogate escapes, no integers written as fractions or exponents, depth 64.
     public static func parse(bytes: [UInt8], label: String) throws -> StrictJSON {
-        guard let text = ColorIdentifiers.strictUTF8(bytes) else { throw ColorError.invalid("\(label): not strict UTF-8") }
+        guard let text = ColorIdentifiers.strictUTF8(bytes) else { throw ColorError.message("\(label) is not strict UTF-8") }
         return try parse(text, label: label)
     }
 
@@ -94,7 +94,7 @@ public indirect enum StrictJSON: Equatable, Sendable {
 
         init(scalars: [Unicode.Scalar], label: String) { self.scalars = scalars; self.label = label }
 
-        func fail(_ reason: String) -> ColorError { .invalid("\(label) is not strict JSON (\(reason))") }
+        func fail(_ reason: String) -> ColorError { .message("\(label) is not strict JSON (\(reason))") }
 
         var current: Unicode.Scalar? { position < scalars.count ? scalars[position] : nil }
 
@@ -254,33 +254,28 @@ public indirect enum StrictJSON: Equatable, Sendable {
     // MARK: - Shape helpers (strictJson.ts)
 
     func object(_ label: String) throws -> [(String, StrictJSON)] {
-        guard case .object(let members) = self else { throw ColorError.invalid("\(label) must be a JSON object") }
+        guard case .object(let members) = self else { throw ColorError.message("\(label) must be a JSON object") }
         return members
     }
 
     func array(_ label: String) throws -> [StrictJSON] {
-        guard case .array(let items) = self else { throw ColorError.invalid("\(label) must be an array") }
+        guard case .array(let items) = self else { throw ColorError.message("\(label) must be an array") }
         return items
     }
 
     func uint32(_ label: String) throws -> UInt32 {
         guard case .number(let value) = self, value == value.rounded(), value >= 0, value <= Double(UInt32.max) else {
-            throw ColorError.invalid("\(label) must be an integer in 0..2^32-1")
+            throw ColorError.message("\(label) must be an integer in 0..2^32-1")
         }
         return UInt32(value)
-    }
-
-    func string(_ label: String) throws -> String {
-        guard case .string(let value) = self else { throw ColorError.invalid("\(label) must be a string") }
-        return value
     }
 
     /// Requires every named member, allows the optional ones, refuses anything else.
     static func exactMembers(_ members: [(String, StrictJSON)], required: [String], optional: [String] = [], label: String) throws {
         let names = members.map(\.0)
-        for name in required where !names.contains(name) { throw ColorError.invalid("\(label) is missing \(name)") }
+        for name in required where !names.contains(name) { throw ColorError.message("\(label) is missing \(name)") }
         for name in names where !required.contains(name) && !optional.contains(name) {
-            throw ColorError.invalid("\(label) has unknown member \(name)")
+            throw ColorError.message("\(label) has unknown member \(name)")
         }
     }
 }

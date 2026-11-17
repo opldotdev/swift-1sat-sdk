@@ -68,7 +68,7 @@ public enum OneSatPermissionAsset: String, CaseIterable, Sendable {
     private func isDeployedDispatchLabel(_ label: String) -> Bool {
         deployedSchemeLabels.contains { scheme in
             let prefix = "p \(scheme) "
-            return label.hasPrefix(prefix) && label.utf8.count > prefix.utf8.count
+            return label.utf8.starts(with: prefix.utf8) && label.utf8.count > prefix.utf8.count
         }
     }
 

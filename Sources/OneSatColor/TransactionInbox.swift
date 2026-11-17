@@ -244,7 +244,7 @@ public enum TransactionInbox {
                     senderIdentityKey: try PublicKey(try Hex.decode(hex, maximumDecodedByteCount: 33))
                 ))))
             case let .basketInsertion(_, basket, instructions, tags):
-                guard basket.hasPrefix("p color ") else {
+                guard basket.utf8.starts(with: "p color ".utf8) else {
                     throw Skip(reason: "output \(index): unsupported basket \(basket)")
                 }
                 let checked = try ColorReceipt.check(

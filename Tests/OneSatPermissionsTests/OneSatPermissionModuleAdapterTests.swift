@@ -282,6 +282,31 @@ final class OneSatPermissionModuleAdapterTests: XCTestCase {
         )
     }
 
+    func test_aDispatchLabelWithAMarkAfterItsPrefixIsStillRoutingMetadata() throws {
+        // TS `hasSchemeDispatchLabel` (types/constants.ts:302) reads code units: `startsWith('p bsv21 ')`
+        // matches though a combining mark follows the space.
+        let routed = WalletRequest.action(.createAction(try WalletCreateActionRequest(
+            description: "Routed token action",
+            outputs: [tokenOutput(
+                script: try BSV21.deployMint(symbol: "NEW", amount: "1").lock().bytes
+            )],
+            labels: ["p bsv21 \u{301}action", "ordinary"]
+        )))
+        let classification = OneSatPermissionAsset.bsv21.canonicalClassification(
+            for: routed,
+            originator: "example.com",
+            classifier: classifier()
+        )
+        guard case .authorizationRequired(let plan) = classification.decision else {
+            return XCTFail("A deployed module label must reach BRC-116 authorization")
+        }
+        let protocols = plan.requirements.compactMap { requirement -> String? in
+            guard case .protocolAccess(let scope) = requirement.scope else { return nil }
+            return scope.protocolName
+        }
+        XCTAssertEqual(protocols, ["action label ordinary"])
+    }
+
     func test_plainOneSatBasketUsesOrdinalStylingButRemainsUnverified() async throws {
         let request = try WalletListOutputsRequest(basket: "1sat", tags: ["collection:example"])
         let review = try await dispatch(asset: .oneSat, request: .action(.listOutputs(request)))

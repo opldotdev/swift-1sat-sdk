@@ -39,8 +39,8 @@ public enum ColorIdentifiers {
     public static func protocolName(
         _ selector: ColorAssetSelector, derivationPrefix: String, derivationSuffix: String
     ) throws -> String {
-        try validateRemittance(derivationPrefix)
-        try validateRemittance(derivationSuffix)
+        try validateRemittance(derivationPrefix, name: "derivationPrefix")
+        try validateRemittance(derivationSuffix, name: "derivationSuffix")
         let name = "p color \(tag(selector)) \(Hex.encode(Array(derivationPrefix.utf8))) \(Hex.encode(Array(derivationSuffix.utf8)))"
         // TS compares `name.length`, UTF-16 units; the name is ASCII, so bytes and units agree.
         guard name.utf16.count <= maxProtocolNameLength else { throw ColorError.protocolNameTooLong }
@@ -49,7 +49,7 @@ public enum ColorIdentifiers {
 
     /// Parses a `p color` protocol name back into its selector and remittance strings.
     public static func parseProtocolName(_ name: String) throws -> (selector: ColorAssetSelector, derivationPrefix: String, derivationSuffix: String) {
-        let parts = name.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        let parts = splitOnSpace(name)
         guard parts.count == 5, parts[0] == "p", parts[1] == "color", name.utf16.count <= maxProtocolNameLength else {
             throw ColorError.invalid("p color protocol name")
         }
@@ -58,8 +58,8 @@ public enum ColorIdentifiers {
               let suffix = strictUTF8(try Hex.decode(parts[4], maximumDecodedByteCount: 280)) else {
             throw ColorError.invalid("p color remittance tags")
         }
-        try validateRemittance(prefix)
-        try validateRemittance(suffix)
+        try validateRemittance(prefix, name: "derivationPrefix")
+        try validateRemittance(suffix, name: "derivationSuffix")
         return (try selector(fromTag: parts[2]), prefix, suffix)
     }
 
@@ -71,7 +71,7 @@ public enum ColorIdentifiers {
 
     /// Parses a per-asset basket; nil for any other basket.
     public static func parseBasket(_ basket: String) throws -> (assetID: ColorAssetID, role: ColorTokenRole)? {
-        let parts = basket.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        let parts = splitOnSpace(basket)
         guard parts.count > 2, parts[0] == "p", parts[1] == "color", parts[2] != "balance", parts[2] != "assets" else {
             return nil
         }
@@ -80,7 +80,7 @@ public enum ColorIdentifiers {
 
     /// Parses `p color balance <tag>` or `p color balance <tag> authority`; nil otherwise.
     public static func parseBalanceSelector(_ basket: String) throws -> (assetID: ColorAssetID, role: ColorTokenRole)? {
-        let parts = basket.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        let parts = splitOnSpace(basket)
         guard parts.count > 2, parts[0] == "p", parts[1] == "color", parts[2] == "balance" else { return nil }
         return try parseTagged(Array(parts.dropFirst(3)))
     }
@@ -100,47 +100,74 @@ public enum ColorIdentifiers {
 
     public static func isDerivationSuffixTag(_ tag: String) -> Bool {
         let prefix = "\(basketNamespace) "
-        guard tag.hasPrefix(prefix) else { return false }
+        guard tag.utf8.starts(with: prefix.utf8) else { return false }
         // TS `/^p color [0-9a-f]{64}$/`: compare bytes, not graphemes, so a combining mark
         // after the last hex digit does not pass.
         let hex = tag.utf8.dropFirst(prefix.utf8.count)
-        return hex.count == 64 && hex.allSatisfy { (0x30...0x39).contains($0) || (0x61...0x66).contains($0) }
+        return hex.count == 64 && hex.allSatisfy(isLowerHexByte)
     }
 
-    /// A remittance string is nonempty strict UTF-8 without whitespace. Swift strings are always
-    /// valid Unicode, so only the emptiness and whitespace checks can fail here.
-    public static func validateRemittance(_ value: String) throws {
+    /// TS `validateRemittanceString`: a remittance string is nonempty strict UTF-8 without
+    /// whitespace. Swift strings are always valid Unicode, so only the emptiness and whitespace
+    /// checks can fail here. `name` is the TS name of the field.
+    public static func validateRemittance(_ value: String, name: String) throws {
         guard !value.isEmpty, !value.unicodeScalars.contains(where: isJSWhitespace) else {
-            throw ColorError.invalid("remittance string")
+            throw ColorError.message("\(name) must be a nonempty string without whitespace")
         }
     }
 
-    /// A compressed secp256k1 key in lowercase hex.
-    public static func validateIdentityKey(_ value: String) throws {
-        guard value.utf8.count == 66, value.hasPrefix("02") || value.hasPrefix("03"),
-              value.allSatisfy({ ("0"..."9").contains($0) || ("a"..."f").contains($0) }),
-              (try? PublicKey(Hex.decode(value, maximumDecodedByteCount: 33))) != nil else {
-            throw ColorError.invalid("identity key")
+    /// TS `IDENTITY_KEY`, `/^0[23][0-9a-f]{64}$/`, on bytes: a digit followed by a combining
+    /// mark is no hex digit.
+    static func isIdentityKeyHex(_ value: String) -> Bool {
+        value.utf8.count == 66 && (value.utf8.starts(with: "02".utf8) || value.utf8.starts(with: "03".utf8))
+            && value.utf8.allSatisfy(isLowerHexByte)
+    }
+
+    /// TS `validateIdentityKey`: a compressed secp256k1 key in lowercase hex, on the curve. TS
+    /// quotes the SDK's error; `@bsv/sdk` says `Invalid point` for a well-formed key off the curve.
+    public static func validateIdentityKey(_ value: String, name: String) throws {
+        guard isIdentityKeyHex(value) else {
+            throw ColorError.message("\(name) must be a compressed public key in lowercase hex")
+        }
+        guard (try? PublicKey(Hex.decode(value, maximumDecodedByteCount: 33))) != nil else {
+            throw ColorError.message("\(name) is not a valid public key (Invalid point)")
         }
     }
 
+    /// TS `assetIdFromTag`: anything but `issue` or `<64 hex>v<vout>` is an invalid asset tag.
     static func selector(fromTag tag: String) throws -> ColorAssetSelector {
         if tag == "issue" { return .issue }
-        guard let v = tag.firstIndex(of: "v") else { throw ColorError.invalid("asset tag") }
-        let txid = String(tag[..<v]), vout = String(tag[tag.index(after: v)...])
-        return .asset(try ColorAssetID(txid: txid, voutText: vout))
+        guard let v = tag.utf8.firstIndex(of: UInt8(ascii: "v")),
+              let id = try? ColorAssetID(
+                  txid: String(decoding: tag.utf8[..<v], as: UTF8.self),
+                  voutText: String(decoding: tag.utf8[tag.utf8.index(after: v)...], as: UTF8.self)
+              ) else {
+            throw ColorError.invalid("asset tag")
+        }
+        return .asset(id)
+    }
+
+    /// TS `split(' ')`: splits on U+0020 alone, so a combining mark after a space starts the next
+    /// part rather than joining the space into one character.
+    static func splitOnSpace(_ text: String) -> [String] {
+        text.utf8.split(separator: 0x20, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
     }
 
     private static func parseTagged(_ rest: [String]) throws -> (assetID: ColorAssetID, role: ColorTokenRole)? {
         guard !rest.isEmpty, rest.count <= 2, rest.count == 1 || rest[1] == "authority" else { return nil }
         guard case .asset(let id) = try selector(fromTag: rest[0]) else {
-            throw ColorError.invalid("issue is not a stored basket")
+            throw ColorError.message("issue is not a stored basket")
         }
         return (id, rest.count == 2 ? .authority : .value)
     }
 
+    /// `/^(?:[0-9a-f]{2})+$/`, on bytes: a digit followed by a combining mark is no hex digit.
     private static func isHexTag(_ text: String) -> Bool {
-        !text.isEmpty && text.count % 2 == 0 && text.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
+        !text.isEmpty && text.utf8.count % 2 == 0 && text.utf8.allSatisfy(isLowerHexByte)
+    }
+
+    static func isLowerHexByte(_ byte: UInt8) -> Bool {
+        (0x30...0x39).contains(byte) || (0x61...0x66).contains(byte)
     }
 
     /// Decodes UTF-8 only when it round-trips: `TextDecoder('utf-8', { fatal: true })`.
@@ -168,7 +195,8 @@ public struct ColorAssetID: Hashable, Sendable, CustomStringConvertible, Compara
     public let vout: UInt32
 
     public init(txid: String, vout: UInt32) throws {
-        guard txid.utf8.count == 64, txid.allSatisfy({ ("0"..."9").contains($0) || ("a"..."f").contains($0) }) else {
+        // Bytes, not characters: `"1\u{301}"` is one character that sorts between "0" and "9".
+        guard txid.utf8.count == 64, txid.utf8.allSatisfy(ColorIdentifiers.isLowerHexByte) else {
             throw ColorError.invalid("asset ID")
         }
         self.txid = txid
@@ -183,8 +211,8 @@ public struct ColorAssetID: Hashable, Sendable, CustomStringConvertible, Compara
 
     init(txid: String, voutText: String) throws {
         // `(0|[1-9]\d{0,9})` then <= 0xffffffff.
-        guard !voutText.isEmpty, voutText.count <= 10, voutText.allSatisfy({ ("0"..."9").contains($0) }),
-              voutText == "0" || !voutText.hasPrefix("0"),
+        guard !voutText.isEmpty, voutText.utf8.count <= 10, voutText.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
+              voutText == "0" || voutText.utf8.first != 0x30,
               let value = UInt64(voutText), value <= UInt64(UInt32.max) else {
             throw ColorError.invalid("asset ID")
         }
@@ -216,7 +244,12 @@ public enum ColorAssetSelector: Hashable, Sendable, CustomStringConvertible {
 }
 
 public enum ColorError: Error, Equatable, Sendable, LocalizedError {
+    /// `BRC-207: invalid <what>`, where TS says exactly that.
     case invalid(String)
+    /// `BRC-207: <text>`: a TS message that is a whole sentence.
+    case message(String)
+    /// The text alone: a TS message without the `BRC-207: ` prefix.
+    case plain(String)
     case protocolNameTooLong
     case planTooLarge
     case receiptTooLarge
@@ -230,6 +263,8 @@ public enum ColorError: Error, Equatable, Sendable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .invalid(let what): "BRC-207: invalid \(what)"
+        case .message(let text): "BRC-207: \(text)"
+        case .plain(let text): text
         case .protocolNameTooLong: "BRC-207: protocol name exceeds 280 characters"
         case .planTooLarge: "BRC-207: plan exceeds 16 MiB"
         case .receiptTooLarge: "BRC-207: receipt exceeds 1000 bytes"
