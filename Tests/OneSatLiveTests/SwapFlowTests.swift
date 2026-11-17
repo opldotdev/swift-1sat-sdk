@@ -223,7 +223,10 @@ final class SwapFlowTests: LiveTestCase {
             + "\(token.sym) \(before.tokens) -> \(after.tokens)")
         if let buy {
             let samePool = Set(result.legs.map(\.poolId)) == Set(buy.legs.map(\.poolId))
-            if samePool {
+            // Only this run's tokens, sold into the pool output the buy itself made (no trade between).
+            let untouched = result.totalIn == buy.totalOut
+                && result.legs.map { Self.txid(of: $0.poolOutpoint) } == buy.legs.map(\.txid)
+            if samePool && untouched {
                 XCTAssertLessThan(result.totalOut, buy.totalIn,
                     "the sell back through the buy's own pool paid \(result.totalOut) sats for a \(buy.totalIn) sat buy")
             }
@@ -245,6 +248,12 @@ final class SwapFlowTests: LiveTestCase {
             XCTFail("the buy's pool \(leg.poolId) is not listed now")
             return
         }
+        // The row must be the pool output the buy made: another trade into the pool since could
+        // move its price past the round trip's fees.
+        guard Self.txid(of: row.pool.outpoint) == leg.txid else {
+            print("SAME POOL not checked: \(leg.poolId) has traded since the buy (now at \(row.pool.outpoint), the buy made \(leg.txid))")
+            return
+        }
         guard let back = try AMMPricing.computeSwap(row.pool, .tokenToBsv, leg.amountOut) else {
             XCTFail("selling \(leg.amountOut) \(token.sym) back into \(leg.poolId) computes no swap")
             return
@@ -253,6 +262,11 @@ final class SwapFlowTests: LiveTestCase {
             + "(fees lp \(back.liquidityFee) val \(back.validationFee) com \(back.commission)) for a \(leg.amountIn) sat buy")
         XCTAssertLessThan(back.amountOut, leg.amountIn,
             "selling \(leg.amountOut) \(token.sym) back into the buy's own pool pays \(back.amountOut) sats, more than the \(leg.amountIn) the buy paid")
+    }
+
+    /// The txid of an outpoint written `<txid>.<vout>` or `<txid>_<vout>`, lowercase.
+    static func txid(of outpoint: String) -> String {
+        String(outpoint.prefix { $0 != "." && $0 != "_" && $0 != ":" }).lowercased()
     }
 
     /// (b) The recovery pass after the swaps: nothing left to take in, the swap basket empty.
