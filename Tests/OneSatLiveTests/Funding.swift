@@ -116,11 +116,11 @@ enum Funding {
 
     // MARK: Topping up
 
-    /// Makes sure A holds at least `floor`, paying from T. Returns A's balance afterwards.
+    /// Makes sure a wallet (A or S) holds at least `floor`, paying from T. Returns its balance afterwards.
     ///
     /// A sync runs first, so a deposit an earlier top-up left unswept counts before any new
-    /// payment. T tops A up at most once per process (`TopUpBudget`): a second attempt in the same
-    /// run fails rather than paying again.
+    /// payment. T tops each wallet up at most once per process (`TopUpBudget`): a second attempt in
+    /// the same run fails rather than paying again.
     @discardableResult
     static func ensureFunded(_ a: LiveWallet, treasury t: LiveWallet) async throws -> Int64 {
         _ = try await sync(a)
@@ -170,24 +170,25 @@ enum Funding {
     }
 }
 
-/// What T may pay A in one process: one top-up, at most `2 × Funding.floor`.
+/// What T may pay each wallet in one process: one top-up, at most `2 × Funding.floor`.
 actor TopUpBudget {
     static let shared = TopUpBudget()
     static let maximumTopUps = 1
     static let maximumSatoshis = UInt64(2 * Funding.floor)
 
-    private var topUps = 0
-    private var satoshis: UInt64 = 0
+    private var topUps: [String: Int] = [:]
+    private var satoshis: [String: UInt64] = [:]
 
     func spend(_ amount: UInt64, to name: String) throws {
-        guard topUps < Self.maximumTopUps, satoshis + amount <= Self.maximumSatoshis else {
+        let count = topUps[name, default: 0], paid = satoshis[name, default: 0]
+        guard count < Self.maximumTopUps, paid + amount <= Self.maximumSatoshis else {
             throw LiveSetupError(
-                "\(name) needs another top-up of \(amount) sats after \(topUps) this run (\(satoshis) sats); "
-                    + "the run allows \(Self.maximumTopUps) of at most \(Self.maximumSatoshis). An earlier top-up "
+                "\(name) needs another top-up of \(amount) sats after \(count) this run (\(paid) sats); "
+                    + "the run allows \(Self.maximumTopUps) of at most \(Self.maximumSatoshis) per wallet. An earlier top-up "
                     + "may not have arrived; see its RECEIVED or RETRY lines.")
         }
-        topUps += 1
-        satoshis += amount
+        topUps[name] = count + 1
+        satoshis[name] = paid + amount
     }
 }
 

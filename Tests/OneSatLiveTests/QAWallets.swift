@@ -22,8 +22,12 @@ import ToolboxWallet
 /// identity keys and addresses are printed. A local run never reads it: the local stack is a
 /// throwaway database, so it uses the fixed public root below.
 enum QAWallets {
+    /// A: inscribe, send and lifecycle. B: send's counterparty. T: the treasury that tops the
+    /// others up. S: the swap round trip alone, so the funding BEEF a swap sends the exchange
+    /// carries only S's own unconfirmed ancestry, never A's ~180 KB inscriptions (an unconfirmed
+    /// chain of them made the BEEF about 800 KB, and the exchange's validator ran out of fuel).
     enum Role: String, CaseIterable, Sendable {
-        case A, B, T
+        case A, B, T, S
     }
 
     enum WalletSet: String, CaseIterable, Sendable {
