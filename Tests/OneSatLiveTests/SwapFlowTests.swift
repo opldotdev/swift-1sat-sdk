@@ -181,7 +181,7 @@ final class SwapFlowTests: LiveTestCase {
     /// Sells every unit of the token A holds (this run's buy and any an earlier run left), quoted
     /// fresh: done, the tokens gone from A's 1Color basket, the payout in A's sats. False when it
     /// stopped cleanly twice, or A holds none to sell. After a buy that filled, it first checks the
-    /// pool math: selling the bought tokens back into the buy's own pools must return less than the
+    /// pool math: selling the bought tokens back into the buy's own pool must return less than the
     /// buy paid in (`assertSamePoolLoses`). The best-priced sell can still pay more, when another of
     /// the token's pools prices it higher; that is the pools' price gap, and the log says so.
     func sellBack(_ ox: OpenExchange, _ ctx: OneColorContext, _ a: LiveWallet, _ token: OpenExchangeHostedToken, after buy: OpenExchangeSwapResult?) async throws -> Bool {
@@ -233,23 +233,26 @@ final class SwapFlowTests: LiveTestCase {
         return true
     }
 
-    /// Selling what `buy` got back into the buy's own pools, read now, quotes less than the buy
-    /// paid in: one pool's round trip loses its fees and price impact (constant product, as the TS
-    /// engine). Skipped, with a line, when that sell is under the validators' minimum leg.
+    /// Selling what `buy` got back into the buy's own pool, read now, pays less than the buy paid
+    /// in: one pool's round trip loses its fees and price impact. Computed with the contract's own
+    /// math (`AMMPricing.computeSwap`, the TS engine's `computeSwap`) on the pool's current
+    /// reserves, so it runs even when that sell is under the validators' minimum leg.
     func assertSamePoolLoses(_ ox: OpenExchange, _ token: OpenExchangeHostedToken, _ buy: OpenExchangeSwapResult) async throws {
-        let ids = Set(buy.legs.map(\.poolId))
+        XCTAssertEqual(buy.legs.count, 1, "the round trip's buy is quoted for one leg")
+        guard let leg = buy.legs.first else { return }
         let all = try await ox.tokenPools(token.tokenId)
-        let own = OpenExchangePools(market: all.market, pools: all.pools.filter { ids.contains($0.poolId) }, validators: all.validators)
-        XCTAssertEqual(own.pools.count, ids.count, "the buy's pools \(ids.sorted()) are not all listed now")
-        do {
-            let back = try Self.quote(.sell, buy.totalOut, token, own)
-            print("SAME POOL sell \(buy.totalOut) \(token.sym) back into \(ids.sorted()): \(back.amountOut) sats for a \(buy.totalIn) sat buy")
-            XCTAssertLessThan(back.amountOut, buy.totalIn,
-                "selling \(buy.totalOut) \(token.sym) back into the buy's own pools quotes \(back.amountOut) sats, more than the \(buy.totalIn) the buy paid")
-        } catch let error as OpenExchangeError {
-            guard case .belowMinimum = error else { throw error }
-            print("SAME POOL not checked: selling \(buy.totalOut) \(token.sym) back into \(ids.sorted()) is under the minimum leg: \(error.message)")
+        guard let row = all.pools.first(where: { $0.poolId == leg.poolId }) else {
+            XCTFail("the buy's pool \(leg.poolId) is not listed now")
+            return
         }
+        guard let back = try AMMPricing.computeSwap(row.pool, .tokenToBsv, leg.amountOut) else {
+            XCTFail("selling \(leg.amountOut) \(token.sym) back into \(leg.poolId) computes no swap")
+            return
+        }
+        print("SAME POOL sell \(leg.amountOut) \(token.sym) back into \(leg.poolId): \(back.amountOut) sats "
+            + "(fees lp \(back.liquidityFee) val \(back.validationFee) com \(back.commission)) for a \(leg.amountIn) sat buy")
+        XCTAssertLessThan(back.amountOut, leg.amountIn,
+            "selling \(leg.amountOut) \(token.sym) back into the buy's own pool pays \(back.amountOut) sats, more than the \(leg.amountIn) the buy paid")
     }
 
     /// (b) The recovery pass after the swaps: nothing left to take in, the swap basket empty.
