@@ -26,6 +26,22 @@ public enum LegacySweepRunner {
         case run
         /// A 0-sat output.
         case unspendable
+
+        /// The classes a sweep can move, in run order (`sweeper.ts` `SweepClass`).
+        public static let transferable: [SweepClass] = [.bsv, .ordinals, .opns, .bsv20, .bsv21]
+    }
+
+    /// Sweep is disabled only when every class available now is skipped (`sweeper.ts`
+    /// `isSweepAllDisabled`). Comparing counts would strand the button on a stale skip after a
+    /// rescan drops a class.
+    public static func isSweepAllDisabled(available: [SweepClass], skipped: Set<SweepClass>) -> Bool {
+        available.allSatisfy { skipped.contains($0) }
+    }
+
+    /// Show the class skip toggles when there is a choice, or a skip to clear (`sweeper.ts`
+    /// `showClassSkips`).
+    public static func showClassSkips(available: [SweepClass], skipped: Set<SweepClass>) -> Bool {
+        available.count > 1 || !skipped.isEmpty
     }
 
     /// Why an outpoint was not swept.
@@ -56,6 +72,9 @@ public enum LegacySweepRunner {
         case runTransaction
         /// 0 sats.
         case zeroSatoshis
+        /// Its class was skipped for this run (`sweeper.ts` `SweepClassSelection`). It stays on
+        /// the key for a later run.
+        case skipped
     }
 
     public struct Leftover: Equatable, Hashable, Sendable {
@@ -159,8 +178,23 @@ public enum LegacySweepRunner {
         }
     }
 
-    /// The wallet and network work, injected. ``standard(_:beef:checkpoint:)`` wires the SDK's own
-    /// actions.
+    /// The step about to run, for a progress line (`sweeper.ts` `onProgress`). `label` is the one a
+    /// failure of the step carries, e.g. `BSV`, `Ordinals batch 2/3`, `BSV-21 PEPE`.
+    public struct Stage: Equatable, Sendable {
+        public let sweepClass: SweepClass
+        public let label: String
+        /// How many outputs the step spends.
+        public let outputs: Int
+
+        public init(sweepClass: SweepClass, label: String, outputs: Int) {
+            self.sweepClass = sweepClass
+            self.label = label
+            self.outputs = outputs
+        }
+    }
+
+    /// The wallet and network work, injected. ``standard(_:beef:checkpoint:progress:)`` wires the
+    /// SDK's own actions.
     public struct Steps: Sendable {
         /// The merged BEEF for the source transactions of these `txid.vout` outpoints.
         public var beef: @Sendable (_ outpoints: [String]) async throws -> BEEF
@@ -173,6 +207,8 @@ public enum LegacySweepRunner {
         ) async throws -> AssetSweep.SweepBsv21Result
         /// Called before every broadcasting step. A throw stops the run (``Interrupted``).
         public var checkpoint: @Sendable () throws -> Void
+        /// Called as each step starts, before its BEEF is read.
+        public var progress: @Sendable (_ stage: Stage) async -> Void
 
         public init(
             beef: @escaping @Sendable (_ outpoints: [String]) async throws -> BEEF,
@@ -182,7 +218,8 @@ public enum LegacySweepRunner {
             moveBsv21: @escaping @Sendable (
                 _ tokenID: String, _ inputs: [AssetSweep.TokenInput], _ beef: BEEF, _ symbol: String?
             ) async throws -> AssetSweep.SweepBsv21Result,
-            checkpoint: @escaping @Sendable () throws -> Void = {}
+            checkpoint: @escaping @Sendable () throws -> Void = {},
+            progress: @escaping @Sendable (_ stage: Stage) async -> Void = { _ in }
         ) {
             self.beef = beef
             self.fundBsv = fundBsv
@@ -190,6 +227,7 @@ public enum LegacySweepRunner {
             self.moveBsv20 = moveBsv20
             self.moveBsv21 = moveBsv21
             self.checkpoint = checkpoint
+            self.progress = progress
         }
 
         /// `AssetSweep.bsv`, `.ordinals`, `.bsv20` and `.bsv21` on `ctx`. BSV-21 reads the token's
@@ -198,7 +236,8 @@ public enum LegacySweepRunner {
         public static func standard(
             _ ctx: OneSatContext,
             beef: @escaping @Sendable (_ outpoints: [String]) async throws -> BEEF,
-            checkpoint: @escaping @Sendable () throws -> Void = {}
+            checkpoint: @escaping @Sendable () throws -> Void = {},
+            progress: @escaping @Sendable (_ stage: Stage) async -> Void = { _ in }
         ) -> Steps {
             Steps(
                 beef: beef,
@@ -215,7 +254,8 @@ public enum LegacySweepRunner {
                         symbol: details.symbol ?? symbol, decimals: details.decimals
                     )
                 },
-                checkpoint: checkpoint
+                checkpoint: checkpoint,
+                progress: progress
             )
         }
     }
@@ -386,10 +426,28 @@ public enum LegacySweepRunner {
 
     // MARK: - Run
 
-    /// Sweeps one key. Throws only ``Interrupted``, when `steps.checkpoint` throws; every other
-    /// failure is in the returned report.
-    public static func run(_ input: KeyInput, steps: Steps) async throws -> Report {
-        let plan = plan(input)
+    /// The plan with every output of a `skipped` class moved to the leftovers as ``LeftoverReason/skipped``.
+    /// `sweeper.ts` `sweepAllClasses` with a `selection`: a skipped class sweeps nothing. Here what
+    /// it leaves is reported, so the key is kept for it.
+    public static func skipping(_ skipped: Set<SweepClass>, in plan: Plan) -> Plan {
+        guard !skipped.isEmpty else { return plan }
+        var plan = plan
+        func skip(_ sweepClass: SweepClass, _ outputs: [ScannedOutput]) {
+            plan.leftovers += outputs.map { Leftover(sweepClass: sweepClass, outpoint: ref($0), reason: .skipped) }
+        }
+        if skipped.contains(.bsv) { skip(.bsv, plan.funding); plan.funding = [] }
+        if skipped.contains(.ordinals) { skip(.ordinals, plan.ordinals); plan.ordinals = [] }
+        if skipped.contains(.opns) { skip(.opns, plan.opns); plan.opns = [] }
+        if skipped.contains(.bsv20) { skip(.bsv20, plan.bsv20.flatMap { $0.outputs.map(\.output) }); plan.bsv20 = [] }
+        if skipped.contains(.bsv21) { skip(.bsv21, plan.bsv21.flatMap { $0.outputs.map(\.output) }); plan.bsv21 = [] }
+        plan.leftovers.sort { ($0.outpoint.txid, $0.outpoint.vout) < ($1.outpoint.txid, $1.outpoint.vout) }
+        return plan
+    }
+
+    /// Sweeps one key, leaving every class in `skipped` where it is. Throws only ``Interrupted``,
+    /// when `steps.checkpoint` throws; every other failure is in the returned report.
+    public static func run(_ input: KeyInput, steps: Steps, skipping skipped: Set<SweepClass> = []) async throws -> Report {
+        let plan = skipping(skipped, in: plan(input))
         var report = Report()
         report.leftovers = plan.leftovers
         report.locked = plan.locked
@@ -420,6 +478,7 @@ public enum LegacySweepRunner {
         // BSV (`sweepFundingStep`): one action for every funding output.
         if !plan.funding.isEmpty {
             let refs = plan.funding.map(ref)
+            await steps.progress(Stage(sweepClass: .bsv, label: "BSV", outputs: refs.count))
             do {
                 let beef = try await steps.beef(plan.funding.map(outpoint))
                 try checkpoint()
@@ -450,6 +509,7 @@ public enum LegacySweepRunner {
             for (index, batch) in batches.enumerated() {
                 let label = batches.count == 1 ? name : "\(name) batch \(index + 1)/\(batches.count)"
                 let refs = batch.map(ref)
+                await steps.progress(Stage(sweepClass: sweepClass, label: label, outputs: refs.count))
                 do {
                     let beef = try await steps.beef(batch.map(outpoint))
                     try checkpoint()
@@ -475,6 +535,7 @@ public enum LegacySweepRunner {
         for group in plan.bsv20 {
             for batch in AssetSweep.listedBatches(group.outputs, events: { $0.output.events }) {
                 let refs = batch.map { ref($0.output) }
+                await steps.progress(Stage(sweepClass: .bsv20, label: "BSV-20 \(group.tokenID)", outputs: refs.count))
                 do {
                     let beef = try await steps.beef(batch.map { outpoint($0.output) })
                     try checkpoint()
@@ -497,6 +558,7 @@ public enum LegacySweepRunner {
             let name = group.symbol ?? String(group.tokenID.prefix(8))
             for batch in AssetSweep.listedBatches(group.outputs, events: { $0.output.events }) {
                 let refs = batch.map { ref($0.output) }
+                await steps.progress(Stage(sweepClass: .bsv21, label: "BSV-21 \(name)", outputs: refs.count))
                 do {
                     let beef = try await steps.beef(batch.map { outpoint($0.output) })
                     try checkpoint()
