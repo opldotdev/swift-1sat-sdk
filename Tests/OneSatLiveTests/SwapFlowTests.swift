@@ -113,9 +113,9 @@ final class SwapFlowTests: LiveTestCase {
 
         try await cancelledBeforeSend(ox, ctx, a, token, origin: origin)
         let bought = try await buy(ox, ctx, a, token, origin: origin)
-        let sold = try await sellBack(ox, ctx, a, token)
+        let sold = try await sellBack(ox, ctx, a, token, after: bought)
         XCTAssertTrue(
-            bought || sold,
+            bought != nil || sold,
             "neither the buy nor the sell of \(token.sym) filled; each stopped cleanly twice with everything moved back. "
                 + "See the SWAP lines: the exchange's pools at \(origin) took no leg this run."
         )
@@ -156,11 +156,11 @@ final class SwapFlowTests: LiveTestCase {
     }
 
     /// (a) Buy with A, quoted fresh: done, the tokens in A's 1Color basket, the sats spent within
-    /// the quote and fees, each leg's txid recorded. False when it stopped cleanly twice.
-    func buy(_ ox: OpenExchange, _ ctx: OneColorContext, _ a: LiveWallet, _ token: OpenExchangeHostedToken, origin: String) async throws -> Bool {
+    /// the quote and fees, each leg's txid recorded. Its result, or nil when it stopped cleanly twice.
+    func buy(_ ox: OpenExchange, _ ctx: OneColorContext, _ a: LiveWallet, _ token: OpenExchangeHostedToken, origin: String) async throws -> OpenExchangeSwapResult? {
         guard let filled = try await swapWithRetry("buy", ox, ctx, a, token, quote: {
             try await self.roundTrip(ox, token, origin: origin).buy
-        }) else { return false }
+        }) else { return nil }
         let (run, before, after) = filled
         let quote = run.quote
         let result = run.result
@@ -175,13 +175,17 @@ final class SwapFlowTests: LiveTestCase {
         print("BUY \(token.sym) \(token.tokenId): legs \(result.legs.map(\.txid)), \(result.totalIn) sats in, \(result.totalOut) out "
             + "(quoted \(quote.amountOut), min \(quote.minAmountOut)); A sats \(before.sats) -> \(after.sats) (\(spent) spent), "
             + "\(token.sym) \(before.tokens) -> \(after.tokens)")
-        return true
+        return result
     }
 
     /// Sells every unit of the token A holds (this run's buy and any an earlier run left), quoted
     /// fresh: done, the tokens gone from A's 1Color basket, the payout in A's sats. False when it
-    /// stopped cleanly twice, or A holds none to sell.
-    func sellBack(_ ox: OpenExchange, _ ctx: OneColorContext, _ a: LiveWallet, _ token: OpenExchangeHostedToken) async throws -> Bool {
+    /// stopped cleanly twice, or A holds none to sell. After a buy that filled, it first checks the
+    /// pool math: selling the bought tokens back into the buy's own pools must return less than the
+    /// buy paid in (`assertSamePoolLoses`). The best-priced sell can still pay more, when another of
+    /// the token's pools prices it higher; that is the pools' price gap, and the log says so.
+    func sellBack(_ ox: OpenExchange, _ ctx: OneColorContext, _ a: LiveWallet, _ token: OpenExchangeHostedToken, after buy: OpenExchangeSwapResult?) async throws -> Bool {
+        if let buy { try await assertSamePoolLoses(ox, token, buy) }
         let asset = try ColorAssetID(token.tokenId)
         guard try await OneColorActions.balance(ctx, assetID: asset) > 0 else {
             print("SELL nothing: \(a.name) holds no \(token.sym)")
@@ -217,7 +221,35 @@ final class SwapFlowTests: LiveTestCase {
         print("SELL \(token.sym) \(token.tokenId): legs \(result.legs.map(\.txid)), \(result.totalIn) \(token.sym) in, \(result.totalOut) sats out "
             + "(quoted \(quote.amountOut), min \(quote.minAmountOut)); A sats \(before.sats) -> \(after.sats) (\(gained) gained), "
             + "\(token.sym) \(before.tokens) -> \(after.tokens)")
+        if let buy {
+            let samePool = Set(result.legs.map(\.poolId)) == Set(buy.legs.map(\.poolId))
+            if samePool {
+                XCTAssertLessThan(result.totalOut, buy.totalIn,
+                    "the sell back through the buy's own pool paid \(result.totalOut) sats for a \(buy.totalIn) sat buy")
+            }
+            print("ROUND TRIP \(buy.totalIn) sats -> \(buy.totalOut) \(token.sym) -> \(result.totalOut) sats; buy pools \(buy.legs.map(\.poolId)), "
+                + "sell pools \(result.legs.map(\.poolId))" + (samePool ? " (same pool)" : " (a different pool: the gain is the gap between the pools' prices)"))
+        }
         return true
+    }
+
+    /// Selling what `buy` got back into the buy's own pools, read now, quotes less than the buy
+    /// paid in: one pool's round trip loses its fees and price impact (constant product, as the TS
+    /// engine). Skipped, with a line, when that sell is under the validators' minimum leg.
+    func assertSamePoolLoses(_ ox: OpenExchange, _ token: OpenExchangeHostedToken, _ buy: OpenExchangeSwapResult) async throws {
+        let ids = Set(buy.legs.map(\.poolId))
+        let all = try await ox.tokenPools(token.tokenId)
+        let own = OpenExchangePools(market: all.market, pools: all.pools.filter { ids.contains($0.poolId) }, validators: all.validators)
+        XCTAssertEqual(own.pools.count, ids.count, "the buy's pools \(ids.sorted()) are not all listed now")
+        do {
+            let back = try Self.quote(.sell, buy.totalOut, token, own)
+            print("SAME POOL sell \(buy.totalOut) \(token.sym) back into \(ids.sorted()): \(back.amountOut) sats for a \(buy.totalIn) sat buy")
+            XCTAssertLessThan(back.amountOut, buy.totalIn,
+                "selling \(buy.totalOut) \(token.sym) back into the buy's own pools quotes \(back.amountOut) sats, more than the \(buy.totalIn) the buy paid")
+        } catch let error as OpenExchangeError {
+            guard case .belowMinimum = error else { throw error }
+            print("SAME POOL not checked: selling \(buy.totalOut) \(token.sym) back into \(ids.sorted()) is under the minimum leg: \(error.message)")
+        }
     }
 
     /// (b) The recovery pass after the swaps: nothing left to take in, the swap basket empty.
