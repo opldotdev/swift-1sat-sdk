@@ -38,8 +38,10 @@ final class SwapFlowTests: LiveTestCase {
     /// What the staging and move-back actions may cost in miner fees between them.
     static let actionFees: Int64 = 2_000
     /// The most sats one leg may put in: the run fails, before spending, when the exchange's
-    /// smallest round trip needs more.
-    static let maxLegSats = BigInt(10_000)
+    /// smallest round trip needs more. Testnet validators take legs of 100,000 sats or more, so
+    /// the cap sits above that; the sell back returns most of it, leaving a few thousand in fees.
+    /// It stays under `Funding.floor` so one top-up covers the round trip.
+    static let maxLegSats = BigInt(150_000)
     /// A swap run is cancelled before its next leg after this long.
     static let softDeadline: TimeInterval = 150
     /// A swap run that has not returned by now is cancelled outright and fails.
