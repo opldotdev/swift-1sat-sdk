@@ -67,6 +67,162 @@ public enum AssetSweep {
         }
     }
 
+    /// `SWEEP_BATCH_SIZE` (`@1sat/actions` `sweep/types.ts`): ordinals and OpNS names per
+    /// transaction in the CLI, sweep-ui and Yours.
+    public static let batchSize = 25
+
+    /// One plain-BSV output held by a legacy key.
+    public struct FundingInput: Sendable {
+        public let outpoint: String
+        public let satoshis: UInt64
+        public let lockingScript: [UInt8]
+        public let key: PrivateKey
+
+        public init(outpoint: String, satoshis: UInt64, lockingScript: [UInt8], key: PrivateKey) {
+            self.outpoint = outpoint
+            self.satoshis = satoshis
+            self.lockingScript = lockingScript
+            self.key = key
+        }
+    }
+
+    /// Sweeps legacy BSV into the destination wallet as a wallet action (`sweepBsv`,
+    /// `@1sat/actions` `sweep/index.ts`).
+    ///
+    /// A full sweep has no explicit outputs: the wallet's own change absorbs the value (less the
+    /// fee) under its own derivation, so it can fund the asset sweeps that follow in the same run.
+    /// With `amount` below the input total, one P2PKH output returns `total - amount` to the
+    /// first input's address and the change receives `amount - fee`.
+    ///
+    /// `Sweep.build`, a raw transaction to an address, is unchanged and still available.
+    public static func bsv(
+        _ ctx: OneSatContext,
+        inputs: [FundingInput],
+        inputBEEF: BEEF,
+        amount: UInt64? = nil
+    ) async -> ActionResult {
+        do {
+            let plan: BsvPlan
+            switch try bsvPlan(ctx, inputs: inputs, inputBEEF: inputBEEF, amount: amount) {
+            case .failure(let reason): return ActionResult.failure(reason)
+            case .ready(let ready): plan = ready
+            }
+            let keyMap = plan.keysByOutpoint
+            return try await TrackedAction.execute(
+                ctx,
+                description: plan.description,
+                inputBEEF: inputBEEF,
+                inputs: plan.inputs,
+                outputs: plan.outputs,
+                options: TrackedAction.Options(randomizeOutputs: false),
+                sign: { tx in
+                    try signLegacyInputs(transaction: tx, keysByOutpoint: keyMap, inputBEEF: inputBEEF)
+                }
+            )
+        } catch let error as OneSatActionError {
+            return ActionResult.failure(error)
+        } catch {
+            return ActionResult.failure(describing: error)
+        }
+    }
+
+    /// The `createAction` request ``bsv(_:inputs:inputBEEF:amount:)`` sends.
+    struct BsvPlan {
+        let description: String
+        let inputs: [WalletCreateActionInput]
+        let outputs: [WalletCreateActionOutput]
+        let keysByOutpoint: [String: PrivateKey]
+    }
+
+    enum BsvPlanResult {
+        case ready(BsvPlan)
+        /// TS's error strings: `no-inputs`, `invalid-amount`, `insufficient-funds`.
+        case failure(String)
+    }
+
+    static func bsvPlan(
+        _ ctx: OneSatContext,
+        inputs: [FundingInput],
+        inputBEEF: BEEF,
+        amount: UInt64?
+    ) throws -> BsvPlanResult {
+        guard let first = inputs.first else { return .failure("no-inputs") }
+        var inputTotal: UInt64 = 0
+        for input in inputs {
+            let (sum, overflow) = inputTotal.addingReportingOverflow(input.satoshis)
+            guard !overflow else { throw SweepError.amountsOverflow }
+            inputTotal = sum
+        }
+        if let amount {
+            guard amount > 0 else { return .failure("invalid-amount") }
+            guard amount <= inputTotal else { return .failure("insufficient-funds") }
+        }
+        let partial: UInt64? = amount.flatMap { $0 < inputTotal ? $0 : nil }
+
+        let sources = try sourceOutputs(inputBEEF)
+        var createInputs: [WalletCreateActionInput] = []
+        var keysByOutpoint: [String: PrivateKey] = [:]
+        for (index, input) in inputs.enumerated() {
+            let parsed = try parseOutpoint(input.outpoint)
+            guard let source = sources[parsed.description] else {
+                throw OneSatActionError.missingSourceTransaction(inputIndex: index)
+            }
+            keysByOutpoint[parsed.description] = input.key
+            keysByOutpoint[parsed.ordinalDescription] = input.key
+            createInputs.append(
+                try WalletCreateActionInput(
+                    outpoint: parsed,
+                    inputDescription: "Legacy BSV \(input.outpoint)",
+                    unlockingScriptLength: legacyUnlockingScriptLength(source),
+                    sequenceNumber: 0xffff_ffff
+                )
+            )
+        }
+
+        var outputs: [WalletCreateActionOutput] = []
+        if let partial {
+            let sourceAddress = Address(publicKey: first.key.publicKey, network: ctx.chain.network)
+            outputs.append(
+                try WalletCreateActionOutput(
+                    lockingScript: try ActionScript.payToPublicKeyHash(sourceAddress).bytes,
+                    satoshis: inputTotal - partial,
+                    outputDescription: "Return to legacy address"
+                )
+            )
+        }
+        let plural = inputs.count == 1 ? "" : "s"
+        let description = partial.map { "Sweep \($0) sats from \(inputs.count) legacy BSV UTXO\(plural)" }
+            ?? "Sweep \(inputs.count) legacy BSV UTXO\(plural)"
+        return .ready(BsvPlan(
+            description: description, inputs: createInputs, outputs: outputs, keysByOutpoint: keysByOutpoint
+        ))
+    }
+
+    /// `scan.ts` `isListedOutput`: an OrdLock v2 listing (`ordlock2` tag) or a `list:` event.
+    public static func isListed(events: [String]) -> Bool {
+        events.contains(OneSatConstants.ordlockV2Tag) || events.contains(where: { $0.hasPrefix("list:") })
+    }
+
+    /// `scan.ts` `bsv21SweepBatches` / `bsv20SweepBatches`: each listed output in its own batch
+    /// (so one invalid listing cannot sink the rest), then every unlisted output together.
+    public static func listedBatches<T>(_ items: [T], events: (T) -> [String]) -> [[T]] {
+        var batches: [[T]] = []
+        var unlisted: [T] = []
+        for item in items {
+            if isListed(events: events(item)) { batches.append([item]) } else { unlisted.append(item) }
+        }
+        if !unlisted.isEmpty { batches.append(unlisted) }
+        return batches
+    }
+
+    /// Splits `items` into runs of at most `size` (sweep-ui `chunk`).
+    public static func batches<T>(_ items: [T], size: Int = batchSize) -> [[T]] {
+        precondition(size > 0, "batch size must be positive")
+        return stride(from: 0, to: items.count, by: size).map {
+            Array(items[$0..<Swift.min($0 + size, items.count)])
+        }
+    }
+
     /// Transfers each 1-sat inscription to a P1SAT address keyed by its outpoint.
     public static func ordinals(
         _ ctx: OneSatContext,

@@ -92,4 +92,52 @@ final class SweepPlanTests: XCTestCase {
         XCTAssertTrue(plan.fundable.isEmpty)
         XCTAssertEqual(plan.remaining.bsv21.first?.tokenID, "gold")
     }
+
+    // MARK: - G3 untagged 1-sat / 0-sat (`scan.ts` `categorizeOutputs`)
+
+    func test_untaggedOneSatIsAnOrdinalAndZeroSatIsSkipped() {
+        let plan = SweepPlan.from(scan: [
+            out(0, sats: 1),
+            out(1, sats: 0),
+            out(2, sats: 2),
+            out(3, sats: 546, events: ["insc", "type:image/png"]),
+        ])
+        XCTAssertEqual(out(0, sats: 1).kind, .ordinal)
+        XCTAssertEqual(out(1, sats: 0).kind, .unspendable)
+        XCTAssertEqual(plan.fundable.map(\.vout), [2], "only above 1 sat funds")
+        XCTAssertEqual(plan.remaining.ordinals.map(\.vout), [0, 3], "a tagged 546-sat inscription stays an ordinal")
+        XCTAssertEqual(plan.remaining.skipped.map(\.vout), [1])
+        XCTAssertFalse(plan.remaining.isEmpty)
+    }
+
+    // MARK: - G14 token signals
+
+    func test_tickOrBsv20MimeEventIsABsv20TokenNotAnOrdinal() {
+        XCTAssertEqual(out(0, sats: 1, events: ["1sat", "tick:PEPE"]).kind, .bsv20(tick: "PEPE"))
+        XCTAssertEqual(out(0, sats: 1, events: ["1sat", "insc", "type:application/bsv-20"]).kind, .bsv20(tick: nil))
+        XCTAssertEqual(out(0, sats: 1, events: ["tick:"]).kind, .ordinal, "an empty tick is no tick")
+        XCTAssertEqual(out(0, sats: 1, events: ["bsv21:x", "tick:PEPE"]).kind, .bsv21(tokenID: "x"))
+        XCTAssertEqual(out(0, sats: 1, events: ["lock:5", "tick:PEPE"]).kind, .locked(until: 5), "lock before BSV-20 as in TS")
+        let plan = SweepPlan.from(scan: [out(0, sats: 1, events: ["tick:PEPE"]), out(1, sats: 1000, events: ["type:application/bsv-20"])])
+        XCTAssertTrue(plan.fundable.isEmpty)
+        XCTAssertTrue(plan.remaining.ordinals.isEmpty)
+        XCTAssertEqual(plan.remaining.bsv20.map(\.vout), [0, 1])
+    }
+
+    // MARK: - G4 RUN
+
+    func test_aRunSourceHoldsBackWouldBeFunding() {
+        let run = ScannedOutput(
+            txid: String(repeating: "1", count: 64), vout: 0, satoshis: 5_000, lockingScript: [0x76],
+            events: [], sourceHasRunOutput: true
+        )
+        XCTAssertEqual(run.kind, .run)
+        let plan = SweepPlan.from(scan: [run, out(1, sats: 5_000)])
+        XCTAssertEqual(plan.fundable.map(\.vout), [1])
+        XCTAssertEqual(plan.remaining.run.map(\.vout), [0])
+        XCTAssertFalse(plan.remaining.isEmpty)
+        XCTAssertTrue(ScannedOutput.hasRunPrefix([0x00, 0x6a, 0x03, 0x72, 0x75, 0x6e, 0x05]))
+        XCTAssertFalse(ScannedOutput.hasRunPrefix([0x00, 0x6a, 0x03, 0x72, 0x75]), "one byte short is not RUN")
+        XCTAssertFalse(ScannedOutput.hasRunPrefix([0x6a, 0x03, 0x72, 0x75, 0x6e, 0x00]))
+    }
 }

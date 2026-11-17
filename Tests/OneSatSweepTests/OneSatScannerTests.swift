@@ -182,15 +182,81 @@ final class OneSatScannerTests: XCTestCase {
         XCTAssertThrowsError(try OneSatScanner.parse(sse: Array(failed.utf8)))
     }
 
+    /// G7: the owner read asks the indexer to sync the address first, and sync frames before the
+    /// outputs do not disturb the parse.
+    func test_scanAsksForARefreshAndReadsPastSyncFrames() async throws {
+        let script = try Script.payToPublicKeyHash(Address(address).publicKeyHash, maximumByteCount: 10_000)
+        let source = Transaction(version: 1, inputs: [], outputs: [
+            TransactionOutput(satoshis: 7_000, lockingScript: script),
+        ], lockTime: 0)
+        let txid = try source.transactionID(limits: Sweep.defaultLimits).displayHex
+        let rows = """
+            event: sync
+            data: {"phase":"fetch","owner":"\(address)"}
+
+            event: sync
+            data: {"phase":"ingest","total":2,"processed":1,"owner":"\(address)"}
+
+            event: txo
+            data: {"outpoint":"\(txid).0","satoshis":7000,"events":[]}
+
+            event: done
+            data: {}
+
+            """
+        let http = SourceHTTP(stream: Array(rows.utf8), raw: try source.serialized(limits: Sweep.defaultLimits))
+        let outputs = try await OneSatScanner(http: http).scan(address: address)
+        XCTAssertEqual(outputs.map(\.kind), [.fundable])
+        let urls = await http.urls
+        let query = try XCTUnwrap(URLComponents(url: urls[0], resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertTrue(query.contains(URLQueryItem(name: "refresh", value: "true")))
+        XCTAssertTrue(query.contains(URLQueryItem(name: "limit", value: "10000")))
+
+        let syncOnly = rows.components(separatedBy: "event: txo")[0]
+        XCTAssertThrowsError(try OneSatScanner.parse(sse: Array(syncOnly.utf8)), "sync without done is incomplete")
+    }
+
+    /// G4: a funding output whose source transaction has a RUN output anywhere is held back.
+    func test_aRunOutputInTheSourceTransactionHoldsBackItsFunding() async throws {
+        let script = try Script.payToPublicKeyHash(Address(address).publicKeyHash, maximumByteCount: 10_000)
+        func source(_ marker: [UInt8]) throws -> Transaction {
+            Transaction(version: 1, inputs: [], outputs: [
+                TransactionOutput(satoshis: 9_000, lockingScript: script),
+                TransactionOutput(satoshis: 0, lockingScript: try Script(bytes: marker, maximumByteCount: 100)),
+            ], lockTime: 0)
+        }
+        for (marker, expected) in [
+            (ScannedOutput.runPrefix + [0x01, 0x05], AssetKind.run),
+            (Array(ScannedOutput.runPrefix.dropLast()), AssetKind.fundable),
+        ] {
+            let tx = try source(marker)
+            let txid = try tx.transactionID(limits: Sweep.defaultLimits).displayHex
+            let rows = """
+                event: txo
+                data: {"outpoint":"\(txid).0","satoshis":9000}
+
+                event: done
+                data: {}
+
+                """
+            let http = SourceHTTP(stream: Array(rows.utf8), raw: try tx.serialized(limits: Sweep.defaultLimits))
+            let outputs = try await OneSatScanner(http: http).scan(address: address)
+            XCTAssertEqual(outputs.map(\.kind), [expected])
+            XCTAssertEqual(outputs[0].sourceHasRunOutput, expected == .run)
+        }
+    }
+
     private actor SourceHTTP: HTTPGet {
         let stream: [UInt8]
         let raw: [UInt8]
         private(set) var paths: [String] = []
+        private(set) var urls: [URL] = []
 
         init(stream: [UInt8], raw: [UInt8]) { self.stream = stream; self.raw = raw }
 
         func get(_ url: URL) async throws -> (status: Int, body: [UInt8]) {
             paths.append(url.path)
+            urls.append(url)
             return (200, url.path.hasSuffix("/txos") ? stream : raw)
         }
     }
