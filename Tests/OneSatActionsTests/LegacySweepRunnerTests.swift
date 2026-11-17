@@ -237,6 +237,62 @@ final class LegacySweepRunnerTests: XCTestCase {
         XCTAssertEqual(merged.failures.count, 1)
     }
 
+    // MARK: - Class skips (`sweeper.ts` `SweepClassSelection`)
+
+    func test_aSkippedClassRunsNoStepAndItsOutputsStayAsSkipped() async throws {
+        let recorder = Recorder()
+        let input = try keyInput(
+            [
+                out(0, sats: 5_000),
+                out(1, sats: 1, events: ["1sat"]),
+                out(2, sats: 1, events: ["1sat", "type:application/op-ns"]),
+                out(3, sats: 1, events: ["bsv21"]),
+            ],
+            tokens: listing([token(3, amount: 9, kind: .bsv21)], unreadable: [])
+        )
+        let report = try await LegacySweepRunner.run(input, steps: steps(recorder), skipping: [.ordinals, .bsv21])
+        XCTAssertEqual(report.bsvTxids, ["bsv-1"])
+        XCTAssertEqual(report.opnsTxids, ["ord-1"])
+        XCTAssertTrue(report.ordinalTxids.isEmpty)
+        XCTAssertTrue(report.bsv21Txids.isEmpty)
+        XCTAssertEqual(report.leftovers, [leftover(.ordinals, 1, .skipped), leftover(.bsv21, 3, .skipped)])
+        XCTAssertTrue(report.failures.isEmpty)
+        let calls = await recorder.calls
+        XCTAssertEqual(calls.filter { $0.step != "beef" }.map(\.step), ["bsv", "ordinals"])
+        XCTAssertEqual(calls.filter { $0.step == "ordinals" }.map(\.outpoints), [[op(2)]])
+    }
+
+    func test_noSkipsLeavesThePlanAsItWas() throws {
+        let input = try keyInput([out(0, sats: 5_000), out(1, sats: 1, events: ["1sat"])])
+        let plan = LegacySweepRunner.plan(input)
+        XCTAssertEqual(LegacySweepRunner.skipping([], in: plan), plan)
+    }
+
+    func test_sweepAllIsDisabledOnlyWhenEveryAvailableClassIsSkipped() {
+        XCTAssertFalse(LegacySweepRunner.isSweepAllDisabled(available: [.bsv, .ordinals], skipped: [.bsv]))
+        XCTAssertTrue(LegacySweepRunner.isSweepAllDisabled(available: [.bsv, .ordinals], skipped: [.bsv, .ordinals]))
+        // A stale skip of a class the rescan dropped does not strand the button.
+        XCTAssertFalse(LegacySweepRunner.isSweepAllDisabled(available: [.bsv], skipped: [.ordinals]))
+        XCTAssertTrue(LegacySweepRunner.showClassSkips(available: [.bsv, .bsv21], skipped: []))
+        XCTAssertFalse(LegacySweepRunner.showClassSkips(available: [.bsv], skipped: []))
+        XCTAssertTrue(LegacySweepRunner.showClassSkips(available: [.bsv], skipped: [.opns]))
+    }
+
+    // MARK: - Progress
+
+    func test_progressNamesEveryStepBeforeItRuns() async throws {
+        let recorder = Recorder()
+        let stages = StageLog()
+        let input = try keyInput((0..<30).map { out(UInt32($0), sats: 1, events: ["1sat"]) } + [out(40, sats: 900)])
+        var steps = steps(recorder)
+        steps.progress = { await stages.append($0) }
+        _ = try await LegacySweepRunner.run(input, steps: steps)
+        let logged = await stages.stages
+        XCTAssertEqual(logged.map(\.label), ["BSV", "Ordinals batch 1/2", "Ordinals batch 2/2"])
+        XCTAssertEqual(logged.map(\.outputs), [1, 25, 5])
+        XCTAssertEqual(logged.map(\.sweepClass), [.bsv, .ordinals, .ordinals])
+    }
+
     // MARK: - Fixture
 
     private let txid = String(repeating: "ab", count: 32)
@@ -313,6 +369,11 @@ final class LegacySweepRunnerTests: XCTestCase {
             }
         )
     }
+}
+
+private actor StageLog {
+    private(set) var stages: [LegacySweepRunner.Stage] = []
+    func append(_ stage: LegacySweepRunner.Stage) { stages.append(stage) }
 }
 
 private actor Recorder {
