@@ -4,8 +4,8 @@ import FoundationNetworking
 #endif
 
 /// Sees the process's URL loading requests and refuses any to a host outside the backend's
-/// allowlist (storage and the 1Sat API), so a flow that strays to another host, mainnet or new,
-/// fails instead of spending or reading there.
+/// allowlist (storage, the 1Sat API and, on testnet, Open Exchange), so a flow that strays to
+/// another host, mainnet or new, fails instead of spending or reading there.
 ///
 /// Registered with `URLProtocol.registerClass`. It answers `canInit` for every request (that is
 /// where it records the host) and takes over only a refused one; every other request goes on to
@@ -14,8 +14,9 @@ import FoundationNetworking
 /// Reach: a registered protocol is consulted by `URLSession.shared` only. A session built from its
 /// own configuration (swift-sdk's BSVNetwork transports, `OneSatAMM.OpenExchange`) does not see
 /// it, so the guard covers what the flows call through `.shared` (the toolbox storage client and
-/// the SDK's 1Sat API clients) and the preflight, which names it in its configuration. Teardown
-/// checks that storage was seen and that every host seen is on the allowlist.
+/// the SDK's 1Sat API clients) and the sessions that name it in their configuration
+/// (`guardedSession`: the preflight, the swap flow's exchange transport and 1Color submit).
+/// Teardown checks that storage was seen and that every host seen is on the allowlist.
 final class HostGuard: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var seen: [String: Int] = [:]

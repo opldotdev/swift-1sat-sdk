@@ -17,8 +17,9 @@ import FoundationNetworking
 ///   `ONESAT_LOCAL_URL` (default `http://127.0.0.1:18199`). Real TS storage server, stub chain;
 ///   the stack also serves the 1sat-stack reads the SDK makes, so one URL is both.
 /// - `testnet`: the hosted testnet servers the app uses (`ChainEndpoints.for(.test)`): storage at
-///   `https://testnet.wallet.1sat.app`, the 1Sat API at `OneSatAPI.testnetURL`. Broadcast is
-///   real, done by storage as for any app send.
+///   `https://testnet.wallet.1sat.app`, the 1Sat API at `OneSatAPI.testnetURL`, and Open Exchange
+///   (the swap app and the 1Color overlay) at `https://testnet.openex.dev`. Broadcast is real,
+///   done by storage as for any app send.
 ///
 /// Unset, every live test skips.
 struct Backend: Sendable {
@@ -33,6 +34,9 @@ struct Backend: Sendable {
     let storage: URL
     /// The 1sat-stack API base: owner sync, BEEF, chain tip.
     let services: URL
+    /// Open Exchange: the swap app and the chain's 1Color overlay (`ChainEndpoints.colorOverlay`),
+    /// one origin. Nil on the local stack, which serves no exchange.
+    let exchange: URL?
 
     var allowsInsecureTransport: Bool { kind == .local }
 
@@ -40,6 +44,7 @@ struct Backend: Sendable {
     static let localURLKey = "ONESAT_LOCAL_URL"
     static let defaultLocalURL = URL(string: "http://127.0.0.1:18199")!
     static let testnetStorage = URL(string: "https://testnet.wallet.1sat.app")!
+    static let testnetExchange = URL(string: "https://testnet.openex.dev")!
 
     /// The backend `ONESAT_LIVE` names. Skips the test when it is unset; an unknown value fails.
     static func current(
@@ -59,23 +64,41 @@ struct Backend: Sendable {
             } else {
                 url = defaultLocalURL
             }
-            return Backend(kind: .local, chain: .test, storage: url, services: url)
+            return Backend(kind: .local, chain: .test, storage: url, services: url, exchange: nil)
         case .testnet:
             return Backend(
                 kind: .testnet,
                 chain: .test,
                 storage: testnetStorage,
-                services: OneSatAPI.baseURL(for: .testnet)
+                services: OneSatAPI.baseURL(for: .testnet),
+                exchange: testnetExchange
             )
         case nil:
             throw LiveSetupError("\(environmentKey)=\(raw) is not a backend; use local or testnet.")
         }
     }
 
-    /// The only hosts a run may contact: storage and the 1Sat API.
+    /// The only hosts a run may contact: storage, the 1Sat API and, on testnet, Open Exchange.
     var allowedHosts: Set<String> {
-        Set([storage.host, services.host].compactMap { $0?.lowercased() })
+        Set([storage.host, services.host, exchange?.host].compactMap { $0?.lowercased() })
     }
+}
+
+/// A session the host guard is named on, so it sees (and can refuse) this session's requests on
+/// every platform, with a per-request and a whole-resource timeout. `fresh` also skips the URL
+/// cache, as `OpenExchange.freshTransport` does.
+func guardedSession(requestTimeout: TimeInterval, resourceTimeout: TimeInterval, fresh: Bool = false) -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    if fresh {
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+    }
+    configuration.timeoutIntervalForRequest = requestTimeout
+    configuration.timeoutIntervalForResource = resourceTimeout
+    // A configured session does not consult registered protocols on every platform; name the
+    // guard so its requests are seen and checked too.
+    configuration.protocolClasses = [HostGuard.self] + (configuration.protocolClasses ?? [])
+    return URLSession(configuration: configuration)
 }
 
 /// A setup failure the suite reports as a failed test with this text, never a skip.
@@ -126,13 +149,7 @@ actor Preflight {
     static let timeout: TimeInterval = 20
 
     static func session() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = timeout * 2
-        // A configured session does not consult registered protocols on every platform; name the
-        // guard so the preflight's own requests are seen and checked too.
-        configuration.protocolClasses = [HostGuard.self] + (configuration.protocolClasses ?? [])
-        return URLSession(configuration: configuration)
+        guardedSession(requestTimeout: timeout, resourceTimeout: timeout * 2)
     }
 
     private static func run(_ backend: Backend) async throws -> Report {
