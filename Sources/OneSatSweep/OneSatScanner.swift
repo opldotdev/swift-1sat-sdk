@@ -43,7 +43,11 @@ public struct OneSatScanner: AssetScanner {
 
         guard let url = URL(
             // Defaults on the endpoint already give unspent-only, satoshis, events and block.
-            string: "\(baseURL.absoluteString)/1sat/owner/\(address)/txos?limit=\(limit)&unspent=true&sats=true&events=true&spend=true"
+            // `refresh=true` asks the indexer to sync the address first (`scan.ts` `scanAddress`,
+            // `owner.getTxos(address, { refresh: true })`). Checked against api.1sat.app on
+            // Nov 17: with `limit` set the stream is sync frames, then every txo, then `done`, so
+            // one request does what TS does in two.
+            string: "\(baseURL.absoluteString)/1sat/owner/\(address)/txos?limit=\(limit)&unspent=true&sats=true&events=true&spend=true&refresh=true"
         ) else {
             throw AssetScannerError.unreadableResponse
         }
@@ -62,6 +66,7 @@ public struct OneSatScanner: AssetScanner {
             throw AssetScannerError.unreadableResponse
         }
         var transactions: [String: Transaction] = [:]
+        var runTransactions: Set<String> = []
         var resolved: [ScannedOutput] = []
         for output in scanned {
             let transaction: Transaction
@@ -85,6 +90,12 @@ public struct OneSatScanner: AssetScanner {
                     throw AssetScannerError.unreadableResponse
                 }
                 transactions[output.txid] = transaction
+                // `scan.ts` `detectRunTransactions`: any output of the source starting with the
+                // RUN prefix holds back its funding outputs. A failed fetch already throws above;
+                // TS would sweep such an output, we do not.
+                if transaction.outputs.contains(where: { ScannedOutput.hasRunPrefix($0.lockingScript.bytes) }) {
+                    runTransactions.insert(output.txid)
+                }
             }
             guard transaction.outputs.indices.contains(Int(output.vout)) else {
                 OneSatLog.error(
@@ -103,7 +114,8 @@ public struct OneSatScanner: AssetScanner {
             }
             resolved.append(ScannedOutput(
                 txid: output.txid, vout: output.vout, satoshis: source.satoshis,
-                lockingScript: source.lockingScript.bytes, events: output.events
+                lockingScript: source.lockingScript.bytes, events: output.events,
+                sourceHasRunOutput: runTransactions.contains(output.txid)
             ))
         }
         return resolved

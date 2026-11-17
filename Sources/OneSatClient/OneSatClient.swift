@@ -30,23 +30,49 @@ public struct OneSatClient: Sendable {
     }
 
     /// Token outputs are grouped so a wallet can render one balance per BSV-21 token id.
+    ///
+    /// An output whose amount cannot be read is left out of the sum and listed by
+    /// ``unreadableTokenOutputs(forAddress:)`` instead; ``tokenInventory(forAddress:)`` returns
+    /// both from one request. A balance that overflows still throws.
     public func tokenBalances(forAddress address: String) async throws -> [TokenBalance] {
+        try await tokenInventory(forAddress: address).balances
+    }
+
+    /// Token outputs whose amount cannot be read (`@1sat/actions` `scan.ts` leaves them out of
+    /// a sweep). A wallet reports them as kept rather than failing the whole read.
+    public func unreadableTokenOutputs(forAddress address: String) async throws -> [OutputRef] {
+        try await tokenInventory(forAddress: address).unreadable
+    }
+
+    /// Token balances and the token outputs left out of them, from one owner-stream request.
+    public func tokenInventory(forAddress address: String) async throws -> TokenInventory {
         let outputs = try await outputs(forAddress: address)
+        let inventory = try Self.tokenInventory(from: outputs)
+        return TokenInventory(
+            balances: inventory.balances, unreadable: inventory.unreadable, outputs: Self.tokenOutputs(from: outputs)
+        )
+    }
+
+    private static func tokenInventory(from outputs: [IndexedOutput]) throws -> TokenInventory {
         var balances: [String: TokenAccumulator] = [:]
         var tokenOrder: [String] = []
+        var unreadable: [OutputRef] = []
 
         for output in outputs {
             guard let tokenID = output.tokenID else { continue }
             let tokenAmount: UInt64
             if let parsed = output.tokenAmount {
                 tokenAmount = parsed
-            } else if output.hasBsv21Event {
+            } else {
+                // Logged and listed, not thrown: one unreadable output must not hide the rest
+                // (`scan.ts` `groupBsv21Tokens` omits an output with no amount).
                 OneSatLog.error(
-                    "OneSatClient.tokenBalances: \(output.txid).\(output.vout) has a BSV-21 event but no readable amount",
+                    "OneSatClient.tokenBalances: \(output.txid).\(output.vout) (token \(tokenID)) has no readable amount; it is listed as unreadable",
                     category: OneSatClientHTTP.category
                 )
-                throw OneSatClientError.unreadableResponse
-            } else {
+                unreadable.append(OutputRef(txid: output.txid, vout: output.vout))
+                // A BSV-20 output without an amount kept its zero row before; keep that.
+                guard !output.hasBsv21Event else { continue }
                 tokenAmount = 0
             }
 
@@ -76,7 +102,7 @@ public struct OneSatClient: Sendable {
             balances[tokenID] = balance
         }
 
-        return try tokenOrder.map { tokenID in
+        let rows = try tokenOrder.map { tokenID in
             guard let balance = balances[tokenID] else {
                 throw OneSatClientError.unreadableResponse
             }
@@ -88,11 +114,16 @@ public struct OneSatClient: Sendable {
                 kind: balance.kind
             )
         }
+        return TokenInventory(balances: rows, unreadable: unreadable)
     }
 
     /// One token UTXO at a time so a sweep can rebuild a transfer.
     public func tokenOutputs(forAddress address: String) async throws -> [TokenOutput] {
-        try await outputs(forAddress: address).compactMap { output in
+        Self.tokenOutputs(from: try await outputs(forAddress: address))
+    }
+
+    private static func tokenOutputs(from outputs: [IndexedOutput]) -> [TokenOutput] {
+        outputs.compactMap { output in
             guard output.isToken,
                   let tokenID = output.tokenID,
                   let amount = output.tokenAmount
@@ -261,6 +292,23 @@ public struct TokenBalance: Equatable, Sendable {
     }
 }
 
+/// One read of an address's tokens: the balances, each readable token UTXO, and the outputs left
+/// out because their amount could not be read.
+public struct TokenInventory: Equatable, Sendable {
+    public let balances: [TokenBalance]
+    /// Token outputs with no readable amount. They are not in `balances` (BSV-21) or count as 0
+    /// there (BSV-20, as before), and a sweep cannot move them.
+    public let unreadable: [OutputRef]
+    /// The same rows as ``OneSatClient/tokenOutputs(forAddress:)``.
+    public let outputs: [TokenOutput]
+
+    public init(balances: [TokenBalance], unreadable: [OutputRef], outputs: [TokenOutput] = []) {
+        self.balances = balances
+        self.unreadable = unreadable
+        self.outputs = outputs
+    }
+}
+
 /// Distinguishes transport failures from data that cannot safely represent an asset balance.
 public enum OneSatClientError: Error, Equatable, Sendable, LocalizedError, CustomDebugStringConvertible {
     case unreadableResponse
@@ -315,12 +363,40 @@ private struct IndexedOutput: Sendable {
 
     var isToken: Bool {
         hasBsv21Event || data["bsv21"] != nil || data["bsv20"] != nil || isTokenInscription
+            || hasBsv21InscriptionSignal || hasBsv20Signal
     }
 
+    /// `scan.ts` `isBsv21Output`: inscription JSON `id` that is an outpoint, or `op` `auth` /
+    /// `deploy+...`.
+    var hasBsv21InscriptionSignal: Bool {
+        if let id = nonempty(inscriptionJSON?["id"]?.stringValue), Self.isValidOutpoint(id) { return true }
+        guard let op = nonempty(inscriptionJSON?["op"]?.stringValue)?.lowercased() else { return false }
+        return op == "auth" || op.hasPrefix("deploy+")
+    }
+
+    /// `scan.ts` `isBsv20Output`: a `tick:` event or an inscription JSON `tick`.
+    var hasBsv20Signal: Bool {
+        events.contains(where: { $0.hasPrefix("tick:") && $0.count > "tick:".count })
+            || nonempty(inscriptionJSON?["tick"]?.stringValue) != nil
+    }
+
+    /// BSV-21 wins over every BSV-20 signal, as `isBsv20Output` checks `isBsv21Output` first.
+    /// A non-outpoint JSON `id` still reads as BSV-21 here (as before); TS would not, but that
+    /// sends it through overlay validation rather than a tick transfer.
     var tokenKind: TokenKind {
         if hasBsv21Event || data["bsv21"] != nil { return .bsv21 }
         if nonempty(inscriptionJSON?["id"]?.stringValue) != nil { return .bsv21 }
+        if hasBsv21InscriptionSignal { return .bsv21 }
         return .bsv20
+    }
+
+    /// `@1sat/types` `isValidOutpoint`: 64 hex characters, `_` or `.`, then the output index.
+    static func isValidOutpoint(_ value: String) -> Bool {
+        let units = Array(value.utf8)
+        guard units.count > 65, units[64] == UInt8(ascii: "_") || units[64] == UInt8(ascii: ".") else { return false }
+        let hex = units[0..<64].allSatisfy { (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }
+        let index = units[65...]
+        return hex && index.allSatisfy { (48...57).contains($0) }
     }
 
     var tokenID: String? {
@@ -333,6 +409,11 @@ private struct IndexedOutput: Sendable {
         if let tick = nonempty(data["bsv20"]?["tick"]?.stringValue) { return tick }
         if let id = nonempty(inscriptionJSON?["id"]?.stringValue) { return id }
         if let tick = nonempty(inscriptionJSON?["tick"]?.stringValue) { return tick }
+        if let tick = events.first(where: { $0.hasPrefix("tick:") }).map({
+            String($0.dropFirst("tick:".count))
+        }).flatMap({ $0.isEmpty ? nil : $0 }) {
+            return tick
+        }
         if isToken { return "\(txid)_\(vout)" }
         return nil
     }
@@ -353,10 +434,15 @@ private struct IndexedOutput: Sendable {
         data["insc"]?["json"]
     }
 
+    /// `scan.ts` `parseBsv21Amount`: data, then inscription JSON, then the `amt:` event; an
+    /// amount of 0 or less is no amount.
     var tokenAmount: UInt64? {
-        integerAmount(data["bsv21"]?["amt"])
+        let amount = integerAmount(data["bsv21"]?["amt"])
             ?? integerAmount(data["bsv20"]?["amt"])
             ?? integerAmount(inscriptionJSON?["amt"])
+            ?? events.first(where: { $0.hasPrefix("amt:") }).flatMap { UInt64($0.dropFirst("amt:".count)) }
+        guard let amount, amount > 0 else { return nil }
+        return amount
     }
 
     var tokenSymbol: String? {

@@ -2,6 +2,7 @@ import Foundation
 import ToolboxServices
 import XCTest
 @testable import OneSatClient
+import OneSatSweep
 
 /// Proves the display client preserves the exact owner-stream metadata emitted by 1sat-stack.
 final class OneSatClientTests: XCTestCase {
@@ -149,16 +150,82 @@ final class OneSatClientTests: XCTestCase {
         ])
     }
 
-    func test_unreadableTokenAmountIsRefused() async throws {
+    /// G12: one unreadable BSV-21 amount is listed, not thrown; the other outputs still sum.
+    func test_unreadableTokenAmountIsListedAndTheRestStillSum() async throws {
         let malformed = sse.replacingOccurrences(of: "\"amt\":\"40\"", with: "\"amt\":\"forty\"")
         let client = OneSatClient(http: StubHTTP(status: 200, body: Array(malformed.utf8)))
 
+        let inventory = try await client.tokenInventory(forAddress: address)
+        XCTAssertEqual(inventory.balances, [
+            TokenBalance(tokenID: tokenID, amount: 2, symbol: nil, kind: .bsv21),
+            TokenBalance(tokenID: "SHUA", amount: 1000, symbol: "SHUA", kind: .bsv20),
+        ])
+        XCTAssertEqual(inventory.unreadable, [OutputRef(txid: String(repeating: "c", count: 64), vout: 2)])
+        let unreadable = try await client.unreadableTokenOutputs(forAddress: address)
+        XCTAssertEqual(unreadable, inventory.unreadable)
+        let balances = try await client.tokenBalances(forAddress: address)
+        XCTAssertEqual(balances, inventory.balances)
+        let outputs = try await client.tokenOutputs(forAddress: address)
+        XCTAssertFalse(outputs.contains { $0.vout == 2 }, "an output with no amount cannot be swept")
+        XCTAssertEqual(inventory.outputs, outputs)
+    }
+
+    /// `scan.ts` `parseBsv21Amount`: the `amt:` event is the last fallback, and 0 is no amount.
+    func test_amountFallsBackToTheAmtEventAndRejectsZero() async throws {
+        let id = String(repeating: "f", count: 64) + "_0"
+        func row(_ vout: Int, _ events: String) -> String {
+            """
+            event: txo
+            data: {"outpoint":"\(String(repeating: "f", count: 64)).\(vout)","satoshis":1,"events":[\(events)],"data":{}}
+
+            """ + "\n"
+        }
+        let body = row(0, "\"bsv21:\(id)\",\"amt:75\"") + row(1, "\"bsv21:\(id)\",\"amt:0\"") + "event: done\ndata: {}\n\n"
+        let client = OneSatClient(http: StubHTTP(status: 200, body: Array(body.utf8)))
+        let inventory = try await client.tokenInventory(forAddress: address)
+        XCTAssertEqual(inventory.balances, [TokenBalance(tokenID: id, amount: 75, symbol: nil, kind: .bsv21)])
+        XCTAssertEqual(inventory.unreadable.map(\.vout), [1])
+    }
+
+    /// A balance that overflows is still refused.
+    func test_overflowingBalanceIsStillRefused() async throws {
+        let huge = sse.replacingOccurrences(of: "\"amt\":\"40\"", with: "\"amt\":\"\(UInt64.max)\"")
+        let client = OneSatClient(http: StubHTTP(status: 200, body: Array(huge.utf8)))
         do {
             _ = try await client.tokenBalances(forAddress: address)
-            XCTFail("expected the malformed amount to be refused")
+            XCTFail("expected the overflow to be refused")
         } catch let error as OneSatClientError {
             XCTAssertEqual(error, .unreadableResponse)
         }
+    }
+
+    /// G14: the remaining `scan.ts` token signals keep an output off the ordinal path, and
+    /// BSV-21 wins over a tick.
+    func test_inscriptionTokenSignalsAreTokens() async throws {
+        let deploy = String(repeating: "9", count: 64) + "_0"
+        func row(_ vout: Int, events: String = "\"1sat\",\"insc\"", json: String) -> String {
+            """
+            event: txo
+            data: {"outpoint":"\(String(repeating: "7", count: 64)).\(vout)","satoshis":1,"events":[\(events)],"data":{"insc":{"file":{"type":"text/plain"},"json":\(json)}}}
+
+            """ + "\n"
+        }
+        let body = row(0, json: "{\"id\":\"\(deploy)\",\"amt\":\"5\",\"tick\":\"NOPE\"}")
+            + row(1, json: "{\"op\":\"deploy+mint\",\"amt\":\"9\"}")
+            + row(2, json: "{\"op\":\"AUTH\",\"amt\":\"3\"}")
+            + row(3, json: "{\"tick\":\"PEPE\",\"amt\":\"8\"}")
+            + row(4, events: "\"1sat\",\"insc\",\"tick:WOOF\",\"amt:6\"", json: "{}")
+            + row(5, json: "{\"note\":\"hello\"}")
+            + "event: done\ndata: {}\n\n"
+        let client = OneSatClient(http: StubHTTP(status: 200, body: Array(body.utf8)))
+
+        let outputs = try await client.tokenOutputs(forAddress: address)
+        XCTAssertEqual(outputs.map(\.vout), [0, 1, 2, 3, 4])
+        XCTAssertEqual(outputs.map(\.kind), [.bsv21, .bsv21, .bsv21, .bsv20, .bsv20])
+        XCTAssertEqual(outputs.map(\.tokenID)[0], deploy, "bsv21 wins over tick")
+        XCTAssertEqual(outputs.map(\.tokenID)[3...], ["PEPE", "WOOF"])
+        let ordinals = try await client.ordinals(forAddress: address)
+        XCTAssertEqual(ordinals.map(\.vout), [5], "only the non-token inscription is an ordinal")
     }
 
     func test_nonSuccessStatusIsTyped() async throws {

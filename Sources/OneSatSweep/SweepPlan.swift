@@ -20,6 +20,16 @@ public enum AssetKind: Equatable, Sendable {
     /// A time-locked output. `until` is the block height (or timestamp) it unlocks at; it cannot be
     /// spent before then, and even after, it needs a lock-specific unlocking script, not a sweep.
     case locked(until: UInt64)
+    /// A tick-based BSV-20 token output (`tick:` event or `type:application/bsv-20`). `tick` is nil
+    /// when only the MIME event marked it. Move it with a token transfer, never as a fee or a bare
+    /// ordinal (`@1sat/actions` `scan.ts` `isBsv20Output` / `isTokenMime`).
+    case bsv20(tick: String?)
+    /// A plain-looking output whose source transaction carries a RUN protocol output. RUN tokens
+    /// and jigs live on such outputs, so it is held back instead of spent as BSV (`scan.ts`
+    /// `detectRunTransactions`).
+    case run
+    /// A 0-sat output. `scan.ts` drops it from every class; it is reported here instead.
+    case unspendable
 }
 
 /// One categorised output from an indexer scan.
@@ -35,18 +45,35 @@ public struct ScannedOutput: Equatable, Sendable {
     public let lockingScript: [UInt8]
     /// The indexer's tags for this output, e.g. `["bsv21:<id>"]`, `["lock:830000"]`.
     public let events: [String]
+    /// True when any output of this output's source transaction starts with the RUN prefix
+    /// (``runPrefix``). Set by ``OneSatScanner`` from the source transaction it already reads.
+    public let sourceHasRunOutput: Bool
 
     public init(
-        txid: String, vout: UInt32, satoshis: UInt64, lockingScript: [UInt8], events: [String]
+        txid: String, vout: UInt32, satoshis: UInt64, lockingScript: [UInt8], events: [String],
+        sourceHasRunOutput: Bool = false
     ) {
         self.txid = txid
         self.vout = vout
         self.satoshis = satoshis
         self.lockingScript = lockingScript
         self.events = events
+        self.sourceHasRunOutput = sourceHasRunOutput
+    }
+
+    /// RUN protocol OP_RETURN prefix: OP_FALSE OP_RETURN OP_PUSH3 "run" (`scan.ts` `RUN_PREFIX`).
+    public static let runPrefix: [UInt8] = [0x00, 0x6a, 0x03, 0x72, 0x75, 0x6e]
+
+    /// `scan.ts` `hasRunPrefix`.
+    public static func hasRunPrefix(_ script: [UInt8]) -> Bool {
+        script.starts(with: runPrefix)
     }
 
     /// What kind of asset this output is, from its tags.
+    ///
+    /// Order follows `@1sat/actions` `scan.ts` `categorizeOutputs`: BSV-21, lock, BSV-20, then
+    /// by satoshis. Two deliberate differences: a tagged inscription above 1 sat stays an ordinal
+    /// (TS spends it as BSV), and a 0-sat output is reported as `.unspendable` (TS drops it).
     public var kind: AssetKind {
         if let token = events.first(where: { $0.hasPrefix("bsv21:") }) {
             return .bsv21(tokenID: String(token.dropFirst("bsv21:".count)))
@@ -56,11 +83,19 @@ public struct ScannedOutput: Equatable, Sendable {
             return .locked(until: until)
         }
         if events.contains("lock") { return .locked(until: 0) }
+        // `isBsv20Output` (`tick:` event) or `isTokenMime`, after the lock check as in TS.
+        let tick = events.first(where: { $0.hasPrefix("tick:") }).map { String($0.dropFirst("tick:".count)) }
+        if let tick, !tick.isEmpty { return .bsv20(tick: tick) }
+        if events.contains("type:application/bsv-20") { return .bsv20(tick: nil) }
         if events.contains(where: {
             $0 == "1sat" || $0.hasPrefix("origin:") || $0.hasPrefix("ord") || $0.hasPrefix("insc")
         }) {
             return .ordinal
         }
+        // `scan.ts`: 1 sat is always an ordinal (or OpNS); funding is only above 1 sat.
+        if satoshis == 1 { return .ordinal }
+        if satoshis == 0 { return .unspendable }
+        if sourceHasRunOutput { return .run }
         return .fundable
     }
 
@@ -98,13 +133,17 @@ public struct SweepPlan: Equatable, Sendable {
         var ordinals: [OutputRef] = []
         var tokens: [TokenRef] = []
         var locked: [LockedRef] = []
+        var bsv20: [OutputRef] = []
+        var run: [OutputRef] = []
+        var skipped: [OutputRef] = []
 
         for output in scan {
+            let ref = OutputRef(txid: output.txid, vout: output.vout)
             switch output.kind {
             case .fundable:
                 fundable.append(output.spendable)
             case .ordinal:
-                ordinals.append(OutputRef(txid: output.txid, vout: output.vout))
+                ordinals.append(ref)
             case .bsv21(let tokenID):
                 tokens.append(
                     TokenRef(tokenID: tokenID, txid: output.txid, vout: output.vout,
@@ -115,12 +154,21 @@ public struct SweepPlan: Equatable, Sendable {
                     LockedRef(txid: output.txid, vout: output.vout, satoshis: output.satoshis,
                               until: until)
                 )
+            case .bsv20:
+                bsv20.append(ref)
+            case .run:
+                run.append(ref)
+            case .unspendable:
+                skipped.append(ref)
             }
         }
 
         return SweepPlan(
             fundable: fundable,
-            remaining: RemainingAssets(ordinals: ordinals, bsv21: tokens, locked: locked)
+            remaining: RemainingAssets(
+                ordinals: ordinals, bsv21: tokens, locked: locked,
+                bsv20: bsv20, run: run, skipped: skipped
+            )
         )
     }
 }
@@ -131,15 +179,30 @@ public struct RemainingAssets: Equatable, Sendable {
     public let ordinals: [OutputRef]
     public let bsv21: [TokenRef]
     public let locked: [LockedRef]
+    /// Tick-based BSV-20 token outputs.
+    public let bsv20: [OutputRef]
+    /// Outputs of a RUN transaction, held back so RUN tokens are not spent as BSV.
+    public let run: [OutputRef]
+    /// 0-sat outputs. Nothing to sweep, but they are reported rather than hidden.
+    public let skipped: [OutputRef]
 
-    public init(ordinals: [OutputRef], bsv21: [TokenRef], locked: [LockedRef]) {
+    public init(
+        ordinals: [OutputRef], bsv21: [TokenRef], locked: [LockedRef],
+        bsv20: [OutputRef] = [], run: [OutputRef] = [], skipped: [OutputRef] = []
+    ) {
         self.ordinals = ordinals
         self.bsv21 = bsv21
         self.locked = locked
+        self.bsv20 = bsv20
+        self.run = run
+        self.skipped = skipped
     }
 
     /// True when the sweep took everything and the source keys can be discarded.
-    public var isEmpty: Bool { ordinals.isEmpty && bsv21.isEmpty && locked.isEmpty }
+    public var isEmpty: Bool {
+        ordinals.isEmpty && bsv21.isEmpty && locked.isEmpty && bsv20.isEmpty && run.isEmpty
+            && skipped.isEmpty
+    }
 
     /// The earliest block height at which some locked output becomes spendable, if any. A wallet
     /// uses this to schedule a re-sweep rather than making the user remember.
@@ -148,7 +211,7 @@ public struct RemainingAssets: Equatable, Sendable {
     }
 }
 
-public struct OutputRef: Equatable, Sendable {
+public struct OutputRef: Hashable, Sendable {
     public let txid: String
     public let vout: UInt32
     public init(txid: String, vout: UInt32) { self.txid = txid; self.vout = vout }
