@@ -46,6 +46,12 @@ public enum LegacySweepRunner {
         case notValidOnOverlay
         /// The token listing names it, but the scan did not return it.
         case notInScan
+        /// An ordinal or OpNS output the token listing did not return, so it was never checked
+        /// for inscription token data and is not moved as a bare ordinal.
+        case notInTokenListing
+        /// The action returned a txid together with an error: it may be on chain. Check the txid
+        /// (kept in the report) before sweeping these again.
+        case broadcastUnconfirmed
         /// The source transaction carries a RUN output.
         case runTransaction
         /// 0 sats.
@@ -125,12 +131,13 @@ public enum LegacySweepRunner {
     /// The token listing for the key's address, from ``OneSatClient/tokenOutputs(forAddress:)``
     /// and ``OneSatClient/unreadableTokenOutputs(forAddress:)``.
     public enum TokenListing: Sendable {
-        case listed(outputs: [TokenOutput], unreadable: [OutputRef])
+        /// `listed` is every unspent outpoint the listing read returned, token or not.
+        case listed(outputs: [TokenOutput], unreadable: [OutputRef], listed: Set<OutputRef>)
         /// The listing request failed. `reason` is recorded as a step failure.
         case unavailable(reason: String)
         /// The listing from one ``OneSatClient/tokenInventory(forAddress:)`` read.
         public static func listed(_ inventory: TokenInventory) -> TokenListing {
-            .listed(outputs: inventory.outputs, unreadable: inventory.unreadable)
+            .listed(outputs: inventory.outputs, unreadable: inventory.unreadable, listed: inventory.listed)
         }
     }
 
@@ -270,14 +277,17 @@ public enum LegacySweepRunner {
         let rows: [OutputRef: TokenOutput]
         let unreadable: Set<OutputRef>
         let listingAvailable: Bool
+        let listedRefs: Set<OutputRef>
         switch input.tokens {
-        case .listed(let outputs, let unreadableRefs):
+        case .listed(let outputs, let unreadableRefs, let listed):
+            listedRefs = listed
             var byRef: [OutputRef: TokenOutput] = [:]
             for row in outputs { byRef[OutputRef(txid: row.txid, vout: row.vout)] = row }
             rows = byRef
             unreadable = Set(unreadableRefs)
             listingAvailable = true
         case .unavailable(let reason):
+            listedRefs = []
             rows = [:]
             unreadable = []
             listingAvailable = false
@@ -332,6 +342,8 @@ public enum LegacySweepRunner {
                 let sweepClass: SweepClass = output.events.contains("type:application/op-ns") ? .opns : .ordinals
                 if !listingAvailable {
                     plan.leftovers.append(Leftover(sweepClass: sweepClass, outpoint: ref, reason: .tokenListingUnavailable))
+                } else if !listedRefs.contains(ref) {
+                    plan.leftovers.append(Leftover(sweepClass: sweepClass, outpoint: ref, reason: .notInTokenListing))
                 } else if output.satoshis != 1 {
                     // `AssetSweep.ordinals` moves 1-sat outputs only; one such output must not
                     // block the rest of the class.
@@ -385,8 +397,24 @@ public enum LegacySweepRunner {
             report.failures.append(StepFailure(sweepClass: .bsv21, label: "Token listing", message: reason))
         }
 
+        // Everything the run would spend, so an interruption can report what it never reached.
+        var planned: [(SweepClass, OutputRef)] = plan.funding.map { (.bsv, ref($0)) }
+            + plan.ordinals.map { (.ordinals, ref($0)) } + plan.opns.map { (.opns, ref($0)) }
+        planned += plan.bsv20.flatMap { $0.outputs.map { (.bsv20, ref($0.output)) } }
+        planned += plan.bsv21.flatMap { $0.outputs.map { (.bsv21, ref($0.output)) } }
+        let allPlanned = planned
+
         func checkpoint() throws {
-            do { try steps.checkpoint() } catch { throw Interrupted(report: report, underlying: error) }
+            do {
+                try steps.checkpoint()
+            } catch {
+                var partial = report
+                let accounted = Set(partial.sweptOutpoints).union(partial.leftovers.map(\.outpoint))
+                partial.leftovers += allPlanned.filter { !accounted.contains($0.1) }.map {
+                    Leftover(sweepClass: $0.0, outpoint: $0.1, reason: .notAttempted)
+                }
+                throw Interrupted(report: partial, underlying: error)
+            }
         }
 
         // BSV (`sweepFundingStep`): one action for every funding output.
@@ -529,13 +557,17 @@ public enum LegacySweepRunner {
         _ sweepClass: SweepClass, label: String, error: any Error, outpoints: [OutputRef], in report: inout Report
     ) {
         var message = OneSatLog.localizedMessage(error)
+        var reason = LeftoverReason.stepFailed
         if let step = error as? StepError {
             if let diagnostic = step.diagnostic { message += " (\(diagnostic))" }
-            if let txid = step.txid { keep(txid, sweepClass, in: &report) }
+            if let txid = step.txid {
+                keep(txid, sweepClass, in: &report)
+                reason = .broadcastUnconfirmed
+            }
         }
         OneSatLog.error(error, "LegacySweepRunner: \(label) failed; \(outpoints.count) output(s) stay", category: "OneSatActions")
         report.failures.append(StepFailure(sweepClass: sweepClass, label: label, message: message))
-        report.leftovers += outpoints.map { Leftover(sweepClass: sweepClass, outpoint: $0, reason: .stepFailed) }
+        report.leftovers += outpoints.map { Leftover(sweepClass: sweepClass, outpoint: $0, reason: reason) }
     }
 
     private static func record(swept refs: [OutputRef], of outputs: [ScannedOutput], in report: inout Report) {

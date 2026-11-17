@@ -147,6 +147,44 @@ final class OneSatClientTests: XCTestCase {
         XCTAssertEqual(items, [
             URLQueryItem(name: "limit", value: "10000"),
             URLQueryItem(name: "tags", value: "insc,bsv20,bsv21"),
+            URLQueryItem(name: "refresh", value: "true"),
+        ])
+    }
+
+    /// A truncated listing could let a token pass as an ordinal, so it is refused.
+    func test_aListingWithoutDoneOrAtTheRowLimitIsRefused() async throws {
+        let noDone = sse.components(separatedBy: "event: done")[0]
+        let errored = noDone + "event: error\ndata: boom\n\nevent: done\ndata: {}\n\n"
+        for body in [noDone, errored] {
+            let client = OneSatClient(http: StubHTTP(status: 200, body: Array(body.utf8)))
+            do {
+                _ = try await client.tokenInventory(forAddress: address)
+                XCTFail("expected an incomplete listing to be refused")
+            } catch let error as OneSatClientError {
+                XCTAssertEqual(error, .unreadableResponse)
+            }
+        }
+        let rows = (0..<10_000).map {
+            "event: txo\ndata: {\"outpoint\":\"\(String(repeating: "a", count: 64)).\($0)\",\"satoshis\":1}\n\n"
+        }.joined() + "event: done\ndata: {}\n\n"
+        let capped = OneSatClient(http: StubHTTP(status: 200, body: Array(rows.utf8)))
+        do {
+            _ = try await capped.tokenInventory(forAddress: address)
+            XCTFail("expected the row limit to be refused")
+        } catch let error as OneSatClientError {
+            XCTAssertEqual(error, .outputLimitReached(limit: 10_000))
+        }
+    }
+
+    /// The inventory lists every outpoint the read returned, token or not.
+    func test_theInventoryListsEveryReturnedOutpoint() async throws {
+        let client = OneSatClient(http: StubHTTP(status: 200, body: Array(sse.utf8)))
+        let inventory = try await client.tokenInventory(forAddress: address)
+        XCTAssertEqual(inventory.listed, [
+            OutputRef(txid: String(repeating: "a", count: 64), vout: 1),
+            OutputRef(txid: String(repeating: "c", count: 64), vout: 2),
+            OutputRef(txid: String(repeating: "d", count: 64), vout: 3),
+            OutputRef(txid: String(repeating: "e", count: 64), vout: 4),
         ])
     }
 
@@ -216,6 +254,7 @@ final class OneSatClientTests: XCTestCase {
             + row(3, json: "{\"tick\":\"PEPE\",\"amt\":\"8\"}")
             + row(4, events: "\"1sat\",\"insc\",\"tick:WOOF\",\"amt:6\"", json: "{}")
             + row(5, json: "{\"note\":\"hello\"}")
+            + row(6, json: "{\"id\":\"not-an-outpoint\"}")
             + "event: done\ndata: {}\n\n"
         let client = OneSatClient(http: StubHTTP(status: 200, body: Array(body.utf8)))
 
@@ -225,7 +264,11 @@ final class OneSatClientTests: XCTestCase {
         XCTAssertEqual(outputs.map(\.tokenID)[0], deploy, "bsv21 wins over tick")
         XCTAssertEqual(outputs.map(\.tokenID)[3...], ["PEPE", "WOOF"])
         let ordinals = try await client.ordinals(forAddress: address)
-        XCTAssertEqual(ordinals.map(\.vout), [5], "only the non-token inscription is an ordinal")
+        XCTAssertEqual(ordinals.map(\.vout), [5, 6], "only the non-token inscriptions are ordinals")
+        // A plain JSON inscription with a non-outpoint id and no amount is no token (`isBsv21Output`).
+        let inventory = try await client.tokenInventory(forAddress: address)
+        XCTAssertFalse(inventory.unreadable.contains { $0.vout == 6 })
+        XCTAssertFalse(inventory.balances.contains { $0.tokenID == "not-an-outpoint" })
     }
 
     func test_nonSuccessStatusIsTyped() async throws {

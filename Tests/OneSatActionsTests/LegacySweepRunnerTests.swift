@@ -39,6 +39,7 @@ final class LegacySweepRunnerTests: XCTestCase {
         let report = try await LegacySweepRunner.run(input, steps: steps)
         XCTAssertEqual(report.bsvTxids, ["late"])
         XCTAssertEqual(report.failures.map(\.message), ["submit failed"])
+        XCTAssertEqual(report.leftovers, [leftover(.bsv, 0, .broadcastUnconfirmed)])
     }
 
     // MARK: - G5: ordinals in batches of 25, BEEF per batch
@@ -100,7 +101,7 @@ final class LegacySweepRunnerTests: XCTestCase {
                 run,
                 out(4, sats: 5_000, events: ["lock:900"]),
             ],
-            tokens: .listed(outputs: [token(0, amount: 40, kind: .bsv21)], unreadable: [ref(1)])
+            tokens: listing([token(0, amount: 40, kind: .bsv21)], unreadable: [ref(1)])
         )
         let report = try await LegacySweepRunner.run(input, steps: steps(recorder))
         XCTAssertEqual(Set(report.leftovers), [
@@ -119,7 +120,7 @@ final class LegacySweepRunnerTests: XCTestCase {
         let recorder = Recorder()
         let input = try keyInput(
             [out(0, sats: 1, events: ["bsv21:\(tokenID)"]), out(1, sats: 1, events: ["bsv21:\(tokenID)"])],
-            tokens: .listed(outputs: [token(0, amount: 4, kind: .bsv21), token(1, amount: 6, kind: .bsv21)], unreadable: [])
+            tokens: listing([token(0, amount: 4, kind: .bsv21), token(1, amount: 6, kind: .bsv21)], unreadable: [])
         )
         var steps = steps(recorder)
         steps.moveBsv21 = { _, inputs, _, _ in
@@ -145,7 +146,7 @@ final class LegacySweepRunnerTests: XCTestCase {
                 out(3, sats: 1, events: ["tick:PEPE"]),
                 out(4, sats: 1, events: ["tick:PEPE", "list:100"]),
             ],
-            tokens: .listed(outputs: [
+            tokens: listing([
                 token(0, amount: 1, kind: .bsv21), token(1, amount: 2, kind: .bsv21), token(2, amount: 3, kind: .bsv21),
                 token(3, amount: 5, kind: .bsv20, id: "PEPE"), token(4, amount: 7, kind: .bsv20, id: "PEPE"),
             ], unreadable: [])
@@ -164,7 +165,7 @@ final class LegacySweepRunnerTests: XCTestCase {
         let recorder = Recorder()
         let input = try keyInput(
             [out(0, sats: 1, events: ["1sat", "insc"]), out(1, sats: 1, events: ["1sat"])],
-            tokens: .listed(outputs: [token(0, amount: 9, kind: .bsv20, id: "SHUA")], unreadable: [])
+            tokens: listing([token(0, amount: 9, kind: .bsv20, id: "SHUA")], unreadable: [])
         )
         _ = try await LegacySweepRunner.run(input, steps: steps(recorder))
         let calls = await recorder.calls
@@ -172,11 +173,25 @@ final class LegacySweepRunnerTests: XCTestCase {
         XCTAssertEqual(calls.filter { $0.step == "ordinals" }.map(\.outpoints), [[op(1)]])
     }
 
+    /// An ordinal the token listing did not return was never checked for token data: it stays.
+    func test_anOrdinalMissingFromTheTokenListingDoesNotMove() async throws {
+        let recorder = Recorder()
+        let input = try keyInput(
+            [out(0, sats: 1, events: ["1sat"]), out(1, sats: 1, events: ["1sat"]),
+             out(2, sats: 1, events: ["1sat", "type:application/op-ns"])],
+            unlisted: [0, 2]
+        )
+        let report = try await LegacySweepRunner.run(input, steps: steps(recorder))
+        let calls = await recorder.calls
+        XCTAssertEqual(calls.filter { $0.step == "ordinals" }.map(\.outpoints), [[op(1)]])
+        XCTAssertEqual(report.leftovers, [leftover(.ordinals, 0, .notInTokenListing), leftover(.opns, 2, .notInTokenListing)])
+    }
+
     func test_withoutTheTokenListingNoOrdinalOrTokenMoves() async throws {
         let recorder = Recorder()
         let input = try keyInput(
             [out(0, sats: 5_000), out(1, sats: 1, events: ["1sat"]), out(2, sats: 1, events: ["bsv21:\(tokenID)"])],
-            tokens: .unavailable(reason: "HTTP 503")
+            tokens: .unavailable("HTTP 503")
         )
         let report = try await LegacySweepRunner.run(input, steps: steps(recorder))
         let calls = await recorder.calls
@@ -202,6 +217,9 @@ final class LegacySweepRunnerTests: XCTestCase {
             XCTFail("expected the interruption")
         } catch let interrupted as LegacySweepRunner.Interrupted {
             XCTAssertEqual(interrupted.report.bsvTxids, ["bsv-1"])
+            XCTAssertEqual(interrupted.report.sweptOutpoints, [ref(0)])
+            XCTAssertEqual(interrupted.report.leftovers, [leftover(.ordinals, 1, .notAttempted)],
+                           "the unreached ordinal is reported, so the report does not read complete")
         }
     }
 
@@ -243,9 +261,28 @@ final class LegacySweepRunnerTests: XCTestCase {
 
     private func keyInput(
         _ scanned: [ScannedOutput],
-        tokens: LegacySweepRunner.TokenListing = .listed(outputs: [], unreadable: [])
+        tokens: Listing = .listed([], unreadable: []),
+        unlisted: Set<UInt32> = []
     ) throws -> LegacySweepRunner.KeyInput {
-        LegacySweepRunner.KeyInput(key: try ActionVectors.identity(), scanned: scanned, ordinalMetadata: [], tokens: tokens)
+        let listing: LegacySweepRunner.TokenListing
+        switch tokens {
+        case .listed(let outputs, let unreadable):
+            // The listing read returns every outpoint of the address unless a test leaves one out.
+            let listed = Set(scanned.filter { !unlisted.contains($0.vout) }.map { OutputRef(txid: $0.txid, vout: $0.vout) })
+            listing = .listed(outputs: outputs, unreadable: unreadable, listed: listed)
+        case .unavailable(let reason):
+            listing = .unavailable(reason: reason)
+        }
+        return LegacySweepRunner.KeyInput(key: try ActionVectors.identity(), scanned: scanned, ordinalMetadata: [], tokens: listing)
+    }
+
+    private enum Listing {
+        case listed([TokenOutput], unreadable: [OutputRef])
+        case unavailable(String)
+    }
+
+    private func listing(_ outputs: [TokenOutput], unreadable: [OutputRef]) -> Listing {
+        .listed(outputs, unreadable: unreadable)
     }
 
     private func steps(

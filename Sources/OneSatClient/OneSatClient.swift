@@ -49,7 +49,8 @@ public struct OneSatClient: Sendable {
         let outputs = try await outputs(forAddress: address)
         let inventory = try Self.tokenInventory(from: outputs)
         return TokenInventory(
-            balances: inventory.balances, unreadable: inventory.unreadable, outputs: Self.tokenOutputs(from: outputs)
+            balances: inventory.balances, unreadable: inventory.unreadable, outputs: Self.tokenOutputs(from: outputs),
+            listed: Set(outputs.map { OutputRef(txid: $0.txid, vout: $0.vout) })
         )
     }
 
@@ -59,7 +60,9 @@ public struct OneSatClient: Sendable {
         var unreadable: [OutputRef] = []
 
         for output in outputs {
-            guard let tokenID = output.tokenID else { continue }
+            // A plain JSON inscription whose `id` is not an outpoint is no token (`scan.ts`
+            // `isBsv21Output`); it stays an ordinal.
+            guard output.isToken, let tokenID = output.tokenID else { continue }
             let tokenAmount: UInt64
             if let parsed = output.tokenAmount {
                 tokenAmount = parsed
@@ -155,6 +158,8 @@ public struct OneSatClient: Sendable {
         components.queryItems = [
             URLQueryItem(name: "limit", value: String(Self.outputLimit)),
             URLQueryItem(name: "tags", value: "insc,bsv20,bsv21"),
+            // As `OneSatScanner`: have the indexer sync the address first (`scan.ts` `scanAddress`).
+            URLQueryItem(name: "refresh", value: "true"),
         ]
         guard let url = components.url else { throw OneSatClientError.unreadableResponse }
 
@@ -163,7 +168,7 @@ public struct OneSatClient: Sendable {
             (status, body), service: "the 1Sat indexer", operation: "OneSatClient owner txos", method: "GET", url: url
         )
         do {
-            return try Self.parse(sse: body)
+            return try Self.parse(sse: body, limit: Self.outputLimit)
         } catch {
             OneSatLog.unreadable(
                 "OneSatClient owner txos", method: "GET", url: url, body: body, error: error,
@@ -174,9 +179,13 @@ public struct OneSatClient: Sendable {
     }
 
     /// Refuses malformed TXO frames so a partial response cannot become a misleading asset view.
-    private static func parse(sse body: [UInt8]) throws -> [IndexedOutput] {
-        let text = String(decoding: body, as: UTF8.self)
+    /// Like ``OneSatScanner``, a stream that sends `error`, never sends `done`, or reaches `limit`
+    /// rows is refused: a truncated listing would let an unlisted token pass as an ordinal.
+    private static func parse(sse body: [UInt8], limit: Int) throws -> [IndexedOutput] {
+        let text = String(decoding: body, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n")
         var outputs: [IndexedOutput] = []
+        var count = 0
+        var complete = false
 
         for frame in text.components(separatedBy: "\n\n") {
             var event = "message"
@@ -188,7 +197,14 @@ public struct OneSatClient: Sendable {
                     data = String(line.dropFirst("data:".count).drop(while: { $0 == " " }))
                 }
             }
+            if event == "error" {
+                OneSatLog.error("OneSatClient: the 1Sat indexer's owner stream sent an error: \(data)", category: OneSatClientHTTP.category)
+                throw OneSatClientError.unreadableResponse
+            }
+            if event == "done" { complete = true; break }
             guard event == "txo", !data.isEmpty else { continue }
+            count += 1
+            guard count < limit else { throw OneSatClientError.outputLimitReached(limit: limit) }
 
             guard let json = try? JSONDecoder().decode(JSONValue.self, from: Data(data.utf8)),
                   let outpoint = json["outpoint"]?.stringValue,
@@ -208,6 +224,10 @@ public struct OneSatClient: Sendable {
                     data: json["data"]?.objectValue ?? [:]
                 )
             )
+        }
+        guard complete else {
+            OneSatLog.error("OneSatClient: the 1Sat indexer's owner stream ended without done", category: OneSatClientHTTP.category)
+            throw OneSatClientError.unreadableResponse
         }
         return outputs
     }
@@ -301,17 +321,25 @@ public struct TokenInventory: Equatable, Sendable {
     public let unreadable: [OutputRef]
     /// The same rows as ``OneSatClient/tokenOutputs(forAddress:)``.
     public let outputs: [TokenOutput]
+    /// Every unspent outpoint the read returned, token or not. An outpoint missing here was not
+    /// checked for inscription token data, so a sweep must not move it as a bare ordinal.
+    public let listed: Set<OutputRef>
 
-    public init(balances: [TokenBalance], unreadable: [OutputRef], outputs: [TokenOutput] = []) {
+    public init(
+        balances: [TokenBalance], unreadable: [OutputRef], outputs: [TokenOutput] = [], listed: Set<OutputRef> = []
+    ) {
         self.balances = balances
         self.unreadable = unreadable
         self.outputs = outputs
+        self.listed = listed
     }
 }
 
 /// Distinguishes transport failures from data that cannot safely represent an asset balance.
 public enum OneSatClientError: Error, Equatable, Sendable, LocalizedError, CustomDebugStringConvertible {
     case unreadableResponse
+    /// The owner stream reached its row limit, so the read is incomplete.
+    case outputLimitReached(limit: Int)
     /// `detail` carries the service, host, path, server reason and body; it does not take part
     /// in `==`, so a status still compares as before.
     case httpFailure(statusCode: Int, detail: OneSatHTTPFailure? = nil)
@@ -320,6 +348,8 @@ public enum OneSatClientError: Error, Equatable, Sendable, LocalizedError, Custo
         switch self {
         case .unreadableResponse:
             "A 1Sat service sent an answer this wallet could not read."
+        case .outputLimitReached(let limit):
+            "This address has \(limit) or more outputs, more than one read can list; the list is incomplete."
         case .httpFailure(_, let detail?):
             detail.userMessage
         case .httpFailure(let status, nil):
@@ -331,6 +361,8 @@ public enum OneSatClientError: Error, Equatable, Sendable, LocalizedError, Custo
         switch self {
         case .unreadableResponse:
             "OneSatClientError.unreadableResponse"
+        case .outputLimitReached(let limit):
+            "OneSatClientError.outputLimitReached(limit: \(limit))"
         case .httpFailure(let status, let detail):
             "OneSatClientError.httpFailure(\(status)): \(detail?.debugDescription ?? "no detail")"
         }
@@ -339,6 +371,7 @@ public enum OneSatClientError: Error, Equatable, Sendable, LocalizedError, Custo
     public static func == (lhs: OneSatClientError, rhs: OneSatClientError) -> Bool {
         switch (lhs, rhs) {
         case (.unreadableResponse, .unreadableResponse): true
+        case (.outputLimitReached(let a), .outputLimitReached(let b)): a == b
         case (.httpFailure(let a, _), .httpFailure(let b, _)): a == b
         default: false
         }
