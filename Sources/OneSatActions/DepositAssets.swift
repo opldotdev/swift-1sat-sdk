@@ -76,6 +76,16 @@ public struct OneSatDepositAssets: DepositAssetSource {
         try await get(Self.rawTransactionURL(txid: txid, baseURL: baseURL))
     }
 
+    /// `BeefClient.getProof`: `GET /1sat/beef/<txid>/proof`, the BRC-74 proof of a mined
+    /// transaction. Nil when the indexer answers 404 because the transaction is not mined yet.
+    public func proof(txid: String) async throws -> [UInt8]? {
+        do {
+            return try await get(Self.proofURL(txid: txid, baseURL: baseURL))
+        } catch DepositAssetError.httpFailure(statusCode: 404, detail: _) {
+            return nil
+        }
+    }
+
     public func ordinalMetadata(outpoint: String, seq: Int) async throws -> OrdfsMetadata {
         try await OrdfsClient(baseURL: baseURL, transport: transport).metadata(outpoint: outpoint, seq: seq)
     }
@@ -106,6 +116,14 @@ public struct OneSatDepositAssets: DepositAssetSource {
             .appendingPathComponent("beef")
             .appendingPathComponent(txid)
             .appendingPathComponent("tx")
+    }
+
+    public static func proofURL(txid: String, baseURL: URL) -> URL {
+        baseURL
+            .appendingPathComponent("1sat")
+            .appendingPathComponent("beef")
+            .appendingPathComponent(txid)
+            .appendingPathComponent("proof")
     }
 
     private func get(_ url: URL, operation: String = #function) async throws -> [UInt8] {
