@@ -239,32 +239,85 @@ public enum CollectionParse {
     }
 
     public struct Grouping: Equatable, Sendable {
-        /// Outputs tagged `subType:collection`, input order preserved.
+        /// Collection parents, input order preserved: outputs tagged `subType:collection` (this
+        /// wallet's own mint), and untagged outputs whose origin is the collection id an item in
+        /// the same input names (a parent received or synced, which BRC-147 does not tag).
         public let parents: [WalletOutput]
-        /// Outputs tagged `subType:collectionItem` + canonical `collection:{id}` or historical
-        /// `collectionId:{id}`, keyed by the id.
+        /// Outputs that name a collection (`memberCollectionId`), keyed by the id, each array in
+        /// input order.
         public let itemsByCollectionId: [String: [WalletOutput]]
+        /// The keys of `itemsByCollectionId` in order of first appearance, so callers that list
+        /// collections get the same order every time.
+        public let collectionIds: [String]
         /// Everything else — a lone inscription is not a collection.
         public let standalone: [WalletOutput]
     }
 
-    /// Tag-only grouping. No MAP decode, no normalization, no network. Tags match in any
-    /// case: storage lowercases them (`subtype:collection`), older rows keep the camelCase.
+    /// The collection an ordinal output belongs to, read from its tags: the first canonical
+    /// `collection:` value, else the first historical `collectionId:` value, matched in any case.
+    ///
+    /// BRC-147 `ordinalTagsFromMetadata` (TS `types/src/ordinalTags.ts`) writes `collection:` for
+    /// every synced or received item and no `subType:` tag; only this wallet's mint adds
+    /// `subType:collectionItem`. So the id tag alone is membership.
+    ///
+    /// A relative `_N` resolves against the txid of `origin`. The id comes back in lowercase
+    /// `txid_vout` form, or nil when it is not an outpoint (MAP `collection` may hold any text,
+    /// and such outputs stay standalone).
+    public static func memberCollectionId(tags: [String], origin: String) -> String? {
+        let raw = [collectionTagPrefix, collectionIdTagPrefix].lazy.compactMap { prefix in
+            tags.lazy.compactMap { WalletTag.value($0, prefix: prefix) }.first
+        }.first
+        guard let raw else { return nil }
+        var id = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if id.hasPrefix("_"), let separator = origin.firstIndex(where: { $0 == "_" || $0 == "." }) {
+            let suffix = String(id.dropFirst())
+            if isDigits(suffix) { id = "\(origin[..<separator])_\(suffix)" }
+        }
+        id = Bsv21Remittance.formatOrdinalOutpoint(id).lowercased()
+        return absoluteCollectionId(id)
+    }
+
+    /// The origin an ordinal output's tags record, in lowercase `txid_vout` form: the first
+    /// `origin:<id>` tag, a bare `origin` tag meaning the output is its own origin, else the
+    /// output's own outpoint.
+    public static func origin(of output: WalletOutput) -> String {
+        let outpoint = output.outpoint.description
+        var resolved: String?
+        for tag in output.tags ?? [] where resolved == nil {
+            if WalletTag.matches(tag, "origin") {
+                resolved = outpoint
+            } else if let value = WalletTag.value(tag, prefix: "origin:"), !value.isEmpty {
+                resolved = value
+            }
+        }
+        return Bsv21Remittance.formatOrdinalOutpoint(resolved ?? outpoint).lowercased()
+    }
+
+    /// Tag-only grouping. No MAP decode, no normalization beyond the id form, no network. Tags
+    /// match in any case: storage lowercases them (`subtype:collection`), older rows keep the
+    /// camelCase.
+    ///
+    /// Each output is, in this order: a parent when tagged `subType:collection`; an item when it
+    /// names a collection (`memberCollectionId`); a parent when its own origin is a collection id
+    /// some item in the input names; else standalone.
     public static func group(ordinalOutputs: [WalletOutput]) -> Grouping {
+        let members = ordinalOutputs.map { output in
+            memberCollectionId(tags: output.tags ?? [], origin: origin(of: output))
+        }
+        let referenced = Set(members.compactMap { $0 })
         var parents: [WalletOutput] = []
         var itemsByCollectionId: [String: [WalletOutput]] = [:]
+        var collectionIds: [String] = []
         var standalone: [WalletOutput] = []
-        for output in ordinalOutputs {
+        for (output, member) in zip(ordinalOutputs, members) {
             let tags = output.tags ?? []
             if WalletTag.contains(tags, parentTag) {
                 parents.append(output)
-            } else if WalletTag.contains(tags, itemTag), let id = [
-                collectionTagPrefix,
-                collectionIdTagPrefix,
-            ].lazy.compactMap({ prefix in
-                tags.lazy.compactMap { WalletTag.value($0, prefix: prefix) }.first
-            }).first {
-                itemsByCollectionId[id, default: []].append(output)
+            } else if let member {
+                if itemsByCollectionId[member] == nil { collectionIds.append(member) }
+                itemsByCollectionId[member, default: []].append(output)
+            } else if referenced.contains(origin(of: output)) {
+                parents.append(output)
             } else {
                 standalone.append(output)
             }
@@ -272,6 +325,7 @@ public enum CollectionParse {
         return Grouping(
             parents: parents,
             itemsByCollectionId: itemsByCollectionId,
+            collectionIds: collectionIds,
             standalone: standalone
         )
     }

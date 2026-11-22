@@ -268,9 +268,11 @@ final class CollectionParseTests: XCTestCase {
             ordinalOutputs: [parent, itemA, itemB, lone, idWithoutItem, itemWithoutId]
         )
         XCTAssertEqual(grouping.parents, [parent])
-        XCTAssertEqual(grouping.itemsByCollectionId[itemCollectionId], [itemA, itemB])
+        // The id tag is membership; the subType tag alone is not.
+        XCTAssertEqual(grouping.itemsByCollectionId[itemCollectionId], [itemA, itemB, idWithoutItem])
         XCTAssertEqual(grouping.itemsByCollectionId.count, 1)
-        XCTAssertEqual(grouping.standalone, [lone, idWithoutItem, itemWithoutId])
+        XCTAssertEqual(grouping.collectionIds, [itemCollectionId])
+        XCTAssertEqual(grouping.standalone, [lone, itemWithoutId])
         XCTAssertEqual(CollectionParse.collectionId(fromOrigin: "\(originTxid).0"), "\(originTxid)_0")
     }
 
@@ -333,18 +335,23 @@ final class CollectionParseTests: XCTestCase {
             outpoint: "\(originTxid).4",
             tags: ["subType:collectionItem", "collectionId:\(otherCollectionId)"]
         )
-        let lone = try walletOutput(
+        let historicalOnly = try walletOutput(
             outpoint: "\(originTxid).5",
             tags: ["type:image/png", "collectionid:\(itemCollectionId)"]
         )
+        let lone = try walletOutput(
+            outpoint: "\(originTxid).7",
+            tags: ["type:image/png"]
+        )
 
         let grouping = CollectionParse.group(ordinalOutputs: [
-            lowerParent, camelParent, lowerItem, camelItem, lowerHistoricalItem, camelHistoricalItem, lone,
+            lowerParent, camelParent, lowerItem, camelItem, lowerHistoricalItem, camelHistoricalItem,
+            historicalOnly, lone,
         ])
         XCTAssertEqual(grouping.parents, [lowerParent, camelParent])
         XCTAssertEqual(
             grouping.itemsByCollectionId[itemCollectionId],
-            [lowerItem, camelItem, lowerHistoricalItem]
+            [lowerItem, camelItem, lowerHistoricalItem, historicalOnly]
         )
         XCTAssertEqual(grouping.itemsByCollectionId[otherCollectionId], [camelHistoricalItem])
         XCTAssertEqual(grouping.itemsByCollectionId.count, 2)
@@ -399,6 +406,102 @@ final class CollectionParseTests: XCTestCase {
         )
 
         XCTAssertEqual(resolved.tags, ["type:image/png"])
+    }
+
+    /// BRC-147 sync tags: `origin:`, `collection:`, `type:` and no subType tag (Pixel Foxes as
+    /// received from another wallet).
+    func test_groupTreatsCollectionTagAloneAsMembership() throws {
+        let foxes = try (1...3).map { index in
+            try walletOutput(
+                outpoint: "\(originTxid).\(index)",
+                tags: ["origin:\(originTxid)_\(index)", "collection:\(itemCollectionId)", "type:image/png"]
+            )
+        }
+        let grouping = CollectionParse.group(ordinalOutputs: foxes)
+        XCTAssertEqual(grouping.itemsByCollectionId[itemCollectionId], foxes)
+        XCTAssertEqual(grouping.collectionIds, [itemCollectionId])
+        XCTAssertTrue(grouping.parents.isEmpty)
+        XCTAssertTrue(grouping.standalone.isEmpty)
+    }
+
+    func test_groupRecognisesUntaggedParentByOrigin() throws {
+        let parentTxid = String(repeating: "b", count: 64)
+        let tagged = try walletOutput(
+            outpoint: "\(String(repeating: "e", count: 64)).0",
+            tags: ["origin:\(parentTxid)_1", "type:image/png"]
+        )
+        let bare = try walletOutput(outpoint: "\(parentTxid).1", tags: ["origin"])
+        let dotted = try walletOutput(
+            outpoint: "\(String(repeating: "f", count: 64)).2",
+            tags: ["origin:\(parentTxid).1"]
+        )
+        let item = try walletOutput(
+            outpoint: "\(originTxid).1",
+            tags: ["collection:\(itemCollectionId)"]
+        )
+        let grouping = CollectionParse.group(ordinalOutputs: [tagged, bare, dotted, item])
+        XCTAssertEqual(grouping.parents, [tagged, bare, dotted])
+        XCTAssertEqual(grouping.itemsByCollectionId[itemCollectionId], [item])
+        XCTAssertTrue(grouping.standalone.isEmpty)
+    }
+
+    func test_groupLeavesUnreferencedUntaggedOutputStandalone() throws {
+        let other = try walletOutput(
+            outpoint: "\(String(repeating: "b", count: 64)).1",
+            tags: ["origin", "type:image/png"]
+        )
+        let grouping = CollectionParse.group(ordinalOutputs: [other])
+        XCTAssertEqual(grouping.standalone, [other])
+        XCTAssertTrue(grouping.parents.isEmpty)
+    }
+
+    func test_groupKeepsNonOutpointCollectionValuesStandalone() throws {
+        let named = try walletOutput(outpoint: "\(originTxid).1", tags: ["collection:pixel foxes"])
+        let grouping = CollectionParse.group(ordinalOutputs: [named])
+        XCTAssertEqual(grouping.standalone, [named])
+        XCTAssertTrue(grouping.itemsByCollectionId.isEmpty)
+    }
+
+    func test_groupResolvesRelativeCollectionIdAgainstOriginTxid() throws {
+        let item = try walletOutput(
+            outpoint: "\(String(repeating: "c", count: 64)).4",
+            tags: ["origin:\(originTxid)_3", "collection:_0"]
+        )
+        XCTAssertEqual(
+            CollectionParse.memberCollectionId(tags: item.tags ?? [], origin: CollectionParse.origin(of: item)),
+            "\(originTxid)_0"
+        )
+        XCTAssertEqual(CollectionParse.group(ordinalOutputs: [item]).collectionIds, ["\(originTxid)_0"])
+    }
+
+    func test_groupNormalisesIdFormAndCase() throws {
+        let upper = String(repeating: "B", count: 64)
+        let dotted = try walletOutput(outpoint: "\(originTxid).1", tags: ["collection:\(upper).1"])
+        let underscore = try walletOutput(outpoint: "\(originTxid).2", tags: ["collection:\(itemCollectionId)"])
+        let grouping = CollectionParse.group(ordinalOutputs: [dotted, underscore])
+        XCTAssertEqual(grouping.itemsByCollectionId[itemCollectionId], [dotted, underscore])
+    }
+
+    func test_groupOrdersCollectionIdsByFirstAppearance() throws {
+        let ids = ["d", "b", "c"].map { String(repeating: $0, count: 64) + "_0" }
+        let outputs = try ids.enumerated().flatMap { index, id in
+            try (0..<2).map { copy in
+                try walletOutput(outpoint: "\(originTxid).\(index * 2 + copy)", tags: ["collection:\(id)"])
+            }
+        }
+        for _ in 0..<5 {
+            XCTAssertEqual(CollectionParse.group(ordinalOutputs: outputs).collectionIds, ids)
+        }
+    }
+
+    func test_groupItemTaggedOutputWithParentTagStaysParent() throws {
+        let output = try walletOutput(
+            outpoint: "\(originTxid).0",
+            tags: [CollectionParse.parentTag, "collection:\(itemCollectionId)"]
+        )
+        let grouping = CollectionParse.group(ordinalOutputs: [output])
+        XCTAssertEqual(grouping.parents, [output])
+        XCTAssertTrue(grouping.itemsByCollectionId.isEmpty)
     }
 
     private func walletOutput(outpoint: String, tags: [String]) throws -> WalletOutput {
