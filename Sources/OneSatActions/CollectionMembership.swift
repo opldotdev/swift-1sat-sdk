@@ -87,31 +87,49 @@ public enum CollectionMembership {
         public var isMember: Bool { self == .member || self == .unverified }
     }
 
-    /// The inscription at `origin` (`txid_vout`), read from a 1sat-stack host: its transaction
-    /// (`/1sat/beef/<txid>/tx`) for the signature and its proof (`/1sat/beef/<txid>/proof`) for
-    /// where it was mined. Throws when either read fails, the transaction is not the one asked
-    /// for, or the proof cannot be read; a transaction that is not mined yet has no position.
+    /// The inscription at `origin` (`txid_vout`), read from a 1sat-stack host. See
+    /// `evidence(txid:vouts:services:)`.
     public static func evidence(
         origin: String,
         services: OneSatDepositAssets = OneSatDepositAssets()
     ) async throws -> Evidence {
         let outpoint = try Outpoint(ordinal: origin)
-        let txid = outpoint.transactionID
+        let read = try await evidence(txid: outpoint.transactionID, vouts: [outpoint.outputIndex], services: services)
+        guard let evidence = read[outpoint.outputIndex] else {
+            throw CollectionMembershipError.wrongTransaction(asked: origin, got: outpoint.transactionID.displayHex)
+        }
+        return evidence
+    }
+
+    /// The inscriptions at `vouts` of one transaction, read once from a 1sat-stack host: the
+    /// transaction (`/1sat/beef/<txid>/tx`) for each output's signature and its proof
+    /// (`/1sat/beef/<txid>/proof`) for where it was mined, so items minted together cost one
+    /// download. Throws when either read fails, the transaction is not the one asked for, or the
+    /// proof cannot be read; a transaction that is not mined yet has no position.
+    public static func evidence(
+        txid: TransactionID,
+        vouts: [UInt32],
+        services: OneSatDepositAssets = OneSatDepositAssets()
+    ) async throws -> [UInt32: Evidence] {
         let raw = try await services.rawTransaction(txid: txid.displayHex)
         let transaction = try Transaction(bytes: raw, limits: WalletTransactionLimits.standard)
         let readID = try transaction.transactionID(limits: WalletTransactionLimits.standard)
         guard readID == txid else {
             throw CollectionMembershipError.wrongTransaction(asked: txid.displayHex, got: readID.displayHex)
         }
-        let authorship = authorship(of: transaction, vout: Int(outpoint.outputIndex))
-        guard let proofBytes = try await services.proof(txid: txid.displayHex) else {
-            return Evidence(authorship: authorship, mined: nil)
+        var mined: BlockPosition?
+        if let proofBytes = try await services.proof(txid: txid.displayHex) {
+            let proof = try MerklePath(bytes: proofBytes, limits: WalletBEEFLimits.standard.merklePathLimits)
+            guard let position = BlockPosition(proof: proof, txid: txid) else {
+                throw CollectionMembershipError.proofWithoutTransaction(txid.displayHex)
+            }
+            mined = position
         }
-        let proof = try MerklePath(bytes: proofBytes, limits: WalletBEEFLimits.standard.merklePathLimits)
-        guard let position = BlockPosition(proof: proof, txid: txid) else {
-            throw CollectionMembershipError.proofWithoutTransaction(txid.displayHex)
+        var read: [UInt32: Evidence] = [:]
+        for vout in vouts {
+            read[vout] = Evidence(authorship: authorship(of: transaction, vout: Int(vout)), mined: mined)
         }
-        return Evidence(authorship: authorship, mined: position)
+        return read
     }
 
     /// The SIGMA signatures on output `vout` of `transaction`, checked.
@@ -134,19 +152,28 @@ public enum CollectionMembership {
                 signed = true
             case .sigma(let sigma):
                 signed = true
-                guard sigma.algorithm == "BSM",
-                      let address = try? Address(sigma.address),
-                      let signature = try? BitcoinMessageSignature(sigma.signature)
-                else { continue }
+                guard sigma.algorithm == "BSM", let address = try? Address(sigma.address) else { continue }
                 let inputHash = inputHash(inputs: inputs, vin: sigma.vin)
                 let message = Sigma.getMessageHash(inputHash: inputHash, dataHash: sigma.dataHash)
-                if (try? signature.verifies(message: message, address: address)) == true,
+                if verifiesBSM(sigma.signature, message: message, address: address),
                    !signers.contains(sigma.address) {
                     signers.append(sigma.address)
                 }
             }
         }
         return Authorship(signers: signers, isSigned: signed)
+    }
+
+    /// TS `deduceRecovery`: the signature's compact header byte is ignored; each of the four
+    /// recovery ids is tried, and the recovered key's compressed address must be `address`.
+    static func verifiesBSM(_ signature: [UInt8], message: [UInt8], address: Address) -> Bool {
+        guard signature.count == 65 else { return false }
+        let compact = Array(signature[1...])
+        for recovery in 0..<4 {
+            guard let candidate = try? BitcoinMessageSignature([UInt8(31 + recovery)] + compact) else { continue }
+            if (try? candidate.verifies(message: message, address: address)) == true { return true }
+        }
+        return false
     }
 
     /// The rules applied to one item and its collection.
@@ -162,14 +189,12 @@ public enum CollectionMembership {
         return .notSignedByCreator
     }
 
-    /// True only when the item is known to be recorded before the collection: mined earlier, or
-    /// mined while the collection still waits for a block. Unknown order is not "before".
+    /// True only when both are mined and the item's block place comes first. A collection with
+    /// no position may be one the indexer has no proof for yet, so the order is unknown, and
+    /// unknown is not "before".
     static func recordedBefore(_ item: BlockPosition?, _ collection: BlockPosition?) -> Bool {
-        switch (item, collection) {
-        case let (item?, collection?): item < collection
-        case (.some, nil): true
-        default: false
-        }
+        guard let item, let collection else { return false }
+        return item < collection
     }
 
     // MARK: - Script reading (`Sigma.computeDataHash`, `Sigma.parseFromScript`)
@@ -203,7 +228,7 @@ public enum CollectionMembership {
                 guard let next = readOp(bytes, at: position) else { break }
                 position = next.next
                 let name = String(decoding: next.data, as: UTF8.self)
-                if name == sigmaPrefix {
+                if next.code == 5, name == sigmaPrefix {
                     if let sigma = sigmaFields(bytes, at: position, dataEnd: separatorAt) {
                         found.append(.sigma(sigma))
                     }

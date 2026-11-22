@@ -89,6 +89,28 @@ final class CollectionMembershipTests: XCTestCase {
         XCTAssertEqual(authorship, .init(signers: [], isSigned: true))
     }
 
+    /// TS `deduceRecovery` ignores the header byte: a signature written with another header
+    /// still verifies for its signer.
+    func test_signatureHeaderByteIsIgnoredAsInTypeScript() throws {
+        let fixture = try fixture()
+        var script = try itemScript(fixture)
+        let at = try XCTUnwrap(Self.signatureStart(in: script))
+        script[at] = script[at] == 31 ? 27 : 31
+        let authorship = CollectionMembership.authorship(lockingScript: script, inputs: try itemInputs(fixture))
+        XCTAssertEqual(authorship.signers, [fixture.signer])
+    }
+
+    /// Where the 65-byte signature after `SIGMA`, `BSM` and the address starts.
+    private static func signatureStart(in script: [UInt8]) -> Int? {
+        let marker: [UInt8] = [0x05] + Array("SIGMA".utf8) + [0x03] + Array("BSM".utf8)
+        guard let start = script.indices.first(where: { Array(script[$0..<min($0 + marker.count, script.count)]) == marker })
+        else { return nil }
+        let addressLength = Int(script[start + marker.count])
+        let push = start + marker.count + 1 + addressLength
+        guard script[push] == 0x41 else { return nil }
+        return push + 1
+    }
+
     func test_otherOutputOfTheCollectionIsUnsigned() throws {
         let fixture = try fixture()
         let authorship = CollectionMembership.authorship(of: try collectionTransaction(fixture), vout: 1)
@@ -158,6 +180,23 @@ final class CollectionMembershipTests: XCTestCase {
         let paths = await http.calls.map(\.path)
         let txid = String(fixture.collection.origin.prefix(64))
         XCTAssertEqual(paths, ["/1sat/beef/\(txid)/tx", "/1sat/beef/\(txid)/proof"])
+    }
+
+    func test_outputsOfOneTransactionAreReadWithOneDownload() async throws {
+        let fixture = try fixture()
+        let raw = try Hex.decode(fixture.collection.rawTransaction, maximumDecodedByteCount: fixture.collection.rawTransaction.count / 2)
+        let proofBytes = try Hex.decode(fixture.collection.proof, maximumDecodedByteCount: fixture.collection.proof.count / 2)
+        let http = IndexerStub(responses: [(200, raw), (200, proofBytes)])
+        let read = try await CollectionMembership.evidence(
+            txid: Outpoint(ordinal: fixture.collection.origin).transactionID,
+            vouts: [0, 1],
+            services: OneSatDepositAssets(baseURL: URL(string: "https://indexer.test")!, transport: http)
+        )
+        XCTAssertEqual(read[0]?.authorship.signers, [fixture.signer])
+        XCTAssertEqual(read[1]?.authorship, CollectionMembership.Authorship(signers: [], isSigned: false))
+        XCTAssertEqual(read[1]?.mined, .init(height: 842_279, index: 103))
+        let calls = await http.calls.count
+        XCTAssertEqual(calls, 2)
     }
 
     func test_evidenceOfAnUnminedTransactionHasNoPosition() async throws {
@@ -230,7 +269,8 @@ final class CollectionMembershipTests: XCTestCase {
         XCTAssertEqual(verdict(evidence([], signed: true, at: late), collection), .unverified)
         XCTAssertEqual(verdict(evidence([creator], at: early), evidence([creator], at: late)), .inscribedBeforeCollection)
         XCTAssertEqual(verdict(evidence([creator], at: early), evidence([creator], at: sameBlockLater)), .inscribedBeforeCollection)
-        XCTAssertEqual(verdict(evidence([creator], at: early), evidence([creator], at: nil)), .inscribedBeforeCollection)
+        // A collection with no proof yet leaves the order unknown, and the item stays.
+        XCTAssertEqual(verdict(evidence([creator], at: early), evidence([creator], at: nil)), .member)
         XCTAssertEqual(verdict(evidence([stranger], at: late), evidence([], at: early)), .unverified)
         XCTAssertEqual(verdict(evidence([], at: late), evidence([], signed: true, at: early)), .unverified)
     }
