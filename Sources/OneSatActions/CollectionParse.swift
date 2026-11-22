@@ -1,7 +1,9 @@
 import Foundation
+import OneSatClient
 import OneSatTemplates
 import BSVCore
 import BSVWallet
+import ToolboxCore
 
 public enum RoyaltyType: String, Equatable, Sendable {
     case paymail
@@ -90,6 +92,58 @@ public struct CollectionItemTrait: Equatable, Sendable {
         self.value = value
         self.rarityLabel = rarityLabel
         self.occurancePercentrage = occurancePercentrage
+    }
+}
+
+/// What a collection item's MAP says about it, for display (`CollectionParse.itemDetails`).
+public struct CollectionItemDetails: Equatable, Sendable {
+    public let traits: [CollectionItemTrait]
+    public let mintNumber: Int?
+    /// 1 is the rarest.
+    public let rank: Int?
+    public let rarityLabel: String?
+
+    public init(
+        traits: [CollectionItemTrait] = [],
+        mintNumber: Int? = nil,
+        rank: Int? = nil,
+        rarityLabel: String? = nil
+    ) {
+        self.traits = traits
+        self.mintNumber = mintNumber
+        self.rank = rank
+        self.rarityLabel = rarityLabel
+    }
+
+    /// Nothing to show.
+    public var isEmpty: Bool { traits.isEmpty && mintNumber == nil && rank == nil && rarityLabel == nil }
+}
+
+/// What a collection parent's MAP says about the collection, for display
+/// (`CollectionParse.collectionDetails`).
+public struct CollectionDetails: Equatable, Sendable {
+    public let description: String?
+    /// `quantity` when it reads as a whole number.
+    public let quantity: Int?
+    /// `quantity` as sent ("Number in collection"), whether or not it is a whole number.
+    public let quantityText: String?
+    /// Label to percentage, in the order given.
+    public let rarityLabels: [RarityLabelEntry]
+    /// The traits table, in the order given: each trait's values with their occurrence.
+    public let traits: [CollectionTraitEntry]
+
+    public init(
+        description: String? = nil,
+        quantity: Int? = nil,
+        quantityText: String? = nil,
+        rarityLabels: [RarityLabelEntry] = [],
+        traits: [CollectionTraitEntry] = []
+    ) {
+        self.description = description
+        self.quantity = quantity
+        self.quantityText = quantityText
+        self.rarityLabels = rarityLabels
+        self.traits = traits
     }
 }
 
@@ -197,6 +251,142 @@ public enum CollectionParse {
         }
         let normalized = normalizeRelativeCollectionId(collectionId, itemOutpoint: itemOutpoint)
         return normalized.isEmpty ? nil : normalized
+    }
+
+    /// What a collection item's MAP says about it (docs.1satordinals.com `collectionItem`
+    /// subType; TS `CollectionItemSubTypeData`): its traits, mint number, rank and rarity label.
+    /// For display only; sync tags never carry these, so this needs the item's metadata.
+    ///
+    /// `subTypeData` may be an object or JSON text (`OrdinalTags.parseMapSubTypeData`). Each trait
+    /// must be an object with a non-empty string `name` and a `value`; a number or bool `value` is
+    /// kept as its JSON text, any other value skips the entry. Order is kept. A trait's
+    /// `rarityLabel` is kept when it is text, and its occurrence from `occurancePercentrage` (TS)
+    /// or `occurrencePercent` (the spec), text or a number. `mintNumber` and `rank` are whole
+    /// numbers, sent as numbers or digit text. `attachments` are not read.
+    public static func itemDetails(fromMap map: [String: JSONValue]?) -> CollectionItemDetails {
+        guard let data = subTypeDataObject(map) else { return CollectionItemDetails() }
+        let traits = (data["traits"].map(nestedJSON)?.arrayValue ?? []).compactMap { entry -> CollectionItemTrait? in
+            guard let trait = entry.objectValue,
+                  let name = trait["name"]?.stringValue, !name.isEmpty,
+                  let value = trait["value"].flatMap(scalarText)
+            else {
+                return nil
+            }
+            return CollectionItemTrait(
+                name: name,
+                value: value,
+                rarityLabel: trait["rarityLabel"]?.stringValue,
+                occurancePercentrage: (trait["occurancePercentrage"] ?? trait["occurrencePercent"])
+                    .flatMap(scalarText)
+            )
+        }
+        return CollectionItemDetails(
+            traits: traits,
+            mintNumber: data["mintNumber"].flatMap(wholeNumber),
+            rank: data["rank"].flatMap(wholeNumber),
+            rarityLabel: data["rarityLabel"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    /// `itemDetails(fromMap:).traits`.
+    public static func itemTraits(fromMap map: [String: JSONValue]?) -> [CollectionItemTrait] {
+        itemDetails(fromMap: map).traits
+    }
+
+    /// What a collection parent's MAP says about the collection (docs.1satordinals.com
+    /// `collection` subType; TS `CollectionSubTypeData`): description, quantity, rarity labels
+    /// and the traits table.
+    ///
+    /// `subTypeData` may be an object or JSON text, and so may `rarityLabels` and `traits` inside
+    /// it. Members keep the order the JSON text gives; an object that reached here already decoded
+    /// (`JSONValue` keeps no order) is read in key order. `rarityLabels` is an object of label to
+    /// percentage (the spec) or an array of such objects (TS `RarityLabels`), read in order.
+    /// `quantity` is a whole number when it reads as one; `quantityText` keeps it as sent.
+    public static func collectionDetails(fromMap map: [String: JSONValue]?) -> CollectionDetails {
+        guard let data = subTypeDataObject(map) else { return CollectionDetails() }
+        let quantityText = data["quantity"].flatMap(scalarText)
+        var rarityLabels: [RarityLabelEntry] = []
+        let labelEntries: [CollectionMapJSON] = switch data["rarityLabels"].map(nestedJSON) {
+        case .array(let entries)?: entries
+        case let object?: [object]
+        case nil: []
+        }
+        for entry in labelEntries {
+            for (label, percentage) in entry.members ?? [] where !label.isEmpty {
+                guard let percentage = scalarText(percentage) else { continue }
+                rarityLabels.append(RarityLabelEntry(key: label, value: percentage))
+            }
+        }
+        let traits = (data["traits"].map(nestedJSON)?.members ?? []).compactMap {
+            name, table -> CollectionTraitEntry? in
+            let table = nestedJSON(table)
+            guard !name.isEmpty, let values = table["values"]?.arrayValue else { return nil }
+            let texts = values.compactMap(scalarText)
+            guard !texts.isEmpty else { return nil }
+            let percentages = (table["occurancePercentages"]?.arrayValue ?? []).compactMap(scalarText)
+            return CollectionTraitEntry(
+                name: name,
+                trait: CollectionTrait(values: texts, occurancePercentages: percentages)
+            )
+        }
+        return CollectionDetails(
+            description: data["description"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 },
+            quantity: data["quantity"].flatMap(wholeNumber),
+            quantityText: quantityText.flatMap { $0.isEmpty ? nil : $0 },
+            rarityLabels: rarityLabels,
+            traits: traits
+        )
+    }
+
+    /// MAP `subTypeData` as an ordered object: JSON text is read in order, an object as decoded.
+    private static func subTypeDataObject(_ map: [String: JSONValue]?) -> CollectionMapJSON? {
+        switch map?["subTypeData"] {
+        case .object(let object):
+            return CollectionMapJSON(object: object)
+        case .string(let text):
+            guard let value = CollectionMapJSON.parse(text), value.members != nil else { return nil }
+            return value
+        default:
+            return nil
+        }
+    }
+
+    /// A member that may itself be JSON text (`rarityLabels`, `traits`): the text read as JSON
+    /// when it is an object or array, else the member as it is.
+    private static func nestedJSON(_ value: CollectionMapJSON) -> CollectionMapJSON {
+        guard case .string(let text) = value, let parsed = CollectionMapJSON.parse(text) else { return value }
+        switch parsed {
+        case .object, .array: return parsed
+        default: return value
+        }
+    }
+
+    /// A string as is, a number or bool as its JSON text, else nil.
+    private static func scalarText(_ value: CollectionMapJSON) -> String? {
+        switch value {
+        case .string(let text):
+            return text
+        case .bool(let flag):
+            return flag ? "true" : "false"
+        case .number(let number):
+            if let integer = Int64(exactly: number) { return String(integer) }
+            guard number.isFinite else { return nil }
+            return String(number)
+        default:
+            return nil
+        }
+    }
+
+    /// A whole number sent as a number or as digit text.
+    private static func wholeNumber(_ value: CollectionMapJSON) -> Int? {
+        switch value {
+        case .number(let number):
+            return Int(exactly: number)
+        case .string(let text):
+            return Int(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        default:
+            return nil
+        }
     }
 
     /// Period origin `"<txid>.<vout>"` → underscore `"<txid>_<vout>"`.
@@ -472,5 +662,186 @@ public enum CollectionMap {
     /// Mirrors `CustomInstructions.jsonString` so MAP bytes match `JSON.stringify`.
     private static func jsonString(_ value: String) -> String {
         JSONText.quote(value)
+    }
+}
+
+/// JSON with object members in the order the text gives them, for the MAP fields a person reads
+/// in order (rarity labels, the traits table). Lenient: any valid JSON reads; nesting stops at 64.
+enum CollectionMapJSON: Equatable, Sendable {
+    case null
+    case bool(Bool)
+    case number(Double)
+    case string(String)
+    case array([CollectionMapJSON])
+    case object([(String, CollectionMapJSON)])
+
+    static let maximumDepth = 64
+
+    static func == (lhs: CollectionMapJSON, rhs: CollectionMapJSON) -> Bool {
+        switch (lhs, rhs) {
+        case (.null, .null): true
+        case let (.bool(a), .bool(b)): a == b
+        case let (.number(a), .number(b)): a == b
+        case let (.string(a), .string(b)): a == b
+        case let (.array(a), .array(b)): a == b
+        case let (.object(a), .object(b)):
+            a.count == b.count && zip(a, b).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
+        default: false
+        }
+    }
+
+    /// A decoded `JSONValue`; its objects have no order left, so members go in key order.
+    init(_ value: JSONValue) {
+        switch value {
+        case .null: self = .null
+        case .bool(let flag): self = .bool(flag)
+        case .number(let number): self = .number(number)
+        case .string(let text): self = .string(text)
+        case .array(let items): self = .array(items.map(CollectionMapJSON.init))
+        case .object(let object): self = CollectionMapJSON(object: object)
+        }
+    }
+
+    init(object: [String: JSONValue]) {
+        self = .object(object.keys.sorted().map { ($0, CollectionMapJSON(object[$0] ?? .null)) })
+    }
+
+    /// The first member named `key`.
+    subscript(key: String) -> CollectionMapJSON? {
+        members?.first { $0.0 == key }?.1
+    }
+
+    var members: [(String, CollectionMapJSON)]? {
+        if case .object(let members) = self { return members }
+        return nil
+    }
+
+    var arrayValue: [CollectionMapJSON]? {
+        if case .array(let items) = self { return items }
+        return nil
+    }
+
+    var objectValue: CollectionMapJSON? { members == nil ? nil : self }
+
+    var stringValue: String? {
+        if case .string(let text) = self { return text }
+        return nil
+    }
+
+    /// The text as JSON, or nil when it is not JSON.
+    static func parse(_ text: String) -> CollectionMapJSON? {
+        var reader = Reader(bytes: Array(text.utf8))
+        guard let value = reader.value(depth: 0) else { return nil }
+        reader.skipWhitespace()
+        return reader.index == reader.bytes.count ? value : nil
+    }
+
+    private struct Reader {
+        let bytes: [UInt8]
+        var index = 0
+
+        init(bytes: [UInt8]) { self.bytes = bytes }
+
+        mutating func skipWhitespace() {
+            while index < bytes.count, [0x20, 0x09, 0x0A, 0x0D].contains(bytes[index]) { index += 1 }
+        }
+
+        mutating func value(depth: Int) -> CollectionMapJSON? {
+            guard depth <= CollectionMapJSON.maximumDepth else { return nil }
+            skipWhitespace()
+            guard index < bytes.count else { return nil }
+            switch bytes[index] {
+            case UInt8(ascii: "{"): return object(depth: depth + 1)
+            case UInt8(ascii: "["): return array(depth: depth + 1)
+            case UInt8(ascii: "\""): return string().map(CollectionMapJSON.string)
+            case UInt8(ascii: "t"): return literal("true", .bool(true))
+            case UInt8(ascii: "f"): return literal("false", .bool(false))
+            case UInt8(ascii: "n"): return literal("null", .null)
+            default: return number()
+            }
+        }
+
+        mutating func literal(_ word: String, _ value: CollectionMapJSON) -> CollectionMapJSON? {
+            let expected = Array(word.utf8)
+            guard index + expected.count <= bytes.count,
+                  Array(bytes[index..<index + expected.count]) == expected
+            else { return nil }
+            index += expected.count
+            return value
+        }
+
+        mutating func object(depth: Int) -> CollectionMapJSON? {
+            index += 1
+            var members: [(String, CollectionMapJSON)] = []
+            skipWhitespace()
+            if index < bytes.count, bytes[index] == UInt8(ascii: "}") {
+                index += 1
+                return .object(members)
+            }
+            while true {
+                skipWhitespace()
+                guard index < bytes.count, bytes[index] == UInt8(ascii: "\""), let key = string() else { return nil }
+                skipWhitespace()
+                guard index < bytes.count, bytes[index] == UInt8(ascii: ":") else { return nil }
+                index += 1
+                guard let value = value(depth: depth) else { return nil }
+                members.append((key, value))
+                skipWhitespace()
+                guard index < bytes.count else { return nil }
+                if bytes[index] == UInt8(ascii: ",") { index += 1; continue }
+                if bytes[index] == UInt8(ascii: "}") { index += 1; return .object(members) }
+                return nil
+            }
+        }
+
+        mutating func array(depth: Int) -> CollectionMapJSON? {
+            index += 1
+            var items: [CollectionMapJSON] = []
+            skipWhitespace()
+            if index < bytes.count, bytes[index] == UInt8(ascii: "]") {
+                index += 1
+                return .array(items)
+            }
+            while true {
+                guard let item = value(depth: depth) else { return nil }
+                items.append(item)
+                skipWhitespace()
+                guard index < bytes.count else { return nil }
+                if bytes[index] == UInt8(ascii: ",") { index += 1; continue }
+                if bytes[index] == UInt8(ascii: "]") { index += 1; return .array(items) }
+                return nil
+            }
+        }
+
+        /// A string token, unescaped by `JSONDecoder` so escapes and surrogates read as JSON says.
+        mutating func string() -> String? {
+            let start = index
+            var escaped = false
+            index += 1
+            while index < bytes.count {
+                switch bytes[index] {
+                case UInt8(ascii: "\\"):
+                    escaped = true
+                    index += 2
+                case UInt8(ascii: "\""):
+                    index += 1
+                    guard escaped else {
+                        return String(decoding: bytes[start + 1..<index - 1], as: UTF8.self)
+                    }
+                    return try? JSONDecoder().decode(String.self, from: Data(bytes[start..<index]))
+                default: index += 1
+                }
+            }
+            return nil
+        }
+
+        mutating func number() -> CollectionMapJSON? {
+            let start = index
+            while index < bytes.count, "+-0123456789.eE".utf8.contains(bytes[index]) { index += 1 }
+            guard index > start,
+                  let number = try? JSONDecoder().decode(Double.self, from: Data(bytes[start..<index]))
+            else { return nil }
+            return .number(number)
+        }
     }
 }

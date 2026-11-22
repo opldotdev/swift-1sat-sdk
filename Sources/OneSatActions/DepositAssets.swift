@@ -76,6 +76,16 @@ public struct OneSatDepositAssets: DepositAssetSource {
         try await get(Self.rawTransactionURL(txid: txid, baseURL: baseURL))
     }
 
+    /// `BeefClient.getProof`: `GET /1sat/beef/<txid>/proof`, the BRC-74 proof of a mined
+    /// transaction. Nil when the indexer answers 404 because the transaction is not mined yet.
+    public func proof(txid: String) async throws -> [UInt8]? {
+        let url = Self.proofURL(txid: txid, baseURL: baseURL)
+        let response = try await transport.send(method: "GET", url: url, headers: [:], body: nil)
+        // Expected while the transaction waits for a block: not a failure to log.
+        if response.status == 404 { return nil }
+        return try Self.body(response, url: url, operation: "proof(txid:)")
+    }
+
     public func ordinalMetadata(outpoint: String, seq: Int) async throws -> OrdfsMetadata {
         try await OrdfsClient(baseURL: baseURL, transport: transport).metadata(outpoint: outpoint, seq: seq)
     }
@@ -108,8 +118,24 @@ public struct OneSatDepositAssets: DepositAssetSource {
             .appendingPathComponent("tx")
     }
 
+    public static func proofURL(txid: String, baseURL: URL) -> URL {
+        baseURL
+            .appendingPathComponent("1sat")
+            .appendingPathComponent("beef")
+            .appendingPathComponent(txid)
+            .appendingPathComponent("proof")
+    }
+
     private func get(_ url: URL, operation: String = #function) async throws -> [UInt8] {
         let response = try await transport.send(method: "GET", url: url, headers: [:], body: nil)
+        return try Self.body(response, url: url, operation: operation)
+    }
+
+    private static func body(
+        _ response: (status: Int, body: [UInt8]),
+        url: URL,
+        operation: String
+    ) throws -> [UInt8] {
         guard (200..<300).contains(response.status) else {
             let detail = OneSatHTTPFailure(
                 service: "the 1Sat indexer", operation: "OneSatDepositAssets.\(operation)", method: "GET", url: url,

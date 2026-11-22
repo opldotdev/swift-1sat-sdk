@@ -1,6 +1,8 @@
 import BSVCore
 import BSVTransaction
 import BSVWallet
+import OneSatClient
+import ToolboxCore
 import XCTest
 @testable import OneSatActions
 
@@ -502,6 +504,218 @@ final class CollectionParseTests: XCTestCase {
         let grouping = CollectionParse.group(ordinalOutputs: [output])
         XCTAssertEqual(grouping.parents, [output])
         XCTAssertTrue(grouping.itemsByCollectionId.isEmpty)
+    }
+
+    /// `GET /1sat/ordfs/metadata/549ce573…_81` as served, byte for byte (Pixel Foxes #2043685).
+    private static let pixelFoxMetadataJSON = #"""
+    {"contentLength":2566,"contentType":"image/png","map":{"app":"Bubblemint","name":"Pixel Foxes #2043685","subType":"collectionItem","subTypeData":"{\"collectionId\":\"1611d956f397caa80b56bc148b4bce87b54f39b234aeca4668b4d5a7785eb9fa_0\",\"traits\":[{\"name\":\"background\",\"value\":\"lemon\"},{\"name\":\"fox\",\"value\":\"Arctic Fox\"},{\"name\":\"body\",\"value\":\"Red Shirt\"},{\"name\":\"mouth\",\"value\":\"Mouth\"},{\"name\":\"head item\",\"value\":\"Gold Durag\"},{\"name\":\"eyes\",\"value\":\"Down to the Right\"},{\"name\":\"item\",\"value\":\"none\"}]}","type":"ord"},"origin":"549ce573ca22dbc682dabe6c0311e55afe93651de3aadcaa9d2d2fd83c227966.81","outpoint":"549ce573ca22dbc682dabe6c0311e55afe93651de3aadcaa9d2d2fd83c227966.81","sequence":0}
+    """#
+    private static let pixelFoxesCollectionId =
+        "1611d956f397caa80b56bc148b4bce87b54f39b234aeca4668b4d5a7785eb9fa_0"
+    private static let pixelFoxCurrentOutpoint =
+        "092af97dd49686f205348007dace0e8c64ed5cc8dffa6d239ebba0a54600d344.1"
+
+    func test_livePixelFoxGroupsUnderItsCollectionWithItsParentAndTraits() throws {
+        let metadata = try JSONDecoder().decode(
+            OrdfsMetadata.self,
+            from: Data(Self.pixelFoxMetadataJSON.utf8)
+        )
+        let tags = OrdinalTags.fromMetadata(
+            metadata,
+            fallbackOrigin: Self.pixelFoxCurrentOutpoint
+        )
+        XCTAssertEqual(tags, [
+            "origin:549ce573ca22dbc682dabe6c0311e55afe93651de3aadcaa9d2d2fd83c227966_81",
+            "collection:\(Self.pixelFoxesCollectionId)",
+            "app:Bubblemint",
+            "type:image/png",
+        ])
+        let fox = try walletOutput(outpoint: Self.pixelFoxCurrentOutpoint, tags: tags)
+        let parentTags = OrdinalTags.fromMetadata(
+            origin: "1611d956f397caa80b56bc148b4bce87b54f39b234aeca4668b4d5a7785eb9fa.0",
+            contentType: "image/png",
+            map: ["app": "Bubblemint", "name": "Pixel Foxes", "subType": "collection", "type": "ord"]
+        )
+        let parent = try walletOutput(
+            outpoint: "1611d956f397caa80b56bc148b4bce87b54f39b234aeca4668b4d5a7785eb9fa.0",
+            tags: parentTags
+        )
+
+        let grouping = CollectionParse.group(ordinalOutputs: [fox, parent])
+        XCTAssertEqual(grouping.collectionIds, [Self.pixelFoxesCollectionId])
+        XCTAssertEqual(grouping.itemsByCollectionId[Self.pixelFoxesCollectionId], [fox])
+        XCTAssertEqual(grouping.parents, [parent])
+        XCTAssertTrue(grouping.standalone.isEmpty)
+
+        let traits = CollectionParse.itemTraits(fromMap: metadata.map)
+        XCTAssertEqual(traits.map(\.name), [
+            "background", "fox", "body", "mouth", "head item", "eyes", "item",
+        ])
+        XCTAssertEqual(traits.map(\.value), [
+            "lemon", "Arctic Fox", "Red Shirt", "Mouth", "Gold Durag", "Down to the Right", "none",
+        ])
+        XCTAssertTrue(traits.allSatisfy { $0.rarityLabel == nil && $0.occurancePercentrage == nil })
+    }
+
+    func test_itemTraitsReadsObjectSubTypeDataAndKeepsOptionalStrings() {
+        let traits = CollectionParse.itemTraits(fromMap: [
+            "subType": "collectionItem",
+            "subTypeData": .object([
+                "collectionId": "_0",
+                "traits": .array([
+                    .object([
+                        "name": "Color",
+                        "value": "Blue",
+                        "rarityLabel": "rare",
+                        "occurancePercentrage": "12.5",
+                    ]),
+                    .object(["name": "Size", "value": "L", "rarityLabel": 3]),
+                ]),
+            ]),
+        ])
+        XCTAssertEqual(traits, [
+            CollectionItemTrait(name: "Color", value: "Blue", rarityLabel: "rare", occurancePercentrage: "12.5"),
+            CollectionItemTrait(name: "Size", value: "L"),
+        ])
+    }
+
+    func test_itemTraitsKeepsNumberAndBoolValuesAsJSONText() {
+        let traits = CollectionParse.itemTraits(fromMap: [
+            "subTypeData": #"{"traits":[{"name":"Level","value":7},{"name":"Speed","value":1.5},{"name":"Shiny","value":true}]}"#,
+        ])
+        XCTAssertEqual(traits.map(\.value), ["7", "1.5", "true"])
+    }
+
+    func test_itemTraitsSkipsEntriesWithoutNameOrValue() {
+        let traits = CollectionParse.itemTraits(fromMap: [
+            "subTypeData": #"{"traits":[{"name":"","value":"x"},{"value":"y"},{"name":"NoValue"},{"name":"Null","value":null},{"name":"Nested","value":{"a":1}},"loose",{"name":"Kept","value":""}]}"#,
+        ])
+        XCTAssertEqual(traits, [CollectionItemTrait(name: "Kept", value: "")])
+    }
+
+    func test_itemTraitsIsEmptyWithoutTraits() {
+        XCTAssertEqual(CollectionParse.itemTraits(fromMap: nil), [])
+        XCTAssertEqual(CollectionParse.itemTraits(fromMap: ["name": "Lone"]), [])
+        XCTAssertEqual(CollectionParse.itemTraits(fromMap: ["subTypeData": "not-json"]), [])
+        XCTAssertEqual(CollectionParse.itemTraits(fromMap: ["subTypeData": #"{"collectionId":"_0"}"#]), [])
+        XCTAssertEqual(CollectionParse.itemTraits(fromMap: ["subTypeData": #"{"traits":{"a":"b"}}"#]), [])
+    }
+
+    /// `GET /1sat/ordfs/metadata/1611d956…_0`, the Pixel Foxes parent, as served.
+    private static let pixelFoxesParentMetadataJSON = #"""
+    {"contentLength":1594,"contentType":"image/png","map":{"app":"RareDropper","name":"Pixel Foxes","royalties":"[{\"type\":\"address\",\"destination\":\"1HERMQcdFQNTFShD2mpt81McxX9kPQ9AEP\",\"percentage\":\"0.03\"}]","subType":"collection","subTypeData":"{\"description\":\"10,000,000 pixel foxes on-chain forever\"}","type":"ord"},"origin":"1611d956f397caa80b56bc148b4bce87b54f39b234aeca4668b4d5a7785eb9fa.0","outpoint":"1611d956f397caa80b56bc148b4bce87b54f39b234aeca4668b4d5a7785eb9fa.0","sequence":0}
+    """#
+
+    func test_livePixelFoxItemDetailsHaveOnlyTraits() throws {
+        let metadata = try JSONDecoder().decode(OrdfsMetadata.self, from: Data(Self.pixelFoxMetadataJSON.utf8))
+        let details = CollectionParse.itemDetails(fromMap: metadata.map)
+        XCTAssertEqual(details.traits.count, 7)
+        XCTAssertEqual(details.traits.first, CollectionItemTrait(name: "background", value: "lemon"))
+        XCTAssertNil(details.mintNumber)
+        XCTAssertNil(details.rank)
+        XCTAssertNil(details.rarityLabel)
+        XCTAssertFalse(details.isEmpty)
+    }
+
+    func test_livePixelFoxesParentDetailsHaveOnlyADescription() throws {
+        let metadata = try JSONDecoder().decode(
+            OrdfsMetadata.self,
+            from: Data(Self.pixelFoxesParentMetadataJSON.utf8)
+        )
+        XCTAssertEqual(
+            CollectionParse.collectionDetails(fromMap: metadata.map),
+            CollectionDetails(description: "10,000,000 pixel foxes on-chain forever")
+        )
+    }
+
+    /// The spec's shape: `rarityLabels` and `traits` each stringified inside stringified
+    /// `subTypeData`, members in an order that is not alphabetical.
+    func test_collectionDetailsReadsSpecShapedParentInOrder() {
+        let rarity = #"{"legendary":"1.00","common":"96.00","rare":"3.00"}"#
+        let traits = #"{"eyes":{"values":["blue","green"],"occurancePercentages":["60.00","40.00"]},"background":{"values":["red","blue","gold"],"occurancePercentages":["50.00","45.00","5.00"]}}"#
+        let subTypeData = try! String(
+            data: JSONSerialization.data(withJSONObject: [
+                "description": "Spec owls",
+                "quantity": "300",
+                "rarityLabels": rarity,
+                "traits": traits,
+            ]),
+            encoding: .utf8
+        )!
+        let details = CollectionParse.collectionDetails(fromMap: [
+            "subType": "collection",
+            "subTypeData": .string(subTypeData),
+        ])
+        XCTAssertEqual(details.description, "Spec owls")
+        XCTAssertEqual(details.quantity, 300)
+        XCTAssertEqual(details.quantityText, "300")
+        XCTAssertEqual(details.rarityLabels, [
+            RarityLabelEntry(key: "legendary", value: "1.00"),
+            RarityLabelEntry(key: "common", value: "96.00"),
+            RarityLabelEntry(key: "rare", value: "3.00"),
+        ])
+        XCTAssertEqual(details.traits, [
+            CollectionTraitEntry(
+                name: "eyes",
+                trait: CollectionTrait(values: ["blue", "green"], occurancePercentages: ["60.00", "40.00"])
+            ),
+            CollectionTraitEntry(
+                name: "background",
+                trait: CollectionTrait(
+                    values: ["red", "blue", "gold"],
+                    occurancePercentages: ["50.00", "45.00", "5.00"]
+                )
+            ),
+        ])
+    }
+
+    /// Nested objects instead of text, TS's array of rarity objects, a numeric quantity and one
+    /// that is not a whole number.
+    func test_collectionDetailsAcceptsObjectsArraysAndLooseQuantities() {
+        let nested = CollectionParse.collectionDetails(fromMap: [
+            "subTypeData": #"{"description":"Owls","quantity":12,"rarityLabels":[{"common":"90"},{"rare":"10"}],"traits":{"hat":{"values":["cap"],"occurancePercentages":["100"]},"empty":{"values":[]}}}"#,
+        ])
+        XCTAssertEqual(nested.quantity, 12)
+        XCTAssertEqual(nested.quantityText, "12")
+        XCTAssertEqual(nested.rarityLabels.map(\.key), ["common", "rare"])
+        XCTAssertEqual(nested.traits.map(\.name), ["hat"])
+
+        let loose = CollectionParse.collectionDetails(fromMap: [
+            "subTypeData": .object(["description": "Owls", "quantity": "10,000,000"]),
+        ])
+        XCTAssertNil(loose.quantity)
+        XCTAssertEqual(loose.quantityText, "10,000,000")
+
+        XCTAssertEqual(CollectionParse.collectionDetails(fromMap: nil), CollectionDetails())
+        XCTAssertEqual(CollectionParse.collectionDetails(fromMap: ["subTypeData": "not-json"]), CollectionDetails())
+    }
+
+    func test_itemDetailsReadsMintNumberRankRarityAndBothPercentSpellings() {
+        let details = CollectionParse.itemDetails(fromMap: [
+            "subType": "collectionItem",
+            "subTypeData": #"{"collectionId":"_0","mintNumber":42,"rank":"3","rarityLabel":"rare","traits":[{"name":"eyes","value":"blue","occurrencePercent":"60.00"},{"name":"hat","value":"cap","occurancePercentrage":"5.00"},{"name":"bg","value":"red","occurrencePercent":12.5}]}"#,
+        ])
+        XCTAssertEqual(details, CollectionItemDetails(
+            traits: [
+                CollectionItemTrait(name: "eyes", value: "blue", occurancePercentrage: "60.00"),
+                CollectionItemTrait(name: "hat", value: "cap", occurancePercentrage: "5.00"),
+                CollectionItemTrait(name: "bg", value: "red", occurancePercentrage: "12.5"),
+            ],
+            mintNumber: 42,
+            rank: 3,
+            rarityLabel: "rare"
+        ))
+        XCTAssertTrue(CollectionParse.itemDetails(fromMap: ["subTypeData": #"{"mintNumber":1.5}"#]).isEmpty)
+    }
+
+    func test_collectionMapJSONReadsEscapesAndRejectsBrokenText() {
+        XCTAssertEqual(
+            CollectionMapJSON.parse(#"{"b":"é\"x","a":[1,true,null]}"#),
+            .object([("b", .string("é\"x")), ("a", .array([.number(1), .bool(true), .null]))])
+        )
+        XCTAssertNil(CollectionMapJSON.parse(#"{"a":1"#))
+        XCTAssertNil(CollectionMapJSON.parse(#"{"a":1} x"#))
+        XCTAssertNil(CollectionMapJSON.parse(String(repeating: "[", count: 70) + String(repeating: "]", count: 70)))
     }
 
     private func walletOutput(outpoint: String, tags: [String]) throws -> WalletOutput {
