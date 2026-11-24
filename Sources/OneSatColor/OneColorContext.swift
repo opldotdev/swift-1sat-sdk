@@ -184,6 +184,64 @@ public struct ColorFundingReport: Equatable, Sendable {
     }
 }
 
+/// Storage's `WERR_INSUFFICIENT_FUNDS`: the wallet's change cannot fund an action (not in the TS,
+/// whose callers show the error as thrown).
+///
+/// It leaves nothing behind: wallet-toolbox plans an action's funding in memory before it writes
+/// (storage/methods/createAction.ts `prepareFundingPlanWithLiquidityPolicy`, ahead of
+/// `createNewTxRecord` and of the claim's `markChangeInputsSpent`; 2.14.5 to 2.18.0), so an
+/// action it cannot fund throws with no transaction record made and no output marked spent,
+/// `noSendChange` coins included. The amounts are storage's own: TS `WERR_INSUFFICIENT_FUNDS`
+/// carries `moreSatoshisNeeded` and `totalSatoshisNeeded` and writes both into its message, the
+/// part of the error the Swift `WireError` keeps.
+public struct WalletShortfall: Equatable, Sendable {
+    public static let code = "WERR_INSUFFICIENT_FUNDS"
+
+    /// The sats the wallet's change lacks; nil when the error does not say.
+    public let moreSatoshisNeeded: UInt64?
+    /// The sats the outputs and the fee take, net of the caller's inputs; nil when not said.
+    public let totalSatoshisNeeded: UInt64?
+
+    public init(moreSatoshisNeeded: UInt64?, totalSatoshisNeeded: UInt64?) {
+        self.moreSatoshisNeeded = moreSatoshisNeeded
+        self.totalSatoshisNeeded = totalSatoshisNeeded
+    }
+
+    /// The shortfall `error` reports; nil when it is not storage's `WERR_INSUFFICIENT_FUNDS`.
+    public static func of(_ error: any Error) -> WalletShortfall? {
+        let message: String
+        if case .insufficientFunds(let text)? = error as? WireError {
+            message = text
+        } else {
+            let text = "\(error) \(OneSatLog.localizedMessage(error))"
+            guard text.contains(code) else { return nil }
+            message = text
+        }
+        let numbers = amounts(message)
+        return WalletShortfall(moreSatoshisNeeded: numbers?.more, totalSatoshisNeeded: numbers?.total)
+    }
+
+    /// The two amounts in TS `WERR_INSUFFICIENT_FUNDS`'s message (sdk/WERR_errors.ts:
+    /// `(<more> more satoshis are needed, for a total of <total>)`).
+    static func amounts(_ message: String) -> (more: UInt64, total: UInt64)? {
+        let middle = " more satoshis are needed, for a total of "
+        guard let at = message.range(of: middle) else { return nil }
+        let more = String(message[..<at.lowerBound].reversed().prefix { $0.isASCII && $0.isNumber }.reversed())
+        let total = String(message[at.upperBound...].prefix { $0.isASCII && $0.isNumber })
+        guard let m = UInt64(more), let t = UInt64(total) else { return nil }
+        return (m, t)
+    }
+
+    /// One short line for the user.
+    public var text: String {
+        switch (moreSatoshisNeeded, totalSatoshisNeeded) {
+        case (let more?, let total?): "Not enough BSV: \(more) more sats needed, \(total) in all"
+        case (let more?, nil): "Not enough BSV: \(more) more sats needed"
+        default: "Not enough BSV"
+        }
+    }
+}
+
 /// Creates, signs and processes an action whose token inputs this module signs. Storage-chosen
 /// BRC-29 funding inputs are signed as `TrackedAction` signs them.
 enum ColorExecutor {
@@ -269,15 +327,28 @@ enum ColorExecutor {
                 fellBack: OneSatLog.message(error)
             ))
             return try await execute(ctx, request: request, signCallerInputs: signCallerInputs)
+        } catch let error where WalletShortfall.of(error) != nil {
+            // Storage plans the funding before it writes, so it made no action and marked no coin
+            // spent (`WalletShortfall`): nothing to abort. The plain request would draw on the same
+            // change, so it is not tried; the error goes up as thrown.
+            let offered = funding.coins.reduce(UInt64(0)) { sum, coin in
+                let (total, overflow) = sum.addingReportingOverflow(coin.satoshis)
+                return overflow ? .max : total
+            }
+            let shortfall = WalletShortfall.of(error)?.text ?? WalletShortfall.code
+            OneSatLog.error(error, "1Color: \(fundedRequest.description): storage cannot fund it from the \(noSendChange.count) chosen coin(s) (\(offered) sats) and the rest of its change (\(shortfall)); no action was made and no coin is held", category: "OneSatColor")
+            throw error
         }
         let report = ColorFundingReport(funded, funding: funding, callerInputs: request.inputs ?? [])
         OneSatLog.notice("1Color: \(fundedRequest.description) funded from the chosen change: \(report.text)", category: "OneSatColor")
-        // Storage marks each `noSendChange` coin spent by this action as it takes it, and only
-        // re-queues it in memory when its change generation lets it go again (wallet-toolbox
-        // fundNewTransactionSdk `releaseChangeInput`): a coin taken and let go stays marked,
-        // spent by an action it is not an input of, for good once that action is sent. A chosen
-        // coin left unused that the change basket no longer lists is such a coin: the action is
-        // aborted, which releases every output it marked, and the plain request goes instead.
+        // A guard for storage older than wallet-toolbox's plan-first funding (2.1.x, whose
+        // fundNewTransactionSdk marked each `noSendChange` coin spent as it popped it and only
+        // re-queued it in memory when `releaseChangeInput` let it go): there a coin taken and let
+        // go stayed marked, spent by an action it is not an input of. Storage from 2.14.5 on
+        // (wallet.1sat.app runs it) claims only the coins its plan spends, so this finds none
+        // there. A chosen coin left unused that the change basket no longer lists is such a coin:
+        // the action is aborted, which releases every output it marked, and the plain request
+        // goes instead.
         if let stuck = await stuckCoins(ctx, unused: report.unused), !stuck.isEmpty {
             let why = "storage left \(stuck.count) chosen coin(s) it did not spend marked spent [\(stuck.joined(separator: ", "))]; the action was aborted to release them"
             OneSatLog.error("1Color: \(fundedRequest.description): \(why); it goes as a plain one", category: "OneSatColor")

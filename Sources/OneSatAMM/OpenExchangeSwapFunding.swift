@@ -12,9 +12,10 @@ import ToolboxActions
 // validator, and why a leg failed, kept as the exchange said it.
 //
 // The validator checks the funding BEEF of every leg: the staging transaction and each of its
-// unproven ancestors. The TS page stages from whatever change storage picks (the smallest
-// sufficient output, proven or not), so a wallet whose recent change is a long unproven chain
-// sends the validator all of it. Here the staging is funded first from the change basket's
+// unproven ancestors. The TS page stages from whatever change storage picks (wallet-toolbox
+// 2.14.5 on: a plan from proven sources first, widened to unproven and sending ones when that
+// cannot fund it or costs more bytes; 2.1.x: the smallest sufficient output, proven or not), so a
+// wallet whose recent change is a long unproven chain can send the validator all of it. Here the staging is funded first from the change basket's
 // confirmed outputs, chosen by the page: createAction `noSend` with `noSendChange` (storage
 // spends those before any other change, the last listed first), then a send-only processAction
 // (`sendWith`) broadcasts it (`ColorExecutor.executeFunded`).
@@ -22,8 +23,9 @@ import ToolboxActions
 // Every ranked coin is offered, not only enough for the payment: storage's change generation
 // (wallet-toolbox generateChangeSdk) also funds new change outputs toward the basket's
 // `numberOfDesiredUTXOs`, each `minimumDesiredUTXOValue`, and takes those inputs from
-// `noSendChange` first, then from its own smallest sufficient change, proven or not. Offering
-// the whole ranking keeps every input it adds to the order chosen here.
+// `noSendChange` first, then from its own change. Offering the whole ranking keeps every input
+// it adds to the order chosen here. A staging storage cannot fund throws
+// `WERR_INSUFFICIENT_FUNDS` having made and held nothing (`WalletShortfall`).
 
 /// One output of the wallet's change basket, as a swap's staging ranks it.
 public struct OpenExchangeFundingCoin: Equatable, Sendable {
