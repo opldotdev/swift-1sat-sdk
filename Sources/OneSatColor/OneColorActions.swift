@@ -8,6 +8,7 @@ import BSVWallet
 import ToolboxActions
 import ToolboxStorage
 import OneSatTemplates
+import OneSatCBOR
 import OneSatMetanet
 import OneSatSweep
 
@@ -345,26 +346,50 @@ public enum OneColorActions {
     }
 }
 
-/// `sendEnvelope`: a signed BRC-169 envelope whose content is BRC-78 encrypted to the recipient.
-enum Delivery {
+/// `sendEnvelope` from `@1sat/actions` `metanet/deliver.ts`: a signed BRC-169 envelope whose
+/// content is BRC-78 encrypted to the recipient.
+public enum Delivery {
+    /// Sends `plaintext` (a MIME entity) to `recipientKey`'s messagebox `messageBox` at
+    /// `resolution.messagebox`, BRC-78 encrypted to that key, in an envelope signed by `identity`
+    /// with `contentHash` its SHA-256 and `payment` as given (`null` when the envelope carries no
+    /// payment). `beforePost` runs after the envelope is built and right before it is posted, so a
+    /// caller can stop there or note that the post began. Returns the messagebox's answer.
+    public static func sendEnvelope(
+        identity: PrivateKey,
+        resolution: HandleResolver.Resolution,
+        recipientKey: PublicKey,
+        plaintext: [UInt8],
+        payment: DagCborValue = .null,
+        messageBox: String,
+        relay: CborRelay,
+        beforePost: () throws -> Void = {}
+    ) async throws -> (status: String, messageID: String) {
+        let content = try await BRC78.encrypt(plaintext, to: recipientKey, wallet: try BRC78.wallet(for: identity))
+        let unsigned = MetanetEnvelope.Unsigned(
+            recipient: .init(handle: resolution.handle, tag: resolution.tag, domain: resolution.domain),
+            senderIdentityKey: identity.publicKey.compressedBytes,
+            created: MetanetEnvelope.timestamp(),
+            payment: payment,
+            contentHash: BSVHashing.sha256(plaintext).bytes
+        )
+        let (envelope, _) = try await MetanetEnvelope.sign(unsigned, content: content, wallet: ProtoWallet(rootKey: identity))
+        guard let host = URL(string: resolution.messagebox) else {
+            throw MetanetError.relay("invalid messagebox URL")
+        }
+        try beforePost()
+        return try await relay.send(
+            host: host, recipient: recipientKey.compressedBytes, messageBox: messageBox, body: envelope
+        )
+    }
+
+    /// The same with `ctx`'s identity and relay and no payment, as a 1Color send delivers.
     static func sendEnvelope(
         _ ctx: OneColorContext, resolution: HandleResolver.Resolution, recipientKey: PublicKey,
         plaintext: [UInt8], messageBox: String
     ) async throws -> (status: String, messageID: String) {
-        let content = try await BRC78.encrypt(plaintext, to: recipientKey, wallet: try BRC78.wallet(for: ctx.identity))
-        let unsigned = MetanetEnvelope.Unsigned(
-            recipient: .init(handle: resolution.handle, tag: resolution.tag, domain: resolution.domain),
-            senderIdentityKey: ctx.identity.publicKey.compressedBytes,
-            created: MetanetEnvelope.timestamp(),
-            payment: .null,
-            contentHash: BSVHashing.sha256(plaintext).bytes
-        )
-        let (envelope, _) = try await MetanetEnvelope.sign(unsigned, content: content, wallet: ProtoWallet(rootKey: ctx.identity))
-        guard let host = URL(string: resolution.messagebox) else {
-            throw MetanetError.relay("invalid messagebox URL")
-        }
-        return try await ctx.relay.send(
-            host: host, recipient: recipientKey.compressedBytes, messageBox: messageBox, body: envelope
+        try await sendEnvelope(
+            identity: ctx.identity, resolution: resolution, recipientKey: recipientKey,
+            plaintext: plaintext, messageBox: messageBox, relay: ctx.relay
         )
     }
 }

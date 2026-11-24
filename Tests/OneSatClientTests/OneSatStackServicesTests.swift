@@ -91,6 +91,96 @@ final class OneSatStackServicesTests: XCTestCase {
         }
     }
 
+    // MARK: - merklePath and header(atHeight:), as `OneSatServices.getMerklePath` reads them
+
+    private struct RoutedHTTP: HTTPGet {
+        let answer: @Sendable (URL) -> (status: Int, body: [UInt8])
+        let recorder: URLRecorder
+
+        func get(_ url: URL) async throws -> (status: Int, body: [UInt8]) {
+            await recorder.record(url)
+            return answer(url)
+        }
+    }
+
+    private let base = URL(string: "https://api.example")!
+    private let txid = String(repeating: "ab", count: 32)
+
+    func test_merklePathIsTheProofAsServed() async throws {
+        let recorder = URLRecorder()
+        let services = OneSatStackServices(
+            baseURL: base, http: RoutedHTTP(answer: { _ in (200, [9, 8, 7]) }, recorder: recorder)
+        )
+
+        let proof = try await services.merklePath(txid: txid)
+        let requested = await recorder.value()
+
+        XCTAssertEqual(proof, [9, 8, 7])
+        XCTAssertEqual(requested?.absoluteString, "https://api.example/1sat/beef/\(txid)/proof")
+    }
+
+    func test_merklePathIsNilWhileTheIndexerAnswers404() async throws {
+        let services = OneSatStackServices(baseURL: base, http: StubHTTP(status: 404, body: []))
+        let proof = try await services.merklePath(txid: txid)
+        XCTAssertNil(proof)
+    }
+
+    func test_merklePathThrowsAnyOtherFailure() async {
+        let services = OneSatStackServices(baseURL: base, http: StubHTTP(status: 500, body: []))
+        do {
+            _ = try await services.merklePath(txid: txid)
+            XCTFail("expected the HTTP failure")
+        } catch {
+            XCTAssertEqual(error as? OneSatClientError, .httpFailure(statusCode: 500))
+        }
+    }
+
+    /// An 80-byte header with `merkleRoot` at bytes 36..<68 and `time` at 68..<72, little-endian.
+    private static func header(merkleRoot: [UInt8], time: UInt32) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: 4) + [UInt8](repeating: 0x11, count: 32) + merkleRoot
+        bytes += [UInt8(time & 0xff), UInt8((time >> 8) & 0xff), UInt8((time >> 16) & 0xff), UInt8(time >> 24)]
+        bytes += [UInt8](repeating: 0, count: 8)
+        return bytes
+    }
+
+    func test_headerAtHeightParsesTheEightyBytesTheChainTrackerSends() async throws {
+        let root = [UInt8](repeating: 0x5a, count: 32)
+        let bytes = Self.header(merkleRoot: root, time: 1_794_660_480)
+        XCTAssertEqual(bytes.count, 80)
+        let recorder = URLRecorder()
+        let services = OneSatStackServices(
+            baseURL: base, http: RoutedHTTP(answer: { _ in (200, bytes) }, recorder: recorder)
+        )
+
+        let header = try await services.header(atHeight: 900_123)
+        let requested = await recorder.value()
+
+        XCTAssertEqual(requested?.absoluteString, "https://api.example/1sat/chaintracks/headers?height=900123&count=1")
+        XCTAssertEqual(header.height, 900_123)
+        XCTAssertEqual(header.merkleRoot, root)
+        XCTAssertEqual(header.serializedBytes, bytes)
+    }
+
+    func test_headerAtHeightRefusesABodyThatIsNotOneHeader() async {
+        let services = OneSatStackServices(baseURL: base, http: StubHTTP(status: 200, body: [UInt8](repeating: 0, count: 79)))
+        do {
+            _ = try await services.header(atHeight: 5)
+            XCTFail("expected unreadableResponse")
+        } catch {
+            XCTAssertEqual(error as? OneSatClientError, .unreadableResponse)
+        }
+    }
+
+    func test_headerAtHeightThrowsAFailureStatus() async {
+        let services = OneSatStackServices(baseURL: base, http: StubHTTP(status: 404, body: []))
+        do {
+            _ = try await services.header(atHeight: 5)
+            XCTFail("expected the HTTP failure")
+        } catch {
+            XCTAssertEqual(error as? OneSatClientError, .httpFailure(statusCode: 404))
+        }
+    }
+
     func test_unimplementedUsdPerBSVNamesTheMethod() async {
         let services = OneSatStackServices(http: StubHTTP(status: 200, body: []))
 

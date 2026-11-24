@@ -400,6 +400,26 @@ final class CollectionParseTests: XCTestCase {
         XCTAssertEqual(resolved.tags, ["type:image/png", "origin:\(originTxid)_7"])
     }
 
+    /// The tag reads behind `resolveOrdinalTags`: the origin as written (a bare `origin` is the
+    /// outpoint itself, the first origin tag wins) and the most specific `type:`.
+    func test_tagOriginAndContentTypeReadTheTagsAsResolveDoes() {
+        let outpoint = "\(originTxid).0"
+        XCTAssertEqual(Ordinals.tagOrigin(outpoint: outpoint, tags: ["origin"]), outpoint)
+        XCTAssertEqual(
+            Ordinals.tagOrigin(outpoint: outpoint, tags: ["name:x", "origin:\(originTxid).7", "origin"]),
+            "\(originTxid).7"
+        )
+        XCTAssertNil(Ordinals.tagOrigin(outpoint: outpoint, tags: ["type:image/png"]))
+        XCTAssertNil(Ordinals.tagOrigin(outpoint: outpoint, tags: nil))
+
+        let tags = ["type:image", "type:image/png; charset=utf-8", "type:application/json"]
+        XCTAssertEqual(Ordinals.tagContentType(tags), "image/png")
+        XCTAssertEqual(Ordinals.tagContentType(["type:text/plain", "type:image/png"]), "text/plain")
+        XCTAssertEqual(Ordinals.tagContentType(tags, contentType: "text/html; charset=utf-8"), "text/html")
+        XCTAssertEqual(Ordinals.tagContentType(["type:image/png"], contentType: "image"), "image/png")
+        XCTAssertNil(Ordinals.tagContentType(["type:", "origin"]))
+    }
+
     func test_resolveOrdinalTagsDoesNotInventMissingOrigin() {
         let resolved = Ordinals.resolveOrdinalTags(
             outpoint: "\(originTxid).0",
