@@ -406,7 +406,10 @@ actor MemoryStorage: ColorWalletStorage {
     func colorListActions(_ auth: AuthID, _ request: WalletListActionsRequest) async throws -> WalletListActionsResult {
         listedActions.append(request)
         if let actionsError { throw TestError(actionsError) }
-        return try WalletListActionsResult(totalActions: UInt32(actions.count), actions: actions)
+        // One page, as storage pages it.
+        let start = min(Int(request.pagination.effectiveOffset), actions.count)
+        let page = Array(actions[start..<min(start + Int(request.pagination.effectiveLimit), actions.count)])
+        return try WalletListActionsResult(totalActions: UInt32(actions.count), actions: page)
     }
 
     func colorInternalizeAction(_ auth: AuthID, _ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {

@@ -40,7 +40,24 @@ public struct OpenExchangeFundingCoin: Equatable, Sendable {
 public enum OpenExchangeSwapFunding {
     static let beefLimits = WalletBEEFLimits.standard
 
-    /// The change basket (`default`) with its source transactions, every page, ranked.
+    /// Actions are read this many to a page.
+    static let actionPageLimit: UInt32 = 1_000
+
+    /// Every action with `labels` (none: every action), a page at a time until a short page.
+    static func allActions(_ ctx: OneColorContext, labels: [String]) async throws -> [WalletAction] {
+        var actions: [WalletAction] = []
+        while true {
+            let page = try await ctx.storage.colorListActions(ctx.auth, try WalletListActionsRequest(
+                labels: labels, pagination: try WalletPagination(limit: actionPageLimit, offset: UInt32(actions.count))
+            ))
+            actions += page.actions
+            if page.actions.count < Int(actionPageLimit) { return actions }
+        }
+    }
+
+    /// The change basket (`default`) with its source transactions, every page, ranked. Outputs
+    /// of a transaction not yet broadcast (its action `nosend` or `sending`, every action read)
+    /// are left out, as storage's own allocation leaves them.
     public static func coins(_ ctx: OneColorContext) async throws -> [OpenExchangeFundingCoin] {
         var outputs: [WalletOutput] = []
         var beef = try BEEF(version: .v2, merklePaths: [], transactions: [], limits: beefLimits)
@@ -53,7 +70,10 @@ public enum OpenExchangeSwapFunding {
             if let pageBEEF = page.beef { beef = try beef.merging(pageBEEF, limits: beefLimits) }
             if page.outputs.count < Int(OneColorConstants.listPageLimit) { break }
         }
-        return try rank(outputs, beef: beef)
+        guard !outputs.isEmpty else { return [] }
+        let unsent = Set(try await allActions(ctx, labels: [])
+            .filter { $0.status == .nosend || $0.status == .sending }.map(\.transactionID))
+        return try rank(outputs.filter { !unsent.contains($0.outpoint.transactionID) }, beef: beef)
     }
 
     /// The spendable outputs with sats, best first: proven first, then the fewest bytes of

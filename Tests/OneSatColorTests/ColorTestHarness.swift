@@ -361,10 +361,14 @@ actor MockWallet: ColorWalletStorage {
     /// What a send-only processAction (`isNewTx` false, `sendWith`) answers for each txid.
     private(set) var sendOnlyStatus: SendWithResult.Status = .unproven
     func setSendOnlyStatus(_ value: SendWithResult.Status) { sendOnlyStatus = value }
+    /// What a send-only processAction throws instead of answering.
+    private(set) var sendOnlyError: String?
+    func setSendOnlyError(_ value: String?) { sendOnlyError = value }
 
     func processAction(_ auth: AuthID, _ request: StorageProcessActionRequest) async throws -> StorageProcessActionResult {
         processed.append(request)
         if !request.isNewTx {
+            if let sendOnlyError { throw HarnessError(sendOnlyError) }
             return StorageProcessActionResult(sendWithResults: request.sendWith.map { SendWithResult(txid: $0, status: sendOnlyStatus) })
         }
         guard let action = pending.removeValue(forKey: request.reference), let raw = request.rawTX else {

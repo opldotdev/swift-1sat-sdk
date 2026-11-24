@@ -48,10 +48,13 @@ public enum OpenExchangeSettleEvent: Equatable, Sendable {
     case notFiled(outpoint: String, error: String)
     /// A staging action held as a noSend (the swap stopped between its two calls) was sent.
     case heldSent(txid: String)
-    /// A held staging action could not be sent (`error`) and was aborted, its coins free again.
-    case heldAborted(txid: String, error: String)
-    /// A held staging action could be neither sent (`error`) nor aborted (`abort`): left held.
-    case heldKept(txid: String, error: String, abort: String)
+    /// A held staging's send was taken by storage, whose monitor broadcasts it (`sending`).
+    case heldSending(txid: String)
+    /// Storage failed a held staging's send itself (`failed`), which releases its inputs.
+    case heldFailed(txid: String)
+    /// A held staging's send threw, or storage answered no status for it: left held (`error`),
+    /// to be sent again by the next recovery, never aborted (its transaction may be out).
+    case heldKept(txid: String, error: String)
     /// The wallet's actions could not be read to find held staging actions.
     case heldUnread(error: String)
 }
@@ -321,21 +324,22 @@ extension OpenExchangeSwapLeg {
 
     // MARK: - Held stagings (not in the TS)
 
-    /// Every swap staging action left held as a noSend (`amm-swap` label, status `nosend`): a
-    /// staging funded from chosen change is created as a noSend and sent in a second call, so a
-    /// swap stopped between the two leaves it held, its coins reserved. Each is sent now
-    /// (`sendWith` its txid); one that cannot be sent is aborted, which frees its coins. Each
-    /// step is logged and told to `onEvent`; nothing is dropped. Returns the txids sent.
+    /// Every swap staging action left held as a noSend (`amm-swap` label, status `nosend`, every
+    /// page of the wallet's actions): a staging funded from chosen change is created as a noSend
+    /// and sent in a second call, so a swap stopped between the two leaves it held, its coins
+    /// reserved. Each is sent again now (`sendWith` its txid), and storage's answer told as it
+    /// is: `unproven` sent, `sending` taken by storage's monitor, `failed` failed by storage (its
+    /// inputs released). One whose send throws or answers nothing is left held for the next
+    /// recovery: it is never aborted, since its transaction may already be out. Each step is
+    /// logged and told to `onEvent`; nothing is dropped. Returns the txids sent.
     @discardableResult
     public static func recoverHeldStages(
         _ ctx: OneColorContext, onEvent: (@Sendable (OpenExchangeSettleEvent) -> Void)? = nil
     ) async -> [String] {
         let held: [String]
         do {
-            let r = try await ctx.storage.colorListActions(ctx.auth, try WalletListActionsRequest(
-                labels: [OpenExchangeSwapNames.label], pagination: try WalletPagination(limit: 1000)
-            ))
-            held = r.actions.filter { $0.status == .nosend }.map(\.transactionID.displayHex)
+            held = try await OpenExchangeSwapFunding.allActions(ctx, labels: [OpenExchangeSwapNames.label])
+                .filter { $0.status == .nosend }.map(\.transactionID.displayHex)
         } catch {
             OneSatLog.error(error, "OpenExchange: the wallet's actions could not be read to find held stagings", category: OpenExchange.logCategory)
             onEvent?(.heldUnread(error: OpenExchangeError.errorText(error)))
@@ -343,26 +347,31 @@ extension OpenExchangeSwapLeg {
         }
         var sent: [String] = []
         for txid in held {
+            let status: SendWithResult.Status
             do {
                 let r = try await ctx.storage.processAction(ctx.auth, StorageProcessActionRequest(
                     reference: txid, isNewTx: false, isSendWith: true, rawTX: nil, sendWith: [txid], isNoSend: false, isDelayed: false
                 ))
-                if let failed = r.sendWithResults.first(where: { $0.status != .unproven }) {
-                    throw OpenExchangeSwapLeg.fail("broadcast \(failed.status.rawValue)")
+                guard let answered = r.sendWithResults.first(where: { $0.txid == txid }) ?? r.sendWithResults.first else {
+                    throw OpenExchangeSwapLeg.fail("storage answered no send status")
                 }
+                status = answered.status
+            } catch {
+                OneSatLog.error(error, "OpenExchange: the held staging \(txid) could not be sent; it stays held for the next recovery", category: OpenExchange.logCategory)
+                onEvent?(.heldKept(txid: txid, error: OpenExchangeError.errorText(error)))
+                continue
+            }
+            switch status {
+            case .unproven:
                 OneSatLog.notice("OpenExchange: the held staging \(txid) was sent", category: OpenExchange.logCategory)
                 sent.append(txid)
                 onEvent?(.heldSent(txid: txid))
-            } catch {
-                let reason = OpenExchangeError.errorText(error)
-                OneSatLog.error(error, "OpenExchange: the held staging \(txid) could not be sent; aborting it", category: OpenExchange.logCategory)
-                do {
-                    _ = try await ctx.storage.abortAction(ctx.auth, WalletAbortActionRequest(reference: try WalletBase64Data(base64: txid)))
-                    onEvent?(.heldAborted(txid: txid, error: reason))
-                } catch let abort {
-                    OneSatLog.error(abort, "OpenExchange: the held staging \(txid) could not be aborted; it stays held", category: OpenExchange.logCategory)
-                    onEvent?(.heldKept(txid: txid, error: reason, abort: OpenExchangeError.errorText(abort)))
-                }
+            case .sending:
+                OneSatLog.notice("OpenExchange: the held staging \(txid) is with storage's monitor to send (sending)", category: OpenExchange.logCategory)
+                onEvent?(.heldSending(txid: txid))
+            case .failed:
+                OneSatLog.error("OpenExchange: storage failed the held staging \(txid)'s send (failed); its inputs are released", category: OpenExchange.logCategory)
+                onEvent?(.heldFailed(txid: txid))
             }
         }
         return sent

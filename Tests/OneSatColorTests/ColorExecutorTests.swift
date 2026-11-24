@@ -109,6 +109,34 @@ final class ColorExecutorTests: XCTestCase {
         XCTAssertEqual(aborted, [try XCTUnwrap(processed.first?.reference)])
     }
 
+    /// A send-only call that throws, or a send storage leaves `sending`, may be out: the action
+    /// is not aborted, and the error is thrown.
+    func testAFundedSendThatThrowsOrIsSendingIsNotAborted() async throws {
+        for (status, error, expected) in [
+            (SendWithResult.Status.unproven, "the network is down" as String?, "the network is down"),
+            (.sending, nil, "broadcast sending"),
+        ] {
+            let wallet = try MockWallet(identity: identity)
+            await wallet.setSendOnlyStatus(status)
+            await wallet.setSendOnlyError(error)
+            let records = await wallet.records
+            let coin = try XCTUnwrap(records.first { $0.funding != nil })
+            do {
+                _ = try await ColorExecutor.execute(
+                    context(wallet), request: try request(),
+                    funding: ColorFunding(coins: [ColorFundingCoin(outpoint: coin.outpoint, satoshis: coin.satoshis)])
+                ) { _ in [:] }
+                XCTFail("a send that may be out returned")
+            } catch {
+                XCTAssertTrue("\(error)".contains(expected), "\(error)")
+            }
+            let processed = await wallet.processed
+            XCTAssertEqual(processed.count, 2)
+            let aborted = await wallet.aborted
+            XCTAssertEqual(aborted, [], expected)
+        }
+    }
+
     func testStorageRefusingANoSendChangeOutpointIsRecognised() {
         XCTAssertTrue(ColorExecutor.refusesNoSendChange(HarnessError("WERR_INVALID_PARAMETER: The noSendChange outpoint parameter must be valid")))
         XCTAssertFalse(ColorExecutor.refusesNoSendChange(HarnessError("WERR_INSUFFICIENT_FUNDS")))

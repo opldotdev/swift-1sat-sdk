@@ -239,8 +239,10 @@ enum ColorExecutor {
     /// last listed first), the signed transaction processed as a noSend, then a second,
     /// send-only processAction (`sendWith` its txid) broadcasts it. The outputs, their order and
     /// every other option are the caller's. Storage that refuses a `noSendChange` outpoint gets
-    /// the plain request once instead; a failure after createAction aborts the action, which
-    /// releases its inputs.
+    /// the plain request once instead. A failure before the send, or a send storage reports
+    /// `failed`, aborts the action, which releases its inputs; a send that throws or reports
+    /// `sending` is never aborted (its transaction may be out): it stays for recovery or storage's
+    /// monitor.
     static func executeFunded(
         _ ctx: OneColorContext, request: WalletCreateActionRequest, funding: ColorFunding,
         signCallerInputs: (Transaction) throws -> [Int: Script]
@@ -271,21 +273,41 @@ enum ColorExecutor {
         let report = ColorFundingReport(funded, funding: funding, callerInputs: request.inputs ?? [])
         OneSatLog.notice("1Color: \(fundedRequest.description) funded from the chosen change: \(report.text)", category: "OneSatColor")
         funding.observe?(report)
+        // Before the send: a failure aborts the action, which releases its inputs.
+        let signed: SignedAction
         do {
-            let signed = try sign(ctx, funded: funded, request: fundedRequest, signCallerInputs: signCallerInputs)
+            signed = try sign(ctx, funded: funded, request: fundedRequest, signCallerInputs: signCallerInputs)
             let held = try await ctx.storage.processAction(ctx.auth, try signed.processRequest(isNoSend: true))
             try requireSent(held)
-            let sent = try await ctx.storage.processAction(ctx.auth, StorageProcessActionRequest(
-                reference: funded.reference, isNewTx: false, isSendWith: true, rawTX: nil,
-                sendWith: [signed.transactionID.displayHex], isNoSend: false, isDelayed: false
-            ))
-            try requireSent(sent)
-            return signed
         } catch {
-            OneSatLog.error(error, "1Color: the funded action \(funded.reference) failed; aborting it", category: "OneSatColor")
+            OneSatLog.error(error, "1Color: the funded action \(funded.reference) failed before its send; aborting it", category: "OneSatColor")
             await abort(ctx, reference: funded.reference)
             throw error
         }
+        let txid = signed.transactionID.displayHex
+        let sent: StorageProcessActionResult
+        do {
+            sent = try await ctx.storage.processAction(ctx.auth, StorageProcessActionRequest(
+                reference: funded.reference, isNewTx: false, isSendWith: true, rawTX: nil,
+                sendWith: [txid], isNoSend: false, isDelayed: false
+            ))
+        } catch {
+            // The transaction may be out: never aborted. It stays held, and recovery sends it
+            // again (a resend of a sent transaction is harmless).
+            OneSatLog.error(error, "1Color: the send of the funded action \(txid) threw; it stays held, not aborted, for recovery to send", category: "OneSatColor")
+            throw error
+        }
+        if sent.sendWithResults.contains(where: { $0.status == .failed }) {
+            OneSatLog.error("1Color: storage failed the send of the funded action \(txid); aborting it", category: "OneSatColor")
+            await abort(ctx, reference: funded.reference)
+            throw ColorError.custody("broadcast failed")
+        }
+        if let other = sent.sendWithResults.first(where: { $0.status != .unproven }) {
+            // `sending`: storage's monitor broadcasts it, so it is not aborted.
+            OneSatLog.error("1Color: the funded action \(txid) is \(other.status.rawValue), not sent yet; left to storage, not aborted", category: "OneSatColor")
+            throw ColorError.custody("broadcast \(other.status.rawValue)")
+        }
+        return signed
     }
 
     /// The funded action assembled and signed: the caller's inputs by `signCallerInputs`, the

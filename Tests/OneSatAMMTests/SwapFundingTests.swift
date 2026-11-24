@@ -184,8 +184,9 @@ final class SwapFundingTests: XCTestCase {
         XCTAssertEqual(aborted, [try XCTUnwrap(processed.first?.reference)])
     }
 
-    /// A send-only call that throws aborts it too.
-    func testASendThatThrowsAbortsTheStaging() async throws {
+    /// A send-only call that throws leaves the staging held, not aborted: it may be out, and
+    /// recovery sends it again.
+    func testASendThatThrowsLeavesTheStagingHeld() async throws {
         let storage = try await storage()
         _ = try await storage.addFunding(40_000, proven: true)
         await storage.setSendOnly(.unproven, error: "the network is down")
@@ -195,8 +196,51 @@ final class SwapFundingTests: XCTestCase {
         } catch {
             XCTAssertTrue("\(error)".contains("the network is down"), "\(error)")
         }
+        let processed = await storage.processed
+        XCTAssertEqual(processed.count, 2)
         let aborted = await storage.aborted
-        XCTAssertEqual(aborted.count, 1)
+        XCTAssertEqual(aborted, [])
+    }
+
+    /// A send storage leaves `sending` is its monitor's to broadcast: the staging fails, not aborted.
+    func testASendLeftSendingIsNotAborted() async throws {
+        let storage = try await storage()
+        _ = try await storage.addFunding(40_000, proven: true)
+        await storage.setSendOnly(.sending)
+        do {
+            _ = try await OpenExchangeSwapLeg.stageSats(context(storage), sats: 1_000)
+            XCTFail("a staging left sending returned")
+        } catch {
+            XCTAssertTrue("\(error)".contains("broadcast sending"), "\(error)")
+        }
+        let aborted = await storage.aborted
+        XCTAssertEqual(aborted, [])
+    }
+
+    /// Outputs of a transaction not yet broadcast (`nosend` or `sending`) are not chosen.
+    func testCoinsOfUnsentActionsAreLeftOut() async throws {
+        let storage = try await storage()
+        let held = try await storage.addFunding(90_000, proven: true)
+        let queued = try await storage.addFunding(80_000, proven: true)
+        let done = try await storage.addFunding(10_000, proven: true)
+        await storage.setActions([
+            try heldAction(held.transactionID.displayHex, status: .nosend),
+            try heldAction(queued.transactionID.displayHex, status: .sending),
+            try heldAction(done.transactionID.displayHex, status: .completed),
+        ])
+        let ranked = try await OpenExchangeSwapFunding.coins(context(storage))
+        XCTAssertEqual(ranked.map(\.outpoint), [done.description])
+        let asked = await storage.listedActions
+        XCTAssertEqual(asked.map(\.labels), [[]])
+    }
+
+    /// An empty change basket reads no actions.
+    func testAnEmptyBasketReadsNoActions() async throws {
+        let storage = try await storage()
+        let ranked = try await OpenExchangeSwapFunding.coins(context(storage))
+        XCTAssertEqual(ranked, [])
+        let asked = await storage.listedActions
+        XCTAssertTrue(asked.isEmpty)
     }
 
     /// A basket that lists nothing: the TS's plain staging, storage choosing the change.
@@ -240,17 +284,40 @@ final class SwapFundingTests: XCTestCase {
         XCTAssertTrue(aborted.isEmpty)
     }
 
-    func testAHeldStagingThatCannotBeSentIsAborted() async throws {
+    /// Storage's answer to the re-send, told as it is; none is aborted.
+    func testAHeldStagingsSendIsToldAsStorageAnswers() async throws {
+        let held = String(repeating: "ab", count: 32)
+        for (status, error, event) in [
+            (SendWithResult.Status.sending, nil, OpenExchangeSettleEvent.heldSending(txid: held)),
+            (.failed, nil, .heldFailed(txid: held)),
+            (.unproven, "the network is down", .heldKept(txid: held, error: "the network is down")),
+        ] as [(SendWithResult.Status, String?, OpenExchangeSettleEvent)] {
+            let storage = try MemoryStorage(identity: SwapFixture.walletRoot)
+            await storage.setActions([try heldAction(held, status: .nosend)])
+            await storage.setSendOnly(status, error: error)
+            let events = SettleLog()
+            let sent = await OpenExchangeSwapLeg.recoverHeldStages(context(storage), onEvent: { events.add($0) })
+            XCTAssertEqual(sent, [], "\(status)")
+            XCTAssertEqual(events.all, [event])
+            let aborted = await storage.aborted
+            XCTAssertEqual(aborted, [], "\(status)")
+        }
+    }
+
+    /// A held staging past the first page of actions is still found.
+    func testHeldStagingsAreFoundOnEveryPage() async throws {
         let storage = try MemoryStorage(identity: SwapFixture.walletRoot)
         let held = String(repeating: "ab", count: 32)
-        await storage.setActions([try heldAction(held, status: .nosend)])
-        await storage.setSendOnly(.failed)
-        let events = SettleLog()
-        let sent = await OpenExchangeSwapLeg.recoverHeldStages(context(storage), onEvent: { events.add($0) })
-        XCTAssertEqual(sent, [])
-        XCTAssertEqual(events.all, [.heldAborted(txid: held, error: "broadcast failed")])
-        let aborted = await storage.aborted
-        XCTAssertEqual(aborted, [held])
+        var actions = try (0..<1_000).map { i in
+            try heldAction(String(format: "%064x", i + 1), status: .completed)
+        }
+        actions.append(try heldAction(held, status: .nosend))
+        await storage.setActions(actions)
+        let sent = await OpenExchangeSwapLeg.recoverHeldStages(context(storage))
+        XCTAssertEqual(sent, [held])
+        let asked = await storage.listedActions
+        XCTAssertEqual(asked.map(\.pagination.effectiveOffset), [0, 1_000])
+        XCTAssertEqual(asked.map(\.pagination.effectiveLimit), [1_000, 1_000])
     }
 
     func testUnreadActionsAreToldNotDropped() async throws {
