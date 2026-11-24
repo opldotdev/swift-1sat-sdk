@@ -272,6 +272,21 @@ enum ColorExecutor {
         }
         let report = ColorFundingReport(funded, funding: funding, callerInputs: request.inputs ?? [])
         OneSatLog.notice("1Color: \(fundedRequest.description) funded from the chosen change: \(report.text)", category: "OneSatColor")
+        // Storage marks each `noSendChange` coin spent by this action as it takes it, and only
+        // re-queues it in memory when its change generation lets it go again (wallet-toolbox
+        // fundNewTransactionSdk `releaseChangeInput`): a coin taken and let go stays marked,
+        // spent by an action it is not an input of, for good once that action is sent. A chosen
+        // coin left unused that the change basket no longer lists is such a coin: the action is
+        // aborted, which releases every output it marked, and the plain request goes instead.
+        if let stuck = await stuckCoins(ctx, unused: report.unused), !stuck.isEmpty {
+            let why = "storage left \(stuck.count) chosen coin(s) it did not spend marked spent [\(stuck.joined(separator: ", "))]; the action was aborted to release them"
+            OneSatLog.error("1Color: \(fundedRequest.description): \(why); it goes as a plain one", category: "OneSatColor")
+            await abort(ctx, reference: funded.reference)
+            funding.observe?(ColorFundingReport(
+                sent: report.sent, used: [], unused: report.sent, topUps: [], fellBack: why
+            ))
+            return try await execute(ctx, request: request, signCallerInputs: signCallerInputs)
+        }
         funding.observe?(report)
         // Before the send: a failure aborts the action, which releases its inputs.
         let signed: SignedAction
@@ -308,6 +323,30 @@ enum ColorExecutor {
             throw ColorError.custody("broadcast \(other.status.rawValue)")
         }
         return signed
+    }
+
+    /// The chosen coins in `unused` that the change basket (`default`) no longer lists as
+    /// spendable, every page read. Nil when the basket cannot be read (logged; the action goes
+    /// on as funded).
+    static func stuckCoins(_ ctx: OneColorContext, unused: [String]) async -> [String]? {
+        guard !unused.isEmpty else { return [] }
+        var listed: Set<String> = []
+        var read = 0
+        do {
+            while true {
+                let page = try await ctx.storage.colorListOutputs(ctx.auth, try WalletListOutputsRequest(
+                    basket: OneSatConstants.fundingBasket,
+                    pagination: try WalletPagination(limit: OneColorConstants.listPageLimit, offset: UInt32(read))
+                ))
+                read += page.outputs.count
+                for output in page.outputs where output.spendable { listed.insert(output.outpoint.description) }
+                if page.outputs.count < Int(OneColorConstants.listPageLimit) { break }
+            }
+        } catch {
+            OneSatLog.error(error, "1Color: the change basket could not be read to check the chosen coins left unused \(unused); the action goes on as funded", category: "OneSatColor")
+            return nil
+        }
+        return unused.filter { !listed.contains($0) }
     }
 
     /// The funded action assembled and signed: the caller's inputs by `signCallerInputs`, the

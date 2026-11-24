@@ -93,8 +93,9 @@ final class SwapFlowTests: LiveTestCase {
 
     // MARK: - The staging's funding
 
-    /// A swap's sats staging spends the change basket's best coin, chosen and ranked by the SDK
-    /// (`OpenExchangeSwapFunding`: confirmed first), as a noSend with `noSendChange`, then sends
+    /// A swap's sats staging spends the change basket's best coin, ranked by the SDK
+    /// (`OpenExchangeSwapFunding`: confirmed first) and offered with the rest of the ranking as
+    /// a noSend's `noSendChange`, then sends
     /// it in a second, send-only call: its non-token inputs are the coin picked, the action is
     /// not left held, the network serves the transaction, and its change is spendable after.
     /// Skips when S's change basket holds no confirmed coin.
@@ -118,10 +119,11 @@ final class SwapFlowTests: LiveTestCase {
         assertTxid(staged.txid, "staging")
         let report = try XCTUnwrap(staged.funding, "the staging was not funded from the chosen coins")
         XCTAssertNil(report.fellBack, "storage refused the chosen coins: \(report.text)")
-        XCTAssertEqual(report.sent, picked.reversed().map(\.outpoint), "the best coin goes last")
+        XCTAssertEqual(report.sent, coins.reversed().map(\.outpoint), "every ranked coin is offered, the best last")
         XCTAssertTrue(report.topUps.isEmpty, "storage added coins: \(report.text)")
 
-        // The non-token inputs are the coin(s) picked, the best among them.
+        // The inputs are ranked coins only (storage may spend more than the picks for the change
+        // outputs it adds toward the basket's desired count), the best among them.
         let tx = try ColorBEEF.open(staged.atomicBEEF).transaction
         let inputs = tx.inputs.map(\.previousOutput.description)
         XCTAssertEqual(Set(inputs), Set(report.used), "inputs \(inputs), report \(report.text)")

@@ -128,6 +128,9 @@ actor MemoryStorage: ColorWalletStorage {
     var refusesNoSendChange = false
     /// `noSendChange` is taken (validated) but not spent: storage funds from its own picks.
     var ignoresNoSendChange = false
+    /// The next `noSendChange` coin after those spent is marked spent by the action but is not an
+    /// input of it, as wallet-toolbox leaves a coin it takes and lets go again.
+    var locksAnUnusedNoSendChange = false
     /// The send-only processAction (`isNewTx` false) answers this status for each txid, or throws.
     var sendOnlyStatus: SendWithResult.Status = .unproven
     var sendOnlyError: String?
@@ -155,6 +158,7 @@ actor MemoryStorage: ColorWalletStorage {
     func setListsChange(_ value: Bool) { listsChange = value }
     func setRefusesNoSendChange(_ value: Bool) { refusesNoSendChange = value }
     func setIgnoresNoSendChange(_ value: Bool) { ignoresNoSendChange = value }
+    func setLocksAnUnusedNoSendChange(_ value: Bool) { locksAnUnusedNoSendChange = value }
     /// A listing's BEEF carries `id` with a merkle path from now on.
     func prove(_ id: TransactionID) { provenIDs.insert(id) }
     func setSendOnly(_ status: SendWithResult.Status, error: String? = nil) {
@@ -341,6 +345,11 @@ actor MemoryStorage: ColorWalletStorage {
                     sourceSatoshis: Int64(coin.satoshis), sourceLockingScript: coin.script, unlockingScriptLength: 107,
                     derivationPrefix: Self.fundingPrefix, derivationSuffix: coin.fundingSuffix
                 ))
+            }
+            if locksAnUnusedNoSendChange, let outpoint = change.popLast() {
+                let index = records.firstIndex { $0.outpoint == outpoint }!
+                records[index].reserved = true
+                reserved.append(outpoint.description)
             }
         }
         if held < out + Self.fee {

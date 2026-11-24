@@ -18,6 +18,12 @@ import ToolboxActions
 // confirmed outputs, chosen by the page: createAction `noSend` with `noSendChange` (storage
 // spends those before any other change, the last listed first), then a send-only processAction
 // (`sendWith`) broadcasts it (`ColorExecutor.executeFunded`).
+//
+// Every ranked coin is offered, not only enough for the payment: storage's change generation
+// (wallet-toolbox generateChangeSdk) also funds new change outputs toward the basket's
+// `numberOfDesiredUTXOs`, each `minimumDesiredUTXOValue`, and takes those inputs from
+// `noSendChange` first, then from its own smallest sufficient change, proven or not. Offering
+// the whole ranking keeps every input it adds to the order chosen here.
 
 /// One output of the wallet's change basket, as a swap's staging ranks it.
 public struct OpenExchangeFundingCoin: Equatable, Sendable {
@@ -122,9 +128,10 @@ public enum OpenExchangeSwapFunding {
         return overflow ? .max : sum
     }
 
-    /// The funding of a staging action: the picks of the ranked change basket for `need`. Nil
-    /// when the basket holds no coin, or cannot be read (logged; the staging then goes as the TS
-    /// sends it, storage choosing the change).
+    /// The funding of a staging action: the whole ranked change basket, best spent first (the
+    /// picks for `need` are logged as what covers the payment; storage may spend more of the
+    /// ranking for the change outputs it adds). Nil when the basket holds no coin, or cannot be
+    /// read (logged; the staging then goes as the TS sends it, storage choosing the change).
     static func funding(
         _ ctx: OneColorContext, need: UInt64, what: String, onFunding: (@Sendable (ColorFundingReport) -> Void)?
     ) async -> ColorFunding? {
@@ -135,15 +142,15 @@ public enum OpenExchangeSwapFunding {
             OneSatLog.error(error, "OpenExchange \(what): the change basket could not be read to choose its coins; storage chooses them", category: OpenExchange.logCategory)
             return nil
         }
-        let picked = pick(ranked, need: need)
-        guard !picked.isEmpty else {
+        guard !ranked.isEmpty else {
             OneSatLog.notice("OpenExchange \(what): the change basket lists no coin to choose; storage chooses them", category: OpenExchange.logCategory)
             return nil
         }
+        let picked = pick(ranked, need: need)
         let text = picked.map { "\($0.outpoint) (\($0.satoshis) sats, \($0.proven ? "proven" : "unproven \($0.unprovenBytes) bytes"))" }
-        OneSatLog.notice("OpenExchange \(what): \(need) sats from the change basket's best coins [\(text.joined(separator: ", "))] of \(ranked.count)", category: OpenExchange.logCategory)
+        OneSatLog.notice("OpenExchange \(what): \(need) sats covered by the change basket's best coins [\(text.joined(separator: ", "))]; all \(ranked.count) offered in rank order", category: OpenExchange.logCategory)
         var coins: [ColorFundingCoin] = []
-        for coin in picked {
+        for coin in ranked {
             guard let outpoint = try? Outpoint(coin.outpoint) else { continue }
             coins.append(ColorFundingCoin(outpoint: outpoint, satoshis: coin.satoshis))
         }

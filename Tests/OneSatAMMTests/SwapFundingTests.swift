@@ -78,11 +78,11 @@ final class SwapFundingTests: XCTestCase {
 
     // MARK: - The staging
 
-    /// The sats staging: the same request as the TS's, plus `noSend` and `noSendChange` (the
-    /// picks, the best last); processed as a noSend, then sent alone; it spends the picks.
+    /// The sats staging: the same request as the TS's, plus `noSend` and `noSendChange` (every
+    /// ranked coin, the best last); processed as a noSend, then sent alone; it spends the picks.
     func testStageSatsSpendsTheChosenCoinsBestLastThenSendsThem() async throws {
         let storage = try await storage()
-        _ = try await storage.addFunding(80_000, proven: false, chain: 2)
+        let deep = try await storage.addFunding(80_000, proven: false, chain: 2)
         let second = try await storage.addFunding(6_000, proven: true)
         let best = try await storage.addFunding(8_000, proven: true)
         let ctx = context(storage)
@@ -94,7 +94,7 @@ final class SwapFundingTests: XCTestCase {
         XCTAssertEqual(created.count, 1)
         let got = try XCTUnwrap(created.first)
         XCTAssertEqual(got.options?.noSend, true)
-        XCTAssertEqual(got.options?.noSendChange, [second, best])
+        XCTAssertEqual(got.options?.noSendChange, [deep, second, best])
         XCTAssertNil(got.inputs)
         // Everything else is the TS's request.
         XCTAssertEqual(got.description, plain.description)
@@ -116,7 +116,8 @@ final class SwapFundingTests: XCTestCase {
         let tx = try ColorBEEF.open(staged.atomicBEEF).transaction
         XCTAssertEqual(Set(tx.inputs.map(\.previousOutput)), Set([best, second]))
         XCTAssertEqual(staged.funding, ColorFundingReport(
-            sent: [second, best].map(\.description), used: [best, second].map(\.description), unused: [], topUps: [], fellBack: nil
+            sent: [deep, second, best].map(\.description), used: [best, second].map(\.description),
+            unused: [deep.description], topUps: [], fellBack: nil
         ))
         // The row is the TS's.
         XCTAssertEqual(staged.sats?.outpoint, "\(staged.txid).0")
@@ -133,13 +134,39 @@ final class SwapFundingTests: XCTestCase {
         XCTAssertEqual(staged.funding?.used, [best.description])
     }
 
+    /// Storage leaving a chosen coin it did not spend marked spent (wallet-toolbox takes and
+    /// lets go of `noSendChange` coins as it sizes its change): the action is aborted, which
+    /// releases it, and the plain request goes instead, reported as a fallback.
+    func testAChosenCoinLeftMarkedSpentAbortsAndGoesPlain() async throws {
+        let storage = try await storage()
+        let deep = try await storage.addFunding(80_000, proven: false, chain: 2)
+        let second = try await storage.addFunding(6_000, proven: true)
+        let best = try await storage.addFunding(20_000, proven: true)
+        await storage.setLocksAnUnusedNoSendChange(true)
+        let staged = try await OpenExchangeSwapLeg.stageSats(context(storage), sats: 12_345)
+
+        let created = await storage.created
+        XCTAssertEqual(created.count, 2)
+        XCTAssertEqual(created.first?.options?.noSendChange, [deep, second, best])
+        XCTAssertNil(created.last?.options?.noSendChange)
+        let aborted = await storage.aborted
+        XCTAssertEqual(aborted.count, 1)
+        let report = try XCTUnwrap(staged.funding)
+        let fellBack = try XCTUnwrap(report.fellBack, report.text)
+        XCTAssertTrue(fellBack.contains(second.description), fellBack)
+        XCTAssertEqual(report.used, [])
+    }
+
     /// Storage spending coins of its own beside (or instead of) the chosen ones: reported.
     func testAStorageTopUpIsReported() async throws {
         let storage = try MemoryStorage(identity: SwapFixture.walletRoot)
         await storage.setListsChange(true)
+        // The basket's roots are not offered (their transaction is still sending), so storage,
+        // ignoring the listed coin, tops up from a coin outside the ranking.
+        let roots = try await OpenExchangeSwapFunding.coins(context(storage))
+        let rootTxid = try XCTUnwrap(roots.first?.outpoint.split(separator: ".").first.map(String.init))
+        await storage.setActions([try heldAction(rootTxid, status: .sending)])
         let chosen = try await storage.addFunding(2_000, proven: true)
-        // The basket's roots rank after the proven coin, so with a need above it storage tops up
-        // from its own picks when it ignores the listed ones.
         await storage.setIgnoresNoSendChange(true)
         let staged = try await OpenExchangeSwapLeg.stageSats(context(storage), sats: 500)
         let report = try XCTUnwrap(staged.funding)
