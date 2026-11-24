@@ -190,8 +190,9 @@ public struct ColorFundingReport: Equatable, Sendable {
 /// It leaves nothing behind: wallet-toolbox plans an action's funding in memory before it writes
 /// (storage/methods/createAction.ts `prepareFundingPlanWithLiquidityPolicy`, ahead of
 /// `createNewTxRecord` and of the claim's `markChangeInputsSpent`; 2.14.5 to 2.18.0), so an
-/// action it cannot fund throws with no transaction record made and no output marked spent,
-/// `noSendChange` coins included. The amounts are storage's own: TS `WERR_INSUFFICIENT_FUNDS`
+/// action it cannot fund throws with no output left marked spent, `noSendChange` coins included
+/// (a re-plan inside the write can leave at most a `failed` record with no inputs). The 2.1.x
+/// storage made the record and marked coins before funding; this assumes 2.14.5 or later. The amounts are storage's own: TS `WERR_INSUFFICIENT_FUNDS`
 /// carries `moreSatoshisNeeded` and `totalSatoshisNeeded` and writes both into its message, the
 /// part of the error the Swift `WireError` keeps.
 public struct WalletShortfall: Equatable, Sendable {
@@ -336,7 +337,7 @@ enum ColorExecutor {
                 return overflow ? .max : total
             }
             let shortfall = WalletShortfall.of(error)?.text ?? WalletShortfall.code
-            OneSatLog.error(error, "1Color: \(fundedRequest.description): storage cannot fund it from the \(noSendChange.count) chosen coin(s) (\(offered) sats) and the rest of its change (\(shortfall)); no action was made and no coin is held", category: "OneSatColor")
+            OneSatLog.error(error, "1Color: \(fundedRequest.description): storage cannot fund it from the \(noSendChange.count) chosen coin(s) (\(offered) sats) and the rest of its change (\(shortfall)); storage 2.14.5+ holds no coin for it", category: "OneSatColor")
             throw error
         }
         let report = ColorFundingReport(funded, funding: funding, callerInputs: request.inputs ?? [])

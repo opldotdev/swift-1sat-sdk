@@ -50,7 +50,7 @@ public enum OpenExchangeError: Error, Equatable, Sendable, LocalizedError, Custo
     }
 
     /// Not in the TS: the wallet could not fund an action (storage's `WERR_INSUFFICIENT_FUNDS`).
-    /// A refusal before anything was sent (storage made no action and held no coin, see
+    /// A refusal before anything was sent (storage left no coin marked spent, see
     /// `WalletShortfall`), its code `WERR_INSUFFICIENT_FUNDS` and its message storage's shortfall.
     public static func insufficientFunds(_ shortfall: WalletShortfall) -> OpenExchangeError {
         .refused(code: WalletShortfall.code, message: "\(WalletShortfall.code): \(shortfall.text)")
