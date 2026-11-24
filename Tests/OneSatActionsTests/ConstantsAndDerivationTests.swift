@@ -5,6 +5,22 @@ import XCTest
 @testable import OneSatActions
 
 final class ConstantsAndDerivationTests: XCTestCase {
+    func test_compatibleBasketNamesListThePreferredNameThenItsLegacySpellings() {
+        XCTAssertEqual(
+            OneSatConstants.compatibleBasketNames(for: OneSatConstants.ordinalsBasket),
+            ["1sat", "p 1sat ordinals", "ordinals"]
+        )
+        XCTAssertEqual(
+            OneSatConstants.compatibleBasketNames(for: OneSatConstants.bsv21Basket),
+            ["bsv21", "p 1sat bsv21"]
+        )
+        XCTAssertEqual(OneSatConstants.compatibleBasketNames(for: OneSatConstants.bsv20Basket), ["bsv20", "p 1sat bsv20"])
+        XCTAssertEqual(OneSatConstants.compatibleBasketNames(for: "unrelated"), ["unrelated"])
+        for migration in OneSatConstants.legacyBasketNames {
+            XCTAssertTrue(migration.legacy == "ordinals" || migration.legacy.hasPrefix(OneSatConstants.p1satBasketPrefix))
+        }
+    }
+
     func test_constantsMatchTypesPackage() throws {
         XCTAssertEqual(OneSatConstants.ordinalsBasket, "1sat")
         XCTAssertEqual(OneSatConstants.onesatBasket, "1sat")
