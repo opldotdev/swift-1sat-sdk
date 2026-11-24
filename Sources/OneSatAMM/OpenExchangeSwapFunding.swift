@@ -183,12 +183,10 @@ public struct OpenExchangeFundingStats: Equatable, Sendable {
 
     /// The stats of an Atomic funding BEEF whose rows' transactions are `rows`.
     public static func of(atomicBEEF bytes: [UInt8], rows: [String]) throws -> OpenExchangeFundingStats {
-        let beef: BEEF
-        if bytes.starts(with: [0x01, 0x01, 0x01, 0x01]) {
-            beef = try AtomicBEEF(bytes: bytes, limits: OpenExchangeSwapLeg.beefLimits, transactionOrder: .any).beef
-        } else {
-            beef = try BEEF(bytes: bytes, limits: OpenExchangeSwapLeg.beefLimits, transactionOrder: .any)
-        }
+        // Read as the plain BEEF it wraps (after the Atomic prefix and subject txid): the stats
+        // count every record sent, whether or not it is the subject's ancestor.
+        let body = bytes.starts(with: [0x01, 0x01, 0x01, 0x01]) && bytes.count > 36 ? Array(bytes.dropFirst(36)) : bytes
+        let beef = try BEEF(bytes: body, limits: OpenExchangeSwapLeg.beefLimits, transactionOrder: .any)
         let ancestry = try ColorBEEF.Ancestry(beef)
         let own = Set(rows)
         var proven = 0, unproven = 0, unprovenBytes = 0, ancestors = 0

@@ -694,7 +694,7 @@ extension XCTestCase {
 // MARK: - Funding stats and leg failures (not in the TS)
 
 extension SwapLegTests {
-    /// The stats of a funding BEEF: a proven child, its unproven parent and the rows' own
+    /// The stats of a funding BEEF: a proven parent, its unproven child and the rows' own
     /// unproven staging that spends both.
     func testFundingStatsCountWhatTheValidatorGets() throws {
         func tx(spending parents: [Transaction], tag: UInt32) throws -> Transaction {
@@ -709,12 +709,12 @@ extension SwapLegTests {
         let parent = try tx(spending: [], tag: 1)
         let child = try tx(spending: [parent], tag: 2)
         let stage = try tx(spending: [child, parent], tag: 3)
-        let childID = try child.transactionID(limits: OpenExchangeSwapLeg.txLimits)
+        let parentID = try parent.transactionID(limits: OpenExchangeSwapLeg.txLimits)
         let stageID = try stage.transactionID(limits: OpenExchangeSwapLeg.txLimits)
-        let path = try MerklePath(blockHeight: 80, levels: [[.hash(offset: 0, hash: try Hash256(childID.wireBytes), isTransactionID: true)]])
+        let path = try MerklePath(blockHeight: 80, levels: [[.hash(offset: 0, hash: try Hash256(parentID.wireBytes), isTransactionID: true)]])
         let beef = try BEEF(
             merklePaths: [path],
-            transactions: [.raw(parent), .rawWithMerklePath(transaction: child, merklePathIndex: 0), .raw(stage)],
+            transactions: [.rawWithMerklePath(transaction: parent, merklePathIndex: 0), .raw(child), .raw(stage)],
             limits: OpenExchangeSwapLeg.beefLimits
         )
         let atomic = try AtomicBEEF(subjectTransactionID: stageID, beef: beef, limits: OpenExchangeSwapLeg.beefLimits)
@@ -725,7 +725,7 @@ extension SwapLegTests {
         XCTAssertEqual(stats.txCount, 3)
         XCTAssertEqual(stats.provenCount, 1)
         XCTAssertEqual(stats.unprovenCount, 2)
-        XCTAssertEqual(stats.unprovenBytes, try size(parent) + size(stage))
+        XCTAssertEqual(stats.unprovenBytes, try size(child) + size(stage))
         XCTAssertEqual(stats.unprovenAncestors, 1)
         XCTAssertEqual(stats.largestUnprovenTxid, stageID.displayHex)
         XCTAssertEqual(stats.largestUnprovenBytes, try size(stage))

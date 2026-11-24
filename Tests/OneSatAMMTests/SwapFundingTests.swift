@@ -202,6 +202,7 @@ final class SwapFundingTests: XCTestCase {
     /// A basket that lists nothing: the TS's plain staging, storage choosing the change.
     func testAnEmptyChangeBasketStagesAsTheTypeScriptDoes() async throws {
         let storage = try await storage()
+        _ = try await storage.addFunding(40_000, proven: true)
         await storage.setListsChange(false)
         let staged = try await OpenExchangeSwapLeg.stageSats(context(storage), sats: 1_000)
         XCTAssertNil(staged.funding)
