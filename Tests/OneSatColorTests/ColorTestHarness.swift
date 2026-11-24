@@ -205,6 +205,7 @@ actor MockWallet: ColorWalletStorage {
 
     func colorCreateAction(_ auth: AuthID, _ request: WalletCreateActionRequest) async throws -> StorageCreateActionResult {
         createRequests.append(request)
+        if let createError { throw createError }
         let pool = transactions.merging(try OneSatColorTests.transactions(in: request.inputBEEF)) { mine, _ in mine }
         let caller = try callerInputs(request, pool: pool)
         let funding = try takeFunding()
@@ -361,6 +362,10 @@ actor MockWallet: ColorWalletStorage {
     /// What a send-only processAction (`isNewTx` false, `sendWith`) answers for each txid.
     private(set) var sendOnlyStatus: SendWithResult.Status = .unproven
     func setSendOnlyStatus(_ value: SendWithResult.Status) { sendOnlyStatus = value }
+    /// Thrown by createAction before it reserves anything (wallet-toolbox's refusal of a plan it
+    /// cannot fund).
+    private(set) var createError: (any Error)?
+    func setCreateError(_ error: (any Error)?) { createError = error }
     /// What a send-only processAction throws instead of answering.
     private(set) var sendOnlyError: String?
     func setSendOnlyError(_ value: String?) { sendOnlyError = value }

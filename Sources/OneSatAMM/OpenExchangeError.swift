@@ -3,6 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 import ToolboxAuth
+import OneSatColor
 import OneSatSweep
 
 /// What an Open Exchange call threw: `ClientError` of `@dcasegr/amm-client` 0.55.1 (errors.ts:36)
@@ -48,8 +49,16 @@ public enum OpenExchangeError: Error, Equatable, Sendable, LocalizedError, Custo
         return OpenExchangeRefusal(rawValue: code)
     }
 
+    /// Not in the TS: the wallet could not fund an action (storage's `WERR_INSUFFICIENT_FUNDS`).
+    /// A refusal before anything was sent (storage left no coin marked spent, see
+    /// `WalletShortfall`), its code `WERR_INSUFFICIENT_FUNDS` and its message storage's shortfall.
+    public static func insufficientFunds(_ shortfall: WalletShortfall) -> OpenExchangeError {
+        .refused(code: WalletShortfall.code, message: "\(WalletShortfall.code): \(shortfall.text)")
+    }
+
     /// `errorKind` (errors.ts:48) for what a Swift wallet or transport throws: the user's denial
-    /// and a request that did not get through; nil for anything else.
+    /// and a request that did not get through; nil for anything else. Not in the TS: storage's
+    /// `WERR_INSUFFICIENT_FUNDS` is `insufficientFunds`.
     static func kinded(_ error: Error) -> OpenExchangeError? {
         if let known = error as? OpenExchangeError {
             switch known {
@@ -57,6 +66,7 @@ public enum OpenExchangeError: Error, Equatable, Sendable, LocalizedError, Custo
             default: return known
             }
         }
+        if let shortfall = WalletShortfall.of(error) { return .insufficientFunds(shortfall) }
         let text = errorText(error)
         if text.contains("ERR_PERMISSION_DENIED") || deniedPattern(text) { return .userRejected(text) }
         if error is URLError { return .network(text) }

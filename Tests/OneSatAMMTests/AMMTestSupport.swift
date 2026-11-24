@@ -7,6 +7,7 @@ import BSVWallet
 import ToolboxActions
 import ToolboxAuth
 import ToolboxBRC29
+import ToolboxCore
 import ToolboxStorage
 import OneSatColor
 
@@ -129,7 +130,8 @@ actor MemoryStorage: ColorWalletStorage {
     /// `noSendChange` is taken (validated) but not spent: storage funds from its own picks.
     var ignoresNoSendChange = false
     /// The next `noSendChange` coin after those spent is marked spent by the action but is not an
-    /// input of it, as wallet-toolbox leaves a coin it takes and lets go again.
+    /// input of it, as wallet-toolbox 2.1.x left a coin it took and let go again (2.14.5 on claims
+    /// only the coins its plan spends).
     var locksAnUnusedNoSendChange = false
     /// The send-only processAction (`isNewTx` false) answers this status for each txid, or throws.
     var sendOnlyStatus: SendWithResult.Status = .unproven
@@ -303,6 +305,25 @@ actor MemoryStorage: ColorWalletStorage {
         if let refused = refusedDescription, request.description == refused {
             throw TestError("insufficient funds: 1 sats short")
         }
+        // wallet-toolbox plans the funding before it writes: an action it cannot fund throws
+        // with nothing reserved (createAction.ts `prepareFundingPlanWithLiquidityPolicy`).
+        let before = records
+        do {
+            return try fund(request)
+        } catch let error as WireError {
+            records = before
+            throw error
+        }
+    }
+
+    /// `WERR_INSUFFICIENT_FUNDS` as TS storage sends it (sdk/WERR_errors.ts), `more` short of `total`.
+    static func insufficientFunds(more: UInt64, total: UInt64) -> WireError {
+        .insufficientFunds(
+            "Insufficient funds in the available inputs to cover the cost of the required outputs and the transaction fee (\(more) more satoshis are needed, for a total of \(total)), plus whatever would be required in order to pay the fee to unlock and spend the outputs used to provide the additional satoshis."
+        )
+    }
+
+    private func fund(_ request: WalletCreateActionRequest) throws -> StorageCreateActionResult {
         var inputs: [StorageActionInput] = []
         var reserved: [String] = []
         var held: UInt64 = 0
@@ -353,6 +374,9 @@ actor MemoryStorage: ColorWalletStorage {
             }
         }
         if held < out + Self.fee {
+            guard records.contains(where: { $0.fundingSuffix != nil && !$0.reserved && $0.basket == "default" }) else {
+                throw Self.insufficientFunds(more: out + Self.fee - held, total: out + Self.fee)
+            }
             let funding = try takeFunding()
             held += funding.satoshis
             reserved.append(funding.outpoint.description)
@@ -362,7 +386,7 @@ actor MemoryStorage: ColorWalletStorage {
                 derivationPrefix: Self.fundingPrefix, derivationSuffix: funding.fundingSuffix
             ))
         }
-        guard held >= out + Self.fee else { throw TestError("insufficient funds") }
+        guard held >= out + Self.fee else { throw Self.insufficientFunds(more: out + Self.fee - held, total: out + Self.fee) }
         var outputs = requested.enumerated().map { index, output in
             StorageActionOutput(vout: UInt32(index), satoshis: output.satoshis, lockingScript: output.lockingScript,
                                 providedBy: .you, purpose: nil, derivationSuffix: nil)

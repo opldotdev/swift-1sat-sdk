@@ -6,6 +6,7 @@ import BSVScript
 import BSVTransaction
 import BSVWallet
 import ToolboxAuth
+import ToolboxCore
 import ToolboxStorage
 @testable import OneSatColor
 
@@ -135,6 +136,59 @@ final class ColorExecutorTests: XCTestCase {
             let aborted = await wallet.aborted
             XCTAssertEqual(aborted, [], expected)
         }
+    }
+
+    /// Storage that cannot fund the funded action (`WERR_INSUFFICIENT_FUNDS`, thrown before it
+    /// writes): the error goes up as thrown, with nothing to abort and no plain retry, which
+    /// would draw on the same change.
+    func testAFundedActionStorageCannotFundIsNotRetriedOrAborted() async throws {
+        let wallet = try MockWallet(identity: identity)
+        let refusal = WireError.insufficientFunds(Self.tsInsufficientFunds(more: 1_234, total: 5_678))
+        await wallet.setCreateError(refusal)
+        let records = await wallet.records
+        let coin = try XCTUnwrap(records.first { $0.funding != nil })
+        let reports = ReportLog()
+        do {
+            _ = try await ColorExecutor.execute(
+                context(wallet), request: try request(),
+                funding: ColorFunding(coins: [ColorFundingCoin(outpoint: coin.outpoint, satoshis: coin.satoshis)]) { reports.add($0) }
+            ) { _ in [:] }
+            XCTFail("an unfundable action returned")
+        } catch {
+            XCTAssertEqual(error as? WireError, refusal)
+            XCTAssertEqual(WalletShortfall.of(error), WalletShortfall(moreSatoshisNeeded: 1_234, totalSatoshisNeeded: 5_678))
+        }
+        let created = await wallet.createRequests
+        XCTAssertEqual(created.count, 1)
+        XCTAssertEqual(created.first?.options?.noSendChange, [coin.outpoint])
+        let processed = await wallet.processed
+        XCTAssertTrue(processed.isEmpty)
+        let aborted = await wallet.aborted
+        XCTAssertTrue(aborted.isEmpty)
+        XCTAssertTrue(reports.all.isEmpty)
+    }
+
+    /// TS `WERR_INSUFFICIENT_FUNDS`'s message (sdk/WERR_errors.ts).
+    static func tsInsufficientFunds(more: UInt64, total: UInt64) -> String {
+        "Insufficient funds in the available inputs to cover the cost of the required outputs and the transaction fee (\(more) more satoshis are needed, for a total of \(total)), plus whatever would be required in order to pay the fee to unlock and spend the outputs used to provide the additional satoshis."
+    }
+
+    /// The shortfall is read from storage's `WERR_INSUFFICIENT_FUNDS` alone: the wire error, or
+    /// an error whose text names the code; its amounts from the TS message when it has them.
+    func testAShortfallIsReadFromStoragesInsufficientFunds() {
+        XCTAssertEqual(
+            WalletShortfall.of(WireError.insufficientFunds(Self.tsInsufficientFunds(more: 7, total: 1_000_200))),
+            WalletShortfall(moreSatoshisNeeded: 7, totalSatoshisNeeded: 1_000_200)
+        )
+        XCTAssertEqual(WalletShortfall.of(WireError.insufficientFunds("")), WalletShortfall(moreSatoshisNeeded: nil, totalSatoshisNeeded: nil))
+        XCTAssertEqual(
+            WalletShortfall.of(HarnessError("WERR_INSUFFICIENT_FUNDS: \(Self.tsInsufficientFunds(more: 3, total: 9))")),
+            WalletShortfall(moreSatoshisNeeded: 3, totalSatoshisNeeded: 9)
+        )
+        XCTAssertNil(WalletShortfall.of(WireError.invalidParameter(name: "noSendChange", message: "must be valid")))
+        XCTAssertNil(WalletShortfall.of(HarnessError("insufficient funds")))
+        XCTAssertEqual(WalletShortfall(moreSatoshisNeeded: 7, totalSatoshisNeeded: 1_000_200).text, "Not enough BSV: 7 more sats needed, 1000200 in all")
+        XCTAssertEqual(WalletShortfall(moreSatoshisNeeded: nil, totalSatoshisNeeded: nil).text, "Not enough BSV")
     }
 
     func testStorageRefusingANoSendChangeOutpointIsRecognised() {

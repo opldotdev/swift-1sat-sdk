@@ -17,6 +17,9 @@ package struct Transfer1ColorResult: Equatable, Sendable {
     /// each of them). A 2xx answer that admits less leaves it false, with `error` set and `tx` kept.
     package var submitted: Bool = false
     package var error: String?
+    /// Set with `error` when storage could not fund the transfer (`WERR_INSUFFICIENT_FUNDS`):
+    /// nothing was made or sent.
+    package var shortfall: WalletShortfall?
 
     package init() {}
 }
@@ -115,6 +118,7 @@ extension OneColorActions {
         } catch {
             OneSatLog.error(error, "1Color transfer failed", category: "OneSatColor")
             result.error = OneSatLog.localizedMessage(error)
+            result.shortfall = WalletShortfall.of(error)
             return result
         }
     }

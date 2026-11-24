@@ -432,6 +432,45 @@ final class SwapSellTests: XCTestCase {
         XCTAssertTrue(internalized.isEmpty)
     }
 
+    /// A token staging storage cannot fund (`WERR_INSUFFICIENT_FUNDS`, before it writes): a
+    /// refusal with storage's shortfall, nothing reserved, the token row still the wallet's and
+    /// nothing filed or submitted.
+    func testATokenStageStorageCannotFundIsARefusalWithItsShortfall() async throws {
+        let storage = try MemoryStorage(identity: SwapFixture.walletRoot)
+        let overlay = try StubOverlay()
+        await overlay.admitSubmissions()
+        let ctx = SellFixture.context(storage, overlay)
+        _ = try await SellFixture.holdColor(ctx, storage, overlay, amount: 50_000)
+        await storage.dropFunding()
+        let tokenRows = await storage.basketRecords(SellFixture.basket)
+        XCTAssertFalse(tokenRows.isEmpty)
+        let submits = SubmitLog()
+        do {
+            _ = try await OpenExchangeSwapLeg.stage(
+                ctx, sats: 300, tokens: (SwapFixture.tokenId, 50_000), sym: "TST",
+                submit: { topic, beef in
+                    submits.add(topic, beef)
+                    return OpenExchange.steak(SellFixture.steakJSON())
+                }
+            )
+            XCTFail("an unfundable token stage ran")
+        } catch {
+            // The token input carries 1 sat; the outputs take 1 + 300 and the fake's fee 200.
+            XCTAssertEqual(error as? OpenExchangeError, .insufficientFunds(WalletShortfall(moreSatoshisNeeded: 500, totalSatoshisNeeded: 501)))
+            XCTAssertEqual(OpenExchangeError.errorText(error), "WERR_INSUFFICIENT_FUNDS: Not enough BSV: 500 more sats needed, 501 in all")
+        }
+        let created = await storage.created
+        XCTAssertEqual(created.count, 1)
+        let aborted = await storage.aborted
+        XCTAssertTrue(aborted.isEmpty)
+        let after = await storage.basketRecords(SellFixture.basket)
+        XCTAssertEqual(after.map(\.outpoint), tokenRows.map(\.outpoint))
+        XCTAssertTrue(after.allSatisfy { !$0.reserved })
+        let internalized = await storage.internalized
+        XCTAssertTrue(internalized.isEmpty)
+        XCTAssertTrue(submits.all.isEmpty)
+    }
+
     func testTheStagedKeyIsInItsOutputsDescription() throws {
         for d in SwapFixture.vectors["keyDescriptions"] as! [[String: String]] {
             XCTAssertEqual(try OpenExchangeSwapLeg.swapKeyDescription(d["readable"]!, keyID: d["keyID"]!), d["description"])

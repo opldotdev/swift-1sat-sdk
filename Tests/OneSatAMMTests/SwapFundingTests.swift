@@ -134,8 +134,8 @@ final class SwapFundingTests: XCTestCase {
         XCTAssertEqual(staged.funding?.used, [best.description])
     }
 
-    /// Storage leaving a chosen coin it did not spend marked spent (wallet-toolbox takes and
-    /// lets go of `noSendChange` coins as it sizes its change): the action is aborted, which
+    /// Storage leaving a chosen coin it did not spend marked spent (wallet-toolbox 2.1.x took and
+    /// let go of `noSendChange` coins as it sized its change): the action is aborted, which
     /// releases it, and the plain request goes instead, reported as a fallback.
     func testAChosenCoinLeftMarkedSpentAbortsAndGoesPlain() async throws {
         let storage = try await storage()
@@ -155,6 +155,36 @@ final class SwapFundingTests: XCTestCase {
         let fellBack = try XCTUnwrap(report.fellBack, report.text)
         XCTAssertTrue(fellBack.contains(second.description), fellBack)
         XCTAssertEqual(report.used, [])
+    }
+
+    /// Storage that cannot fund the staging (`WERR_INSUFFICIENT_FUNDS`) has made no action and
+    /// marked no coin spent (wallet-toolbox plans the funding before it writes): nothing is
+    /// aborted or tried again, every chosen coin is still the basket's, and the error is a
+    /// refusal that gives storage's shortfall.
+    func testAStagingStorageCannotFundHoldsNothingAndGivesTheShortfall() async throws {
+        let storage = try await storage()
+        let best = try await storage.addFunding(1_000, proven: true)
+        let other = try await storage.addFunding(500, proven: false)
+        let ctx = context(storage)
+        do {
+            _ = try await OpenExchangeSwapLeg.stageSats(ctx, sats: 5_000)
+            XCTFail("an unfundable staging returned")
+        } catch {
+            // 5,000 sats and the fake's 200 fee, from 1,500 offered.
+            XCTAssertEqual(WalletShortfall.of(error), WalletShortfall(moreSatoshisNeeded: 3_700, totalSatoshisNeeded: 5_200))
+            XCTAssertEqual(OpenExchangeError.of(error), .refused(
+                code: "WERR_INSUFFICIENT_FUNDS", message: "WERR_INSUFFICIENT_FUNDS: Not enough BSV: 3700 more sats needed, 5200 in all"
+            ))
+        }
+        let created = await storage.created
+        XCTAssertEqual(created.count, 1)
+        XCTAssertEqual(created.first?.options?.noSendChange, [other, best])
+        let processed = await storage.processed
+        XCTAssertTrue(processed.isEmpty)
+        let aborted = await storage.aborted
+        XCTAssertTrue(aborted.isEmpty)
+        let ranked = try await OpenExchangeSwapFunding.coins(ctx)
+        XCTAssertEqual(ranked.map(\.outpoint), [best, other].map(\.description))
     }
 
     /// Storage spending coins of its own beside (or instead of) the chosen ones: reported.

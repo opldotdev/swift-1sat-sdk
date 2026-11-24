@@ -244,6 +244,9 @@ extension OpenExchangeSwapLeg {
         if let error = done.error {
             if let txid = done.txid {
                 OneSatLog.error("OpenExchange stage: the staging transaction \(txid) was broadcast, then: \(error)", category: OpenExchange.logCategory)
+            } else if let shortfall = done.shortfall {
+                // Nothing was made or held (`WalletShortfall`): a refusal, with storage's numbers.
+                throw OpenExchangeError.insufficientFunds(shortfall)
             }
             throw fail(error)
         }

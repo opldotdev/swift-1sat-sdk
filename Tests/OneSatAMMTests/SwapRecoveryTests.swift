@@ -741,6 +741,33 @@ final class SwapRecoveryTests: XCTestCase {
         XCTAssertEqual(posts, 1)
     }
 
+    /// A buy whose staging the wallet cannot fund (`WERR_INSUFFICIENT_FUNDS`): the swap throws a
+    /// refusal with storage's shortfall (nothing was sent, so it is not one that may be out),
+    /// and nothing is aborted, moved back or relayed.
+    func testABuyTheWalletCannotStageIsARefusalWithTheShortfall() async throws {
+        let h = try await Host(SwapFixture.legs[0])
+        let quote = try h.quote(25_000)
+        let have = (h.w.c["rowSats"] as! [NSNumber]).reduce(BigInt(0)) { $0 + BigInt($1.int64Value) }
+        let lack = try XCTUnwrap(UInt64(exactly: quote.stage.amount + quote.stage.feeSats - have))
+        await h.w.storage.dropFunding()
+        let log = ProgressLog()
+        let want = OpenExchangeError.insufficientFunds(WalletShortfall(moreSatoshisNeeded: lack + 200, totalSatoshisNeeded: lack + 200))
+        do {
+            _ = try await h.run(log, quote: quote)
+            XCTFail("an unfundable swap ran")
+        } catch {
+            XCTAssertEqual(error as? OpenExchangeError, want)
+        }
+        XCTAssertEqual(log.phases, ["staging", "failed"])
+        XCTAssertEqual(log.all.last, .failed(result: nil, error: want.message))
+        let created = await h.w.storage.created
+        XCTAssertEqual(created.map(\.description), ["AMM swap: sats into the swap basket"])
+        let aborted = await h.w.storage.aborted
+        XCTAssertTrue(aborted.isEmpty)
+        let posts = await h.posts
+        XCTAssertEqual(posts, 0)
+    }
+
     /// A wallet with no 1Color overlay cannot take a leg's tokens in: the swap is refused before
     /// anything is staged or sent.
     func testASwapWithoutAnOverlayIsRefusedBeforeStaging() async throws {
