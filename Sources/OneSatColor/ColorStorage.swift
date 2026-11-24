@@ -86,6 +86,44 @@ public enum ColorBEEF {
         return merged
     }
 
+    /// How far transactions in a BEEF are from confirmation. Not in the TS: a wallet's own
+    /// preference for which coins to spend (an Open Exchange swap's staging, whose ancestry the
+    /// exchange's validator checks).
+    package struct Ancestry {
+        let beef: BEEF
+        let entries: [TransactionID: BEEFTransaction]
+
+        package init(_ beef: BEEF) throws {
+            self.beef = beef
+            var entries: [TransactionID: BEEFTransaction] = [:]
+            for entry in beef.transactions {
+                let id = try entry.transactionID(limits: ColorBEEF.limits.transactionLimits)
+                if entries[id] == nil { entries[id] = entry }
+            }
+            self.entries = entries
+        }
+
+        /// The BEEF carries a merkle path for `id`.
+        package func proven(_ id: TransactionID) -> Bool {
+            entries[id]?.merklePathIndex != nil || beef.merklePath(for: id) != nil
+        }
+
+        /// Whether `id` is proven, and the bytes of it and its unproven ancestry (each transaction
+        /// once), walked down to proven or transaction-ID-only records: 0 for a proven
+        /// transaction, and for one the BEEF does not carry raw.
+        package func of(_ id: TransactionID) throws -> (proven: Bool, unprovenBytes: Int) {
+            var seen: Set<TransactionID> = []
+            var bytes = 0
+            var stack = [id]
+            while let next = stack.popLast() {
+                guard seen.insert(next).inserted, !proven(next), let tx = entries[next]?.transaction else { continue }
+                bytes += try tx.serializedByteCount(limits: ColorBEEF.limits.transactionLimits)
+                stack.append(contentsOf: tx.inputs.map(\.previousOutput.transactionID))
+            }
+            return (proven(id), bytes)
+        }
+    }
+
     /// The transaction of an Atomic BEEF and its plain BEEF.
     package static func open(_ atomicBytes: [UInt8]) throws -> (txid: TransactionID, beef: BEEF, transaction: Transaction) {
         let atomic = try AtomicBEEF(bytes: atomicBytes, limits: limits, transactionOrder: .any)

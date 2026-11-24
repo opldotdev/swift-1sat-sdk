@@ -69,15 +69,24 @@ enum ColorModule {
     /// TS `selectInputs`: admitted, unspent outputs of the asset's value or authority basket. For
     /// `.value`, `target` is units, covered largest first; for `.authority` it is a count of
     /// outputs, taken in listing order (all amounts are 0). Rejected outputs are skipped and the
-    /// choice retried.
+    /// choice retried. `order` `.confirmedFirst` (not in the TS) puts proven outputs first, then
+    /// the least unproven ancestry, before that order.
     static func selectInputs(
         _ ctx: OneColorContext, overlay: any ColorOverlayProvider, assetID: ColorAssetID,
-        role: ColorTokenRole = .value, target: UInt64
+        role: ColorTokenRole = .value, target: UInt64, order: ColorInputOrder = .largestFirst
     ) async throws -> [ColorManagedInput] {
-        let candidates = try await candidates(ctx, assetID: assetID, role: role)
+        var candidates = try await candidates(ctx, assetID: assetID, role: role)
             .enumerated().sorted { $0.element.token.amount != $1.element.token.amount
                 ? $0.element.token.amount > $1.element.token.amount : $0.offset < $1.offset }
             .map(\.element)
+        if order == .confirmedFirst {
+            do {
+                candidates = try await confirmedFirst(ctx, assetID: assetID, role: role, candidates)
+            } catch {
+                // The preference only orders; the selection itself stands without it.
+                OneSatLog.error(error, "1Color: the \(assetID) inputs' ancestry could not be read to order them; largest first", category: "OneSatColor")
+            }
+        }
         var rejected: Set<String> = []
         while true {
             var chosen: [Candidate] = []
@@ -99,6 +108,31 @@ enum ColorModule {
                 return selected
             }
         }
+    }
+
+    /// `candidates` (largest first) reordered: proven source transactions first, then by the
+    /// bytes of unproven ancestry each would carry, the given order kept among equals. Read from
+    /// the BEEF the inputs' source BEEF is built from (`sourceTransactions`). An output this
+    /// wallet cannot read goes last; selection rejects it as it always does.
+    static func confirmedFirst(
+        _ ctx: OneColorContext, assetID: ColorAssetID, role: ColorTokenRole, _ candidates: [Candidate]
+    ) async throws -> [Candidate] {
+        var readable: [String: ColorManagedInput] = [:]
+        for candidate in candidates {
+            if let input = await readableInput(ctx, candidate) { readable[input.outpoint] = input }
+        }
+        guard !readable.isEmpty else { return candidates }
+        let inputs = candidates.compactMap { readable[$0.output.outpoint.description] }
+        let sources = try await sourceTransactions(ctx, basket: ColorIdentifiers.basket(assetID, role: role), selected: inputs)
+        let ancestry = try ColorBEEF.Ancestry(sources)
+        var ranked: [(rank: Int, offset: Int, candidate: Candidate)] = []
+        for (offset, candidate) in candidates.enumerated() {
+            let rank = readable[candidate.output.outpoint.description] == nil
+                ? Int.max
+                : try ancestry.of(candidate.output.outpoint.transactionID).unprovenBytes
+            ranked.append((rank, offset, candidate))
+        }
+        return ranked.sorted { $0.rank != $1.rank ? $0.rank < $1.rank : $0.offset < $1.offset }.map(\.candidate)
     }
 
     static func checkChosen(

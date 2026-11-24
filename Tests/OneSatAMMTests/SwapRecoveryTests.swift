@@ -53,8 +53,17 @@ final class EventLog: @unchecked Sendable {
 
     func add(_ e: OpenExchangeSwapEvent) { lock.withLock { entries.append(e) } }
     var all: [OpenExchangeSwapEvent] { lock.withLock { entries } }
-    /// The events other than the passes.
-    var notable: [OpenExchangeSwapEvent] { all.filter { if case .resolved = $0 { false } else { true } } }
+    /// The events other than the passes and the legs' funding stats.
+    var notable: [OpenExchangeSwapEvent] {
+        all.filter {
+            switch $0 {
+            case .resolved, .prepared: false
+            default: true
+            }
+        }
+    }
+    /// The funding stats of each leg built.
+    var prepared: [OpenExchangeFundingStats] { all.compactMap { if case .prepared(_, _, let stats) = $0 { stats } else { nil } } }
 }
 
 /// The overlay pass's two reads, scripted, each call recorded.
@@ -469,9 +478,13 @@ final class SwapRecoveryTests: XCTestCase {
         XCTAssertEqual(created.last?.description, "AMM move back: TST sats")
         let pool = SwapFixture.pool(h.w.c).outpoint
         let id = try h.w.prepare().id
+        // The refusal, as the exchange said it, with the funding the leg sent.
+        let stats = try XCTUnwrap(events.prepared.first)
+        let failure = OpenExchangeLegFailure(kind: .refused, code: "below_minimum", detail: "below_minimum", pool: pool, raw: "below_minimum", funding: stats)
+        XCTAssertEqual(result.failures, [failure])
         XCTAssertEqual(events.notable, [
             .relayed(leg: OpenExchangePrices.outpointText(pool), attempt: 1, outcome: .refused(id: id, reason: "below_minimum", pool: nil)),
-            .excluded(pool: pool, reason: "refused: below_minimum"),
+            .excluded(pool: pool, reason: "refused: below_minimum", failure: failure),
             .returned(try XCTUnwrap(result.returned)),
         ])
         let posts = await h.posts
@@ -505,10 +518,15 @@ final class SwapRecoveryTests: XCTestCase {
         let pool = SwapFixture.pool(h.w.c).outpoint
         let id = try h.w.prepare().id
         let noAnswer = OpenExchangeLegOutcome.unknown(id: id, reason: "no answer yet: the host could not reach the validator (unreachable)")
+        let failure = OpenExchangeLegFailure(
+            kind: .noAnswer, code: "unreachable", detail: "the host could not reach the validator", pool: pool,
+            raw: "no answer yet: the host could not reach the validator (unreachable)", funding: try XCTUnwrap(events.prepared.last)
+        )
+        XCTAssertEqual(result.failures, [failure])
         XCTAssertEqual(events.notable, [
             .relayed(leg: OpenExchangePrices.outpointText(pool), attempt: 1, outcome: noAnswer),
             .relayed(leg: OpenExchangePrices.outpointText(pool), attempt: 2, outcome: noAnswer),
-            .excluded(pool: pool, reason: "no answer twice: no answer yet: the host could not reach the validator (unreachable)"),
+            .excluded(pool: pool, reason: "no answer twice: no answer yet: the host could not reach the validator (unreachable)", failure: failure),
         ])
         let posts = await h.posts
         XCTAssertEqual(posts, 2)

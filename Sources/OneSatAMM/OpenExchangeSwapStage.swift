@@ -12,6 +12,7 @@ import OneSatColor
 import OneSatSweep
 import OneSatTemplates
 import ToolboxAuth
+import ToolboxStorage
 
 // A sell's side of the swap basket (skein-amm 0.55.1 market/activeSwap.ts `stage` with tokens,
 // `moveBack`, `unfiledStagedTokens`, `fileStagedToken`; lp/close.ts `submitToOverlay`,
@@ -45,6 +46,17 @@ public enum OpenExchangeSettleEvent: Equatable, Sendable {
     case notAccepted(outpoint: String)
     /// The filing threw: left unfiled.
     case notFiled(outpoint: String, error: String)
+    /// A staging action held as a noSend (the swap stopped between its two calls) was sent.
+    case heldSent(txid: String)
+    /// A held staging's send was taken by storage, whose monitor broadcasts it (`sending`).
+    case heldSending(txid: String)
+    /// Storage failed a held staging's send itself (`failed`), which releases its inputs.
+    case heldFailed(txid: String)
+    /// A held staging's send threw, or storage answered no status for it: left held (`error`),
+    /// to be sent again by the next recovery, never aborted (its transaction may be out).
+    case heldKept(txid: String, error: String)
+    /// The wallet's actions could not be read to find held staging actions.
+    case heldUnread(error: String)
 }
 
 /// `UnfiledStaged`: a staged token output the swap basket lacks.
@@ -190,14 +202,20 @@ extension OpenExchangeSwapLeg {
     /// token's topic and the filing of the token row in `amm-swap`, each failure reported in
     /// `errors`. Throws when the wallet or the module refuses or fails the action. The sats key
     /// is drawn first, then the token key (`randomKeyIDs`, tests only, in that order).
+    ///
+    /// Not in the TS: the token inputs are chosen proven first, then by the least unproven
+    /// ancestry (`ColorInputOrder.confirmedFirst`), and the sats come from the change basket's
+    /// best coins as `stageSats` takes them (a noSend with `noSendChange`, then sent alone with
+    /// `sendWith`), so the validator that checks the staging's ancestry gets the least of it.
     public static func stage(
         _ ctx: OneColorContext, sats: UInt64, tokens: (tokenId: String, amount: BigInt)? = nil, sym: String? = nil,
-        submit: OpenExchange.Submit? = nil, randomKeyIDs: [[UInt8]]? = nil
+        submit: OpenExchange.Submit? = nil, randomKeyIDs: [[UInt8]]? = nil,
+        feeRateSatsPerKb: Double = OpenExchangeQuotes.defaultFeeRateSatsPerKb
     ) async throws -> OpenExchangeStaged {
         guard sats <= AMMPoolCall.maxSafeInteger, sats > 0 || tokens != nil else { throw fail("nothing to stage in the swap basket") }
         let sym = sym ?? "token"
         guard let tokens else {
-            return try await stageSats(ctx, sats: sats, sym: sym, randomKeyID: randomKeyIDs?.first)
+            return try await stageSats(ctx, sats: sats, sym: sym, randomKeyID: randomKeyIDs?.first, feeRateSatsPerKb: feeRateSatsPerKb)
         }
         let satsRequest = try stageRequest(ctx, sats: sats, sym: sym, keyID: OpenExchangeSwapNames.newSwapKeyID(random: randomKeyIDs?.first))
         let satsOutput = satsRequest.outputs![0]
@@ -213,9 +231,15 @@ extension OpenExchangeSwapLeg {
         let outputs = [try WalletCreateActionOutput(
             lockingScript: tokenScript, satoshis: 1, outputDescription: try swapKeyDescription("\(sym) for a swap", keyID: keyID)
         )] + (sats > 0 ? [satsOutput] : [])
+        let box = OpenExchangeFundingReportBox()
+        let funding = await OpenExchangeSwapFunding.funding(
+            ctx, need: OpenExchangeSwapFunding.need(outputs: 1 + sats, callerInputs: 0, feeRateSatsPerKb: feeRateSatsPerKb),
+            what: "stage of \(sym)", onFunding: { box.set($0) }
+        )
         let done = await OneColorActions.transfer(
             ctx, assetID: asset, outputs: outputs, description: description,
-            labels: [OpenExchangeSwapNames.label, OpenExchangeSwapNames.stageLabel], acceptDelayedBroadcast: false
+            labels: [OpenExchangeSwapNames.label, OpenExchangeSwapNames.stageLabel], acceptDelayedBroadcast: false,
+            inputOrder: .confirmedFirst, funding: funding
         )
         if let error = done.error {
             if let txid = done.txid {
@@ -259,7 +283,10 @@ extension OpenExchangeSwapLeg {
             errors.append("internalizeAction: \(OpenExchangeError.errorText(error))")
         }
         for e in errors { OneSatLog.error("OpenExchange stage \(txid): \(e)", category: OpenExchange.logCategory) }
-        return OpenExchangeStaged(txid: txid, atomicBEEF: tx, sats: satsRow, tokens: tokenRow, filed: filed, submitted: submitted, errors: errors)
+        return OpenExchangeStaged(
+            txid: txid, atomicBEEF: tx, sats: satsRow, tokens: tokenRow, filed: filed, submitted: submitted, errors: errors,
+            funding: box.value
+        )
     }
 
     // MARK: - Unfiled staged tokens
@@ -293,6 +320,61 @@ extension OpenExchangeSwapLeg {
             onEvent?(.historyUnread(error: OpenExchangeError.errorText(error), kept: out.count))
         }
         return out
+    }
+
+    // MARK: - Held stagings (not in the TS)
+
+    /// Every swap staging action left held as a noSend (`amm-swap` label, status `nosend`, every
+    /// page of the wallet's actions): a staging funded from chosen change is created as a noSend
+    /// and sent in a second call, so a swap stopped between the two leaves it held, its coins
+    /// reserved. Each is sent again now (`sendWith` its txid), and storage's answer told as it
+    /// is: `unproven` sent, `sending` taken by storage's monitor, `failed` failed by storage (its
+    /// inputs released). One whose send throws or answers nothing is left held for the next
+    /// recovery: it is never aborted, since its transaction may already be out. Each step is
+    /// logged and told to `onEvent`; nothing is dropped. Returns the txids sent.
+    @discardableResult
+    public static func recoverHeldStages(
+        _ ctx: OneColorContext, onEvent: (@Sendable (OpenExchangeSettleEvent) -> Void)? = nil
+    ) async -> [String] {
+        let held: [String]
+        do {
+            held = try await OpenExchangeSwapFunding.allActions(ctx, labels: [OpenExchangeSwapNames.label])
+                .filter { $0.status == .nosend }.map(\.transactionID.displayHex)
+        } catch {
+            OneSatLog.error(error, "OpenExchange: the wallet's actions could not be read to find held stagings", category: OpenExchange.logCategory)
+            onEvent?(.heldUnread(error: OpenExchangeError.errorText(error)))
+            return []
+        }
+        var sent: [String] = []
+        for txid in held {
+            let status: SendWithResult.Status
+            do {
+                let r = try await ctx.storage.processAction(ctx.auth, StorageProcessActionRequest(
+                    reference: txid, isNewTx: false, isSendWith: true, rawTX: nil, sendWith: [txid], isNoSend: false, isDelayed: false
+                ))
+                guard let answered = r.sendWithResults.first(where: { $0.txid == txid }) ?? r.sendWithResults.first else {
+                    throw OpenExchangeSwapLeg.fail("storage answered no send status")
+                }
+                status = answered.status
+            } catch {
+                OneSatLog.error(error, "OpenExchange: the held staging \(txid) could not be sent; it stays held for the next recovery", category: OpenExchange.logCategory)
+                onEvent?(.heldKept(txid: txid, error: OpenExchangeError.errorText(error)))
+                continue
+            }
+            switch status {
+            case .unproven:
+                OneSatLog.notice("OpenExchange: the held staging \(txid) was sent", category: OpenExchange.logCategory)
+                sent.append(txid)
+                onEvent?(.heldSent(txid: txid))
+            case .sending:
+                OneSatLog.notice("OpenExchange: the held staging \(txid) is with storage's monitor to send (sending)", category: OpenExchange.logCategory)
+                onEvent?(.heldSending(txid: txid))
+            case .failed:
+                OneSatLog.error("OpenExchange: storage failed the held staging \(txid)'s send (failed); its inputs are released", category: OpenExchange.logCategory)
+                onEvent?(.heldFailed(txid: txid))
+            }
+        }
+        return sent
     }
 
     /// `fileStagedToken`: one unfiled staged token output filed in `amm-swap` from its
