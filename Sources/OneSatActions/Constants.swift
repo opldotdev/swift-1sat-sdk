@@ -31,6 +31,36 @@ public enum OneSatConstants {
     public static let p1satLabel = "p 1sat action"
     /// `P1SAT_BASKET_PREFIX` — leftover P-basket spelling, migration source only.
     public static let p1satBasketPrefix = "p 1sat "
+    /// Older spellings of each preferred basket, as `(legacy, preferred)` pairs. Swift only:
+    /// `@1sat/actions` 0.0.228 removed `LEGACY_P1SAT_BASKET_MIGRATIONS` because toolbox 2.14 storage
+    /// refuses to move an output between baskets, and TS re-files such outputs inside storage
+    /// (wallet-node migration `2026-09-30-002`). Until remote storage is known to have done that, a
+    /// reader keeps listing both spellings. Includes `p 1sat bsv20` and theme-token's plain
+    /// `ordinals`, which the old Swift list carried.
+    public static let legacyBasketNames: [(legacy: String, preferred: String)] = [
+        ("p 1sat ordinals", onesatBasket),
+        ("ordinals", onesatBasket),
+        ("p 1sat bsv21", bsv21Basket),
+        ("p 1sat opns", opnsBasket),
+        ("p 1sat hosting", hostingBasket),
+        ("p 1sat lock", lockBasket),
+        ("p 1sat sigma", sigmaBasket),
+        ("p 1sat bsocial", bsocialBasket),
+        ("p 1sat bsv20", bsv20Basket),
+    ]
+
+    /// `basket` followed by its older spellings from `legacyBasketNames`, each once; just
+    /// `basket` when it has none.
+    public static func compatibleBasketNames(for basket: String) -> [String] {
+        var names = [basket]
+        var seen = Set(names)
+        for migration in legacyBasketNames where migration.preferred == basket {
+            if seen.insert(migration.legacy).inserted {
+                names.append(migration.legacy)
+            }
+        }
+        return names
+    }
     /// `BSV21_TOKEN_LABEL_PREFIX`
     public static let p1satTokenLabelPrefix = "p bsv21 token "
     /// `MAP_PREFIX`

@@ -185,38 +185,11 @@ public enum Ordinals {
         origin: String? = nil,
         name: String? = nil
     ) -> (tags: [String], basket: String, name: String?) {
-        func baseContentType(_ value: String) -> String {
-            String(value.split(
-                separator: ";",
-                maxSplits: 1,
-                omittingEmptySubsequences: false
-            )[0])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        var resolvedContentType = contentType.map(baseContentType).flatMap { $0.isEmpty ? nil : $0 }
-        var resolvedOrigin = origin
+        let resolvedContentType = tagContentType(tags, contentType: contentType)
+        let resolvedOrigin = origin ?? tagOrigin(outpoint: outpoint, tags: tags)
         var resolvedName = name
-        if let tags {
-            for tag in tags {
-                if tag.hasPrefix("type:") {
-                    let value = baseContentType(String(tag.dropFirst(5)))
-                    if !value.isEmpty,
-                       resolvedContentType == nil
-                        || (resolvedContentType?.contains("/") == false && value.contains("/"))
-                    {
-                        resolvedContentType = value
-                    }
-                }
-                if resolvedOrigin == nil, tag == "origin" {
-                    resolvedOrigin = outpoint
-                } else if resolvedOrigin == nil, tag.hasPrefix("origin:") {
-                    resolvedOrigin = String(tag.dropFirst(7))
-                }
-                if resolvedName == nil, tag.hasPrefix("name:") {
-                    resolvedName = String(tag.dropFirst(5))
-                }
-            }
+        if resolvedName == nil, let tag = tags?.first(where: { $0.hasPrefix("name:") }) {
+            resolvedName = String(tag.dropFirst(5))
         }
         var next: [String] = resolvedContentType.map { ["type:\($0)"] } ?? []
         if let resolvedOrigin {
@@ -226,6 +199,44 @@ public enum Ordinals {
             ? OneSatConstants.opnsBasket
             : OneSatConstants.ordinalsBasket
         return (next, basket, OrdinalRemittance.displayName(resolvedName))
+    }
+
+    /// The content type `resolveOrdinalTags` settles on. It starts from `contentType` when given;
+    /// a `type:` tag then takes over only when there is no value yet or the value is a bare
+    /// category (`image`) and the tag has a subtype (`image/png`), so otherwise the first value
+    /// stands. `;` parameters are dropped. Nil when there is none.
+    ///
+    /// The tag loop of TS `resolveOrdinalTags` (`packages/actions/src/ordinals/index.ts`), before
+    /// its ORDFS lookup.
+    public static func tagContentType(_ tags: [String]?, contentType: String? = nil) -> String? {
+        var resolved = contentType.map(baseContentType).flatMap { $0.isEmpty ? nil : $0 }
+        for tag in tags ?? [] where tag.hasPrefix("type:") {
+            let value = baseContentType(String(tag.dropFirst(5)))
+            if !value.isEmpty, resolved == nil || (resolved?.contains("/") == false && value.contains("/")) {
+                resolved = value
+            }
+        }
+        return resolved
+    }
+
+    /// The origin an output's tags name: a bare `origin` tag means `outpoint` itself and
+    /// `origin:<outpoint>` names another; the first such tag wins. Nil when there is neither.
+    ///
+    /// The value comes back as written, not in `txid_vout` form: `resolveOrdinalTags` formats it
+    /// only when it writes the `origin:` tag. The tag loop of TS `resolveOrdinalTags`, before its
+    /// ORDFS lookup.
+    public static func tagOrigin(outpoint: String, tags: [String]?) -> String? {
+        for tag in tags ?? [] {
+            if tag == "origin" { return outpoint }
+            if tag.hasPrefix("origin:") { return String(tag.dropFirst(7)) }
+        }
+        return nil
+    }
+
+    /// A MIME type without its `;` parameters, trimmed.
+    private static func baseContentType(_ value: String) -> String {
+        String(value.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)[0])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// `ordinalSeedTags` from `packages/actions/src/utils/ordinalSeedTags.ts`.

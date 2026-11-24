@@ -75,6 +75,82 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     /// `fee_per_output` times the token output count does not fit in a `UInt64`.
     case overlayFeeOverflow
 
+    /// The error whose `wireMessage` is `message`, so a caller can switch on the case behind an
+    /// `ActionResult.error` (or a deploy or mint result's `error`) instead of comparing text. Nil
+    /// for any other text, and for the two cases whose message is free text
+    /// (`ordLockV2Refused`, `ordLockV2FrontFundingFailed` with a reason).
+    ///
+    /// `@1sat/actions` returns these as plain `error` strings and has no typed form; the results
+    /// here keep the strings, and this reads them back.
+    public init?(wireMessage message: String) {
+        if let fixed = Self.fixedCases.first(where: { $0.wireMessage == message }) {
+            self = fixed
+            return
+        }
+        if let rest = Self.suffix(of: message, after: "overlay-fee-exceeds-max-fee: "),
+           let parts = Self.split(rest, " sats > maxFee ", end: " sats"),
+           let fee = UInt64(parts.0), let maxFee = UInt64(parts.1) {
+            self = .overlayFeeExceedsMaxFee(fee: fee, maxFee: maxFee)
+        } else if let text = Self.suffix(of: message, after: "missing-source-locking-script-for-input-"),
+                  let index = Int(text) {
+            self = .missingSourceLockingScript(inputIndex: index)
+        } else if let text = Self.suffix(of: message, after: "missing-source-transaction-for-input-"),
+                  let index = Int(text) {
+            self = .missingSourceTransaction(inputIndex: index)
+        } else if let outpoint = Self.suffix(of: message, after: "input-not-in-transaction-") {
+            self = .inputNotInTransaction(outpoint: outpoint)
+        } else if let ref = Self.suffix(of: message, after: "invalid-ref: ") {
+            self = .invalidRef(ref: ref)
+        } else if let id = Self.suffix(of: message, after: "Invalid collectionId format: ") {
+            self = .invalidCollectionIdFormat(id: id)
+        } else if let rest = Self.suffix(of: message, after: "Inscription data too large: "),
+                  let parts = Self.split(rest, " bytes (max ", end: ")"),
+                  parts.1 == String(OneSatConstants.maxInscriptionBytes), let bytes = Int(parts.0) {
+            self = .inscriptionTooLarge(bytes: bytes)
+        } else if let rest = Self.suffix(of: message, after: "Cannot transfer BSV-20 token "),
+                  rest.hasSuffix(Self.bsv20TransferTail), rest.count > Self.bsv20TransferTail.count {
+            self = .cannotTransferBsv20(outpoint: String(rest.dropLast(Self.bsv20TransferTail.count)))
+        } else {
+            return nil
+        }
+    }
+
+    private static let bsv20TransferTail = " through ordinal transfer — use BSV-21 transfer instead"
+
+    /// Every case without a payload, plus front funding with no reason.
+    private static let fixedCases: [OneSatActionError] = [
+        .noTransfers, .mustProvideCounterpartyOrAddress, .missingPayAddress, .invalidPrice,
+        .inscriptionContentTypeInvalid, .inscriptionContentEmpty, .noRecipients, .amountMustBePositive,
+        .recipientMissingDestination, .servicesRequired, .tokenNotActive, .overlayValidationFailed,
+        .insufficientTokens, .insufficientValidTokens, .tokensQueued, .tokenNotFound, .unvalidatedInputs,
+        .fundingNotNeeded, .fundingSubmitFailed, .noBeefAvailable, .noLockRequests, .invalidSatoshis,
+        .invalidBlockHeight, .noMaturedLocks, .noTxidReturned, .missingCustomInstructions,
+        .invalidCustomInstructions, .noSignableTransaction, .servicesRequiredForPurchase,
+        .listingCreateDisabled, .listingTransactionNotFound, .listingOutputNotFound, .notAnOrdLockListing,
+        .listingNotFoundInOverlay, .ordLockV2FrontFundingFailed(nil), .missingSourceTxid,
+        .mneeClientRequired, .quantityMustBePositive, .anchorNoTxid, .sigmaAnchorFailed,
+        .exactlyOneOfContentOrRef, .contentTypeRequiredWithContent, .noBapIdentity,
+        .signWithBapRequiresInscription, .sigmaPlaceholderMissing, .deployNoTxid,
+        .authAndEndMintingMutuallyExclusive, .mustProvideMintOrAuth, .mintAmountMustBePositive,
+        .noAuthUtxoForToken, .authUtxoMissingCustomInstructions, .multiSigAuthNotSupported,
+        .notABsv21Deploy, .overlayFeeOverflow,
+    ]
+
+    /// The non-empty text after `prefix`, or nil when `message` does not start with it.
+    private static func suffix(of message: String, after prefix: String) -> String? {
+        guard message.hasPrefix(prefix), message.count > prefix.count else { return nil }
+        return String(message.dropFirst(prefix.count))
+    }
+
+    /// `text` as `<first><separator><second><end>`, or nil when it is not that shape.
+    private static func split(_ text: String, _ separator: String, end: String) -> (String, String)? {
+        guard text.hasSuffix(end), let range = text.range(of: separator) else { return nil }
+        let first = String(text[..<range.lowerBound])
+        let second = String(text[range.upperBound...].dropLast(end.count))
+        guard !first.isEmpty else { return nil }
+        return (first, second)
+    }
+
     /// Exact `error` strings from `@1sat/actions`.
     public var wireMessage: String {
         switch self {
@@ -83,7 +159,7 @@ public enum OneSatActionError: Error, Equatable, Sendable {
         case .mustProvideCounterpartyOrAddress:
             return "must-provide-counterparty-or-address"
         case .cannotTransferBsv20(let outpoint):
-            return "Cannot transfer BSV-20 token \(outpoint) through ordinal transfer — use BSV-21 transfer instead"
+            return "Cannot transfer BSV-20 token \(outpoint)\(Self.bsv20TransferTail)"
         case .missingPayAddress:
             return "missing-pay-address"
         case .invalidPrice:
