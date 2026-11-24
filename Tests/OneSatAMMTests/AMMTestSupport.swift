@@ -119,6 +119,18 @@ actor MemoryStorage: ColorWalletStorage {
     var actions: [WalletAction] = []
     var actionsError: String?
     private(set) var listedActions: [WalletListActionsRequest] = []
+    /// The change basket (`default`) is listed to a swap's staging, which then funds it from the
+    /// coins it chooses (`noSendChange`). Off: the listing is empty, the staging goes plain.
+    var listsChange = false
+    /// Transactions a listing's BEEF carries with a merkle path.
+    private(set) var provenIDs: Set<TransactionID> = []
+    /// A `noSendChange` outpoint is refused as storage refuses one that is not its change.
+    var refusesNoSendChange = false
+    /// `noSendChange` is taken (validated) but not spent: storage funds from its own picks.
+    var ignoresNoSendChange = false
+    /// The send-only processAction (`isNewTx` false) answers this status for each txid, or throws.
+    var sendOnlyStatus: SendWithResult.Status = .unproven
+    var sendOnlyError: String?
 
     init(identity: PrivateKey) throws {
         self.identity = identity
@@ -140,6 +152,87 @@ actor MemoryStorage: ColorWalletStorage {
     }
 
     func setNoSendSupported(_ value: Bool) { noSendSupported = value }
+    func setListsChange(_ value: Bool) { listsChange = value }
+    func setRefusesNoSendChange(_ value: Bool) { refusesNoSendChange = value }
+    func setIgnoresNoSendChange(_ value: Bool) { ignoresNoSendChange = value }
+    /// A listing's BEEF carries `id` with a merkle path from now on.
+    func prove(_ id: TransactionID) { provenIDs.insert(id) }
+    func setSendOnly(_ status: SendWithResult.Status, error: String? = nil) {
+        sendOnlyStatus = status
+        sendOnlyError = error
+    }
+    /// Takes every listed funding coin out of the change basket, so only coins added later fund.
+    func dropFunding() { records.removeAll { $0.fundingSuffix != nil && $0.basket == "default" } }
+
+    /// A BRC-29 change coin of `sats` in `default`, its transaction at the end of `chain`
+    /// unproven ancestors (each spending the one before), or proven itself.
+    @discardableResult
+    func addFunding(_ sats: UInt64, proven: Bool, chain: Int = 0) throws -> Outpoint {
+        counter += 1
+        let marker = UInt8(truncatingIfNeeded: counter)
+        let suffix = Data("coin-\(counter)".utf8).base64EncodedString()
+        let key = try BRC29.receivingPrivateKey(recipient: identity, sender: identity.publicKey, prefix: Self.fundingPrefix, suffix: suffix)
+        func spend(_ parent: TransactionID?) throws -> [TransactionInput] {
+            guard let parent else { return [] }
+            return [TransactionInput(previousOutput: Outpoint(transactionID: parent, outputIndex: 0), unlockingScript: try Script(bytes: [], maximumByteCount: 100))]
+        }
+        var parent: TransactionID?
+        for _ in 0..<chain {
+            let tx = Transaction(
+                version: 1,
+                inputs: try spend(parent),
+                outputs: [TransactionOutput(satoshis: sats + 1, lockingScript: try Script(bytes: [0x6a, 0x01, marker], maximumByteCount: 100))],
+                lockTime: 0
+            )
+            let id = try tx.transactionID(limits: txLimits)
+            transactions[id] = tx
+            parent = id
+        }
+        let tx = Transaction(
+            version: 1,
+            inputs: try spend(parent),
+            outputs: [TransactionOutput(satoshis: sats, lockingScript: try BRC29.lockingScript(for: key.publicKey)),
+                      TransactionOutput(satoshis: 0, lockingScript: try Script(bytes: [0x6a, 0x01, marker], maximumByteCount: 100))],
+            lockTime: 0
+        )
+        let id = try tx.transactionID(limits: txLimits)
+        transactions[id] = tx
+        if proven { provenIDs.insert(id) }
+        let outpoint = Outpoint(transactionID: id, outputIndex: 0)
+        records.append(Record(outpoint: outpoint, satoshis: sats, script: tx.outputs[0].lockingScript.bytes, basket: "default", fundingSuffix: suffix))
+        return outpoint
+    }
+
+    /// The listing's BEEF of `roots`: each proven transaction with a merkle path of its own and
+    /// none of its ancestry, each unproven one with its ancestry, parents it lacks txid-only.
+    private func listingBEEF(_ roots: [TransactionID]) throws -> BEEF {
+        var order: [(TransactionID, Transaction)] = []
+        var seen: Set<TransactionID> = []
+        func visit(_ id: TransactionID) {
+            guard seen.insert(id).inserted, let tx = transactions[id] else { return }
+            if !provenIDs.contains(id) { for input in tx.inputs { visit(input.previousOutput.transactionID) } }
+            order.append((id, tx))
+        }
+        for root in roots { visit(root) }
+        let held = Set(order.map(\.0))
+        var boundary: [TransactionID] = []
+        for (id, tx) in order where !provenIDs.contains(id) {
+            for input in tx.inputs where !held.contains(input.previousOutput.transactionID) && !boundary.contains(input.previousOutput.transactionID) {
+                boundary.append(input.previousOutput.transactionID)
+            }
+        }
+        var paths: [MerklePath] = []
+        var entries: [BEEFTransaction] = boundary.map { .transactionID($0) }
+        for (id, tx) in order {
+            if provenIDs.contains(id) {
+                paths.append(try MerklePath(blockHeight: UInt32(80 + paths.count), levels: [[.hash(offset: 0, hash: try Hash256(id.wireBytes), isTransactionID: true)]]))
+                entries.append(.rawWithMerklePath(transaction: tx, merklePathIndex: paths.count - 1))
+            } else {
+                entries.append(.raw(tx))
+            }
+        }
+        return try BEEF(version: .v2, merklePaths: paths, transactions: entries, limits: beefLimits)
+    }
     func setInternalizeAccepts(_ value: Bool) { internalizeAccepts = value }
     func refuse(description: String?) { refusedDescription = description }
     func unfile(create index: Int?) { unfiledCreate = index }
@@ -226,6 +319,30 @@ actor MemoryStorage: ColorWalletStorage {
         }
         let requested = request.outputs ?? []
         let out = requested.reduce(UInt64(0)) { $0 + $1.satoshis }
+        // `noSendChange` (with `noSend` only): each must be this storage's unreserved change;
+        // spent last-listed first while the inputs fall short (wallet-toolbox pops the list).
+        if request.options?.noSend == true, var change = request.options?.noSendChange, !change.isEmpty {
+            for outpoint in change {
+                guard !refusesNoSendChange, records.contains(where: {
+                    $0.outpoint == outpoint && $0.fundingSuffix != nil && $0.basket == "default" && !$0.reserved
+                }) else {
+                    throw TestError("WERR_INVALID_PARAMETER: The noSendChange outpoint parameter must be valid")
+                }
+            }
+            if ignoresNoSendChange { change = [] }
+            while held < out + Self.fee, let outpoint = change.popLast() {
+                let index = records.firstIndex { $0.outpoint == outpoint }!
+                records[index].reserved = true
+                let coin = records[index]
+                held += coin.satoshis
+                reserved.append(coin.outpoint.description)
+                inputs.append(StorageActionInput(
+                    sourceTXID: coin.outpoint.transactionID.displayHex, sourceVout: coin.outpoint.outputIndex,
+                    sourceSatoshis: Int64(coin.satoshis), sourceLockingScript: coin.script, unlockingScriptLength: 107,
+                    derivationPrefix: Self.fundingPrefix, derivationSuffix: coin.fundingSuffix
+                ))
+            }
+        }
         if held < out + Self.fee {
             let funding = try takeFunding()
             held += funding.satoshis
@@ -258,6 +375,9 @@ actor MemoryStorage: ColorWalletStorage {
 
     func colorListOutputs(_ auth: AuthID, _ request: WalletListOutputsRequest) async throws -> WalletListOutputsResult {
         listed.append(request)
+        if request.basket == "default", !listsChange {
+            return try WalletListOutputsResult(totalOutputs: 0, beef: nil, outputs: [])
+        }
         let matching = records.filter { record in
             guard record.basket == request.basket, !record.reserved else { return false }
             if request.tags.isEmpty { return true }
@@ -276,7 +396,9 @@ actor MemoryStorage: ColorWalletStorage {
         }
         var beef: BEEF?
         if request.include == .entireTransactions, !page.isEmpty {
-            beef = try boundedGraph(ancestry(page.map(\.outpoint.transactionID), pool: transactions))
+            beef = provenIDs.isEmpty
+                ? try boundedGraph(ancestry(page.map(\.outpoint.transactionID), pool: transactions))
+                : try listingBEEF(page.map(\.outpoint.transactionID))
         }
         return try WalletListOutputsResult(totalOutputs: UInt64(matching.count), beef: beef, outputs: outputs)
     }
@@ -369,6 +491,10 @@ actor MemoryStorage: ColorWalletStorage {
 
     func processAction(_ auth: AuthID, _ request: StorageProcessActionRequest) async throws -> StorageProcessActionResult {
         processed.append(request)
+        if !request.isNewTx {
+            if let sendOnlyError { throw TestError(sendOnlyError) }
+            return StorageProcessActionResult(sendWithResults: request.sendWith.map { SendWithResult(txid: $0, status: sendOnlyStatus) })
+        }
         guard let action = pending.removeValue(forKey: request.reference), let raw = request.rawTX else {
             throw TestError("unknown reference")
         }

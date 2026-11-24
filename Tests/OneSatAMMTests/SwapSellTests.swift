@@ -1039,9 +1039,14 @@ final class SwapSellTests: XCTestCase {
         let created = await h.w.storage.created
         XCTAssertEqual(created.last?.description, "AMM move back: TST")
         let id = try h.w.prepare().id
+        let failure = OpenExchangeLegFailure(
+            kind: .refused, code: "below_minimum", detail: "below_minimum", pool: SwapFixture.pool(h.w.c).outpoint, raw: "below_minimum",
+            funding: try XCTUnwrap(events.prepared.first)
+        )
+        XCTAssertEqual(result.failures, [failure])
         XCTAssertEqual(events.notable, [
             .relayed(leg: h.poolText, attempt: 1, outcome: .refused(id: id, reason: "below_minimum", pool: nil)),
-            .excluded(pool: SwapFixture.pool(h.w.c).outpoint, reason: "refused: below_minimum"),
+            .excluded(pool: SwapFixture.pool(h.w.c).outpoint, reason: "refused: below_minimum", failure: failure),
             .returned(try XCTUnwrap(result.returned)),
         ])
         let submits = await h.submits
@@ -1069,7 +1074,7 @@ final class SwapSellTests: XCTestCase {
         XCTAssertEqual(events.notable, [
             .relayed(leg: h.poolText, attempt: 1, outcome: .unknown(id: id, reason: "no answer yet: the host could not reach the validator (unreachable)")),
             .relayed(leg: h.poolText, attempt: 2, outcome: .refused(id: id, reason: "pool_spent: at the resend", pool: nil)),
-            .excluded(pool: pool, reason: "still listed at the outpoint refused pool_spent"),
+            .excluded(pool: pool, reason: "still listed at the outpoint refused pool_spent", failure: nil),
             .returned(try XCTUnwrap(result.returned)),
         ])
         let posts = await h.posts
@@ -1119,4 +1124,50 @@ final class SettleLog: @unchecked Sendable {
 
     func add(_ e: OpenExchangeSettleEvent) { lock.withLock { entries.append(e) } }
     var all: [OpenExchangeSettleEvent] { lock.withLock { entries } }
+}
+
+// MARK: - Which token rows a sell stages (not in the TS)
+
+extension SwapSellTests {
+    /// Two value rows: 60,000 unproven and 50,000 proven. The swap's staging of 50,000 spends the
+    /// proven row (`confirmedFirst`); the module's plain transfer of the same amount keeps the
+    /// TS's largest-first choice.
+    func testTokenStagingSpendsTheConfirmedRowFirst() async throws {
+        func world() async throws -> (OneColorContext, MemoryStorage, large: String, proven: String) {
+            let storage = try MemoryStorage(identity: SwapFixture.walletRoot)
+            let overlay = try StubOverlay()
+            await overlay.admitSubmissions()
+            let ctx = SellFixture.context(storage, overlay)
+            var outpoints: [String] = []
+            for amount in [BigInt(60_000), 50_000] {
+                let custody = try ColorCustody(
+                    asset: .asset(SellFixture.assetID), derivationPrefix: Data("held".utf8).base64EncodedString(),
+                    derivationSuffix: Data("row-\(amount)".utf8).base64EncodedString(), senderIdentityKey: ctx.identityKey
+                )
+                let key = try ColorKeys.ownPublicKey(identity: ctx.identity, custody: custody)
+                let script = try AMMPoolCall.tokenP2pkh(AMMPool.hex(try OneColor.idFromString(SwapFixture.tokenId)), amount, OpenExchangeSwapLeg.pkh(key))
+                let tx = try SellFixture.tokenTx(script, marker: amount == 50_000 ? 8 : 9)
+                try await storage.holdColor(tx, vout: 0, assetID: SellFixture.assetID, custody: custody, sources: [try SwapFixture.topicTx("fund")])
+                try await overlay.unspent(tx, vout: 0)
+                if amount == 50_000 { await storage.prove(try tx.transactionID(limits: txLimits)) }
+                outpoints.append("\(try tx.transactionID(limits: txLimits).displayHex).0")
+            }
+            await storage.setFilesInternalized(true)
+            return (ctx, storage, outpoints[0], outpoints[1])
+        }
+
+        let staging = try await world()
+        _ = try await OpenExchangeSwapLeg.stage(staging.0, sats: 0, tokens: (SwapFixture.tokenId, 50_000), sym: "TST")
+        let staged = await staging.1.created
+        XCTAssertEqual(staged.first?.inputs?.map(\.outpoint.description), [staging.proven])
+
+        let plain = try await world()
+        let output = try WalletCreateActionOutput(
+            lockingScript: try AMMPoolCall.tokenP2pkh(AMMPool.hex(try OneColor.idFromString(SwapFixture.tokenId)), 50_000, OpenExchangeSwapLeg.zeroPkh),
+            satoshis: 1, outputDescription: "a plain transfer"
+        )
+        _ = await OneColorActions.transfer(plain.0, assetID: SellFixture.assetID, outputs: [output], description: "a plain transfer of TST")
+        let transferred = await plain.1.created
+        XCTAssertEqual(transferred.first?.inputs?.map(\.outpoint.description), [plain.large])
+    }
 }

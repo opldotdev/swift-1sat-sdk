@@ -91,6 +91,75 @@ final class SwapFlowTests: LiveTestCase {
         }
     }
 
+    // MARK: - The staging's funding
+
+    /// A swap's sats staging spends the change basket's best coin, chosen and ranked by the SDK
+    /// (`OpenExchangeSwapFunding`: confirmed first), as a noSend with `noSendChange`, then sends
+    /// it in a second, send-only call: its non-token inputs are the coin picked, the action is
+    /// not left held, the network serves the transaction, and its change is spendable after.
+    /// Skips when S's change basket holds no confirmed coin.
+    func testStageSatsSpendsChosenConfirmedCoin() async throws {
+        let (ox, _) = try exchange()
+        let a = try await funded(.S)
+        let ctx = colorContext(a)
+        cleanup = (ox, ctx)
+        print("LEFTOVERS before the staging: \(try await Self.moveBackLeftovers(ox, ctx))")
+
+        let coins = try await OpenExchangeSwapFunding.coins(ctx)
+        guard let best = coins.first, best.proven else {
+            throw XCTSkip("\(a.name)'s change basket holds no confirmed coin to choose (\(coins.count) coins)")
+        }
+        let sats: UInt64 = 1_000
+        let need = OpenExchangeSwapFunding.need(outputs: sats, callerInputs: 0, feeRateSatsPerKb: OpenExchangeQuotes.defaultFeeRateSatsPerKb)
+        let picked = OpenExchangeSwapFunding.pick(coins, need: need)
+        print("FUNDING ranked \(coins.count) coins, best \(best.outpoint) (\(best.satoshis) sats); picked \(picked.map(\.outpoint)) for \(need)")
+
+        let staged = try await OpenExchangeSwapLeg.stageSats(ctx, sats: sats, sym: "TEST")
+        assertTxid(staged.txid, "staging")
+        let report = try XCTUnwrap(staged.funding, "the staging was not funded from the chosen coins")
+        XCTAssertNil(report.fellBack, "storage refused the chosen coins: \(report.text)")
+        XCTAssertEqual(report.sent, picked.reversed().map(\.outpoint), "the best coin goes last")
+        XCTAssertTrue(report.topUps.isEmpty, "storage added coins: \(report.text)")
+
+        // The non-token inputs are the coin(s) picked, the best among them.
+        let tx = try ColorBEEF.open(staged.atomicBEEF).transaction
+        let inputs = tx.inputs.map(\.previousOutput.description)
+        XCTAssertEqual(Set(inputs), Set(report.used), "inputs \(inputs), report \(report.text)")
+        XCTAssertTrue(inputs.contains(best.outpoint), "the best confirmed coin \(best.outpoint) is not spent: \(inputs)")
+
+        // Not left held: storage sent it.
+        let actions = try await ctx.storage.colorListActions(ctx.auth, try WalletListActionsRequest(
+            labels: [OpenExchangeSwapNames.label], pagination: try WalletPagination(limit: 1000)
+        ))
+        let action = try XCTUnwrap(actions.actions.first { $0.transactionID.displayHex == staged.txid }, "the staging is not listed")
+        XCTAssertNotEqual(action.status, .nosend)
+
+        // The network has seen it: the 1Sat API serves its BEEF (a few tries).
+        var served = false
+        for attempt in 1...6 where !served {
+            do {
+                _ = try await StackBeefSource(baseURL: backend.services).beef(forTxid: staged.txid)
+                served = true
+            } catch {
+                print("BEEF of \(staged.txid) not served yet (try \(attempt)): \(error)")
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+        }
+        XCTAssertTrue(served, "the 1Sat API never served the staging \(staged.txid)")
+
+        // Its change is spendable in the change basket.
+        let change = try await ctx.storage.colorListOutputs(ctx.auth, try WalletListOutputsRequest(
+            basket: "default", pagination: try WalletPagination(limit: 1000)
+        ))
+        let ours = change.outputs.filter { $0.outpoint.transactionID.displayHex == staged.txid }
+        XCTAssertFalse(ours.isEmpty, "the staging's change is not in the change basket")
+        XCTAssertTrue(ours.allSatisfy(\.spendable), "the staging's change is not spendable: \(ours)")
+
+        // Back to the wallet.
+        print("MOVE BACK after the staging: \(try await Self.moveBackLeftovers(ox, ctx))")
+        try await assertBasketEmpty(ctx, "after the staging moved back")
+    }
+
     // MARK: - The round trip
 
     func testSwapRoundTrip() async throws {

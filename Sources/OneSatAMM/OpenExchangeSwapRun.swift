@@ -57,6 +57,9 @@ public struct OpenExchangeSwapResult: Equatable, Sendable {
     /// The swap-basket rows whose spender the last overlay pass could not take in; nil: none.
     public let stuck: [OpenExchangeStuckRow]?
     public let returned: Returned?
+    /// Why each pool left out after a leg was sent to it failed, in order, as the exchange said
+    /// it (not in the TS, whose result keeps only `stop`).
+    public var failures: [OpenExchangeLegFailure] = []
 }
 
 /// `SwapProgress`: where a swap is.
@@ -79,6 +82,12 @@ public enum OpenExchangeSwapEvent: Equatable, Sendable {
     /// What the basket lacked was staged: the staging transaction, the sats and tokens staged,
     /// the page's submit of the tokens in words, and the submit's and the filing's failures.
     case staged(txid: String, sats: UInt64, tokens: BigInt, submitted: String, errors: [String])
+    /// What the staging just told (`staged`) was funded with, against the change basket's coins
+    /// chosen for it (not in the TS: the TS lets storage choose).
+    case stageFunded(txid: String, report: ColorFundingReport)
+    /// A leg built: its pool, its funding transaction and what its funding BEEF carries to the
+    /// validator (not in the TS).
+    case prepared(leg: String, fundingTxid: String, stats: OpenExchangeFundingStats)
     /// A leg's fee shortfall could not be staged, or was staged and the basket still did not
     /// cover the leg: the sats asked for and why, the wallet's error in full. The swap stops
     /// `fees` and moves its rows back.
@@ -86,8 +95,9 @@ public enum OpenExchangeSwapEvent: Equatable, Sendable {
     /// A leg's relay (attempt 1, or 2 when it is sent once more after no answer) and its outcome,
     /// the host's or validator's reason with it.
     case relayed(leg: String, attempt: Int, outcome: OpenExchangeLegOutcome)
-    /// A pool left out for the rest of the swap, and why.
-    case excluded(pool: String, reason: String)
+    /// A pool left out for the rest of the swap, and why; `failure` when a leg sent to it
+    /// failed, as the exchange said it (also in the result's `failures`).
+    case excluded(pool: String, reason: String, failure: OpenExchangeLegFailure?)
     /// An overlay pass: the legs it took in and the rows it could not.
     case resolved(OpenExchangeResolved)
     /// The move back at an early stop: what went back, or why it did not.
@@ -163,6 +173,7 @@ extension OpenExchange {
         let minerFee = try OpenExchangeQuotes.legMinerFeeSats(feeRate)
 
         var excluded = Set<String>()
+        var failures: [OpenExchangeLegFailure] = []
         var spentAt: String?
         var budget = quote.request.maxSources
 
@@ -203,9 +214,11 @@ extension OpenExchange {
             progress(.staging(sats: lackSats, tokens: lackTokens))
             guard let sats = UInt64(exactly: lackSats) else { throw OpenExchangeError.failed("nothing to stage in the swap basket") }
             let staged = try await OpenExchangeSwapLeg.stage(
-                ctx, sats: sats, tokens: lackTokens > 0 ? (tokenId, lackTokens) : nil, sym: sym, submit: submitter
+                ctx, sats: sats, tokens: lackTokens > 0 ? (tokenId, lackTokens) : nil, sym: sym, submit: submitter,
+                feeRateSatsPerKb: feeRate
             )
             event(.staged(txid: staged.txid, sats: sats, tokens: lackTokens, submitted: staged.submitted, errors: staged.errors))
+            if let report = staged.funding { event(.stageFunded(txid: staged.txid, report: report)) }
             // Not in the TS (which carries on and stops at `fees`, no leg able to spend the
             // unfiled row): a sell whose staged token row was not filed moves the basket's sats
             // back, as the TS does at its `fees` stop, then fails with why.
@@ -242,7 +255,7 @@ extension OpenExchange {
             let answer = try await tokenPools(tokenId)
             if let at = spentAt, answer.pools.contains(where: { $0.pool.outpoint == at }) {
                 excluded.insert(at)
-                event(.excluded(pool: at, reason: "still listed at the outpoint refused pool_spent"))
+                event(.excluded(pool: at, reason: "still listed at the outpoint refused pool_spent", failure: nil))
             }
             spentAt = nil
             // Review note: a pool with an empty reserve takes no leg; it is not offered to the planner.
@@ -265,7 +278,10 @@ extension OpenExchange {
                 let peerId = row.validatorPeerId ?? answer.validators.first { $0.identity == row.pool.validatorIdentityKey.lowercased() }?.peerId
                 guard let poolOutput, let peerId else {
                     excluded.insert(row.pool.outpoint)
-                    event(.excluded(pool: row.pool.outpoint, reason: poolOutput == nil ? "the host served no transaction for the pool" : "no peer ID for the pool's validator"))
+                    event(.excluded(
+                        pool: row.pool.outpoint, reason: poolOutput == nil ? "the host served no transaction for the pool" : "no peer ID for the pool's validator",
+                        failure: nil
+                    ))
                     continue
                 }
                 let commissionPkh = try answer.market.identityKey.flatMap { identity in
@@ -291,13 +307,14 @@ extension OpenExchange {
                     progress(.staging(sats: BigInt(lack), tokens: 0))
                     let staged: OpenExchangeStaged?
                     do {
-                        staged = try await OpenExchangeSwapLeg.stageSats(ctx, sats: lack, sym: sym)
+                        staged = try await OpenExchangeSwapLeg.stageSats(ctx, sats: lack, sym: sym, feeRateSatsPerKb: feeRate)
                     } catch {
                         staged = nil
                         event(.stageFailed(sats: lack, error: OpenExchangeError.errorText(error)))
                     }
                     if let staged {
                         event(.staged(txid: staged.txid, sats: lack, tokens: 0, submitted: staged.submitted, errors: staged.errors))
+                        if let report = staged.funding { event(.stageFunded(txid: staged.txid, report: report)) }
                         holdings = try await OpenExchangeSwapLeg.satsHoldings(ctx)
                         selected = try OpenExchangeSwapLeg.selectInputs(input, sats: holdings, tokens: tokenRows)
                         if selected == nil {
@@ -315,6 +332,7 @@ extension OpenExchange {
                     ctx, input, inputs: inputs.sats, tokens: inputs.tokens, order: order, last: leg.amountIn == remaining, holdingBEEF: holding
                 )
                 let legText = OpenExchangePrices.outpointText(leg.outpoint)
+                event(.prepared(leg: legText, fundingTxid: prepared.fundingTxid, stats: prepared.fundingStats))
                 progress(.relaying(leg: legText, amountIn: leg.amountIn, amountOut: leg.amountOut, filled: legs))
                 var outcome = await relayOnce(ctx, prepared, tokenId: tokenId, peerId: peerId, patienceMs: patienceMs)
                 event(.relayed(leg: legText, attempt: 1, outcome: outcome))
@@ -334,7 +352,9 @@ extension OpenExchange {
                         // (c) Race: the next leg to another pool with the same rows.
                         pending.append(Pending(prepared: prepared, leg: leg, poolId: row.poolId))
                         excluded.insert(row.pool.outpoint)
-                        event(.excluded(pool: row.pool.outpoint, reason: "no answer twice: \(reason)"))
+                        let failure = OpenExchangeLegFailure(outcome, pool: row.pool.outpoint, funding: prepared.fundingStats)
+                        if let failure { failures.append(failure) }
+                        event(.excluded(pool: row.pool.outpoint, reason: "no answer twice: \(reason)", failure: failure))
                         continue
                     }
                 }
@@ -361,7 +381,9 @@ extension OpenExchange {
                     case .failed(let reason): "failed: \(reason)"
                     case .accepted, .unknown: "no outcome"
                     }
-                    event(.excluded(pool: row.pool.outpoint, reason: reason))
+                    let failure = OpenExchangeLegFailure(outcome, pool: row.pool.outpoint, funding: prepared.fundingStats)
+                    if let failure { failures.append(failure) }
+                    event(.excluded(pool: row.pool.outpoint, reason: reason, failure: failure))
                 }
                 accountResolved(await resolveSwaps(ctx))
                 continue
@@ -388,7 +410,8 @@ extension OpenExchange {
         }
         return OpenExchangeSwapResult(
             status: status, stop: why, legs: legs, totalIn: filledIn, totalOut: filledOut,
-            unfilled: quote.request.amountIn - filledIn, stuck: stuck.isEmpty ? nil : stuck, returned: returned
+            unfilled: quote.request.amountIn - filledIn, stuck: stuck.isEmpty ? nil : stuck, returned: returned,
+            failures: failures
         )
     }
 

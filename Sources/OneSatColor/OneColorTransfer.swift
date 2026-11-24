@@ -36,20 +36,26 @@ extension OneColorActions {
     /// not enter a `p color` basket. `labels` are added after the plan labels and may not carry
     /// `p color` or BRC-177 labels: a handoff goes through `send`. `acceptDelayedBroadcast` is the
     /// caller's option, kept as the module keeps the caller's options (`...args`).
+    ///
+    /// Not in the TS, each defaulting to its behaviour: `inputOrder` `.confirmedFirst` selects
+    /// token inputs proven first, then by least unproven ancestry; `funding` has the wallet's
+    /// change chosen by the caller and the action sent in a second call (`ColorExecutor`).
     package static func transfer(
         _ ctx: OneColorContext, assetID: ColorAssetID, outputs: [WalletCreateActionOutput],
-        description: String, labels: [String] = [], acceptDelayedBroadcast: Bool? = nil
+        description: String, labels: [String] = [], acceptDelayedBroadcast: Bool? = nil,
+        inputOrder: ColorInputOrder = .largestFirst, funding: ColorFunding? = nil
     ) async -> Transfer1ColorResult {
         await transfer(
             ctx, assetID: assetID, outputs: outputs, description: description, labels: labels, changeCustody: nil,
-            acceptDelayedBroadcast: acceptDelayedBroadcast
+            acceptDelayedBroadcast: acceptDelayedBroadcast, inputOrder: inputOrder, funding: funding
         )
     }
 
     /// `transfer` with the change custody given, so tests can pin its key to a TS vector.
     static func transfer(
         _ ctx: OneColorContext, assetID: ColorAssetID, outputs requested: [WalletCreateActionOutput],
-        description: String, labels: [String], changeCustody: ColorCustody?, acceptDelayedBroadcast: Bool? = nil
+        description: String, labels: [String], changeCustody: ColorCustody?, acceptDelayedBroadcast: Bool? = nil,
+        inputOrder: ColorInputOrder = .largestFirst, funding: ColorFunding? = nil
     ) async -> Transfer1ColorResult {
         var result = Transfer1ColorResult()
         do {
@@ -65,7 +71,7 @@ extension OneColorActions {
             // TS `fund`: the asset's support, then `fundAsset`.
             try await ColorModule.assertSupportedAsset(overlay, assetID)
             let selected = outputs.value > 0
-                ? try await ColorModule.selectInputs(ctx, overlay: overlay, assetID: assetID, target: outputs.value)
+                ? try await ColorModule.selectInputs(ctx, overlay: overlay, assetID: assetID, target: outputs.value, order: inputOrder)
                 : []
             let selectedValue = try ColorModule.sumAmounts(selected)
             // Change returns what selection adds beyond the need.
@@ -95,7 +101,7 @@ extension OneColorActions {
             guard selected.allSatisfy({ admitted.contains($0.outpoint) }) else {
                 throw ColorError.custody("a \(assetID) input is no longer spendable")
             }
-            let signed = try await ColorExecutor.execute(ctx, request: request, tokenInputs: selected)
+            let signed = try await ColorExecutor.execute(ctx, request: request, tokenInputs: selected, funding: funding)
             // Broadcast: the txid is reported even if a later step throws.
             let txid = signed.transactionID.displayHex
             result.txid = txid

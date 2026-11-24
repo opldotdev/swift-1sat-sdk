@@ -85,10 +85,10 @@ package enum ColorInternalize {
 /// transaction (input index → unlocking script); the storage's funding inputs are signed here.
 package enum ColorPlainAction {
     package static func run(
-        _ ctx: OneColorContext, request: WalletCreateActionRequest,
+        _ ctx: OneColorContext, request: WalletCreateActionRequest, funding: ColorFunding? = nil,
         signCallerInputs: (Transaction) throws -> [Int: Script]
     ) async throws -> (txid: String, atomicBEEF: [UInt8], transaction: Transaction) {
-        let signed = try await ColorExecutor.execute(ctx, request: request, signCallerInputs: signCallerInputs)
+        let signed = try await ColorExecutor.execute(ctx, request: request, funding: funding, signCallerInputs: signCallerInputs)
         return (signed.transactionID.displayHex, try signed.atomicBEEF(), signed.transaction)
     }
 }

@@ -161,6 +161,8 @@ let package = Package(
                 .product(name: "BSVInterpreter", package: "swift-sdk"),
                 .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
+                // `WireError`: storage's refusal of a chosen change outpoint.
+                .product(name: "ToolboxCore", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
                 .product(name: "BSVCore", package: "swift-sdk"),

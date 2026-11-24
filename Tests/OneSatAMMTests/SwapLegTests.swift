@@ -690,3 +690,74 @@ extension XCTestCase {
         }
     }
 }
+
+// MARK: - Funding stats and leg failures (not in the TS)
+
+extension SwapLegTests {
+    /// The stats of a funding BEEF: a proven child, its unproven parent and the rows' own
+    /// unproven staging that spends both.
+    func testFundingStatsCountWhatTheValidatorGets() throws {
+        func tx(spending parents: [Transaction], tag: UInt32) throws -> Transaction {
+            var t = Transaction(version: 1, lockTime: tag)
+            let previous = try parents.isEmpty
+                ? [Outpoint(transactionID: try TransactionID(displayHex: String(repeating: "11", count: 32)), outputIndex: tag)]
+                : parents.map { Outpoint(transactionID: try $0.transactionID(limits: OpenExchangeSwapLeg.txLimits), outputIndex: 0) }
+            t.inputs = try previous.map { TransactionInput(previousOutput: $0, unlockingScript: try AMMPoolCall.script([])) }
+            t.outputs = [TransactionOutput(satoshis: 1_000, lockingScript: try AMMPoolCall.script(AMMPoolCall.p2pkh(OpenExchangeSwapLeg.zeroPkh)))]
+            return t
+        }
+        let parent = try tx(spending: [], tag: 1)
+        let child = try tx(spending: [parent], tag: 2)
+        let stage = try tx(spending: [child, parent], tag: 3)
+        let childID = try child.transactionID(limits: OpenExchangeSwapLeg.txLimits)
+        let stageID = try stage.transactionID(limits: OpenExchangeSwapLeg.txLimits)
+        let path = try MerklePath(blockHeight: 80, levels: [[.hash(offset: 0, hash: try Hash256(childID.wireBytes), isTransactionID: true)]])
+        let beef = try BEEF(
+            merklePaths: [path],
+            transactions: [.raw(parent), .rawWithMerklePath(transaction: child, merklePathIndex: 0), .raw(stage)],
+            limits: OpenExchangeSwapLeg.beefLimits
+        )
+        let atomic = try AtomicBEEF(subjectTransactionID: stageID, beef: beef, limits: OpenExchangeSwapLeg.beefLimits)
+            .serialized(limits: OpenExchangeSwapLeg.beefLimits)
+        let size = { (t: Transaction) in try t.serializedByteCount(limits: OpenExchangeSwapLeg.txLimits) }
+        let stats = try OpenExchangeFundingStats.of(atomicBEEF: atomic, rows: [stageID.displayHex])
+        XCTAssertEqual(stats.bytes, atomic.count)
+        XCTAssertEqual(stats.txCount, 3)
+        XCTAssertEqual(stats.provenCount, 1)
+        XCTAssertEqual(stats.unprovenCount, 2)
+        XCTAssertEqual(stats.unprovenBytes, try size(parent) + size(stage))
+        XCTAssertEqual(stats.unprovenAncestors, 1)
+        XCTAssertEqual(stats.largestUnprovenTxid, stageID.displayHex)
+        XCTAssertEqual(stats.largestUnprovenBytes, try size(stage))
+        XCTAssertTrue(stats.text.contains("1 proven, 2 unproven"), stats.text)
+    }
+
+    /// A validator that answered no frame: its verdict and reason, the raw text kept.
+    func testAnUnreachableDetailIsParsedIntoAFailure() {
+        let pool = String(repeating: "aa", count: 32) + "_0"
+        let fuel = "no answer yet: the host could not reach the validator (unreachable: this node's validator answered no frame (reject: fuel exhausted))"
+        let failure = OpenExchangeLegFailure(.unknown(id: "x", reason: fuel), pool: pool)
+        XCTAssertEqual(failure, OpenExchangeLegFailure(kind: .validatorFailed, code: "reject", detail: "fuel exhausted", pool: pool, raw: fuel))
+
+        let host = "no answer yet: the host could not reach the validator (unreachable: the validator's host: boom\nat line 2)"
+        XCTAssertEqual(
+            OpenExchangeLegFailure(.unknown(id: "x", reason: host), pool: pool),
+            OpenExchangeLegFailure(kind: .validatorFailed, code: "host", detail: "boom at line 2", pool: pool, raw: host)
+        )
+        let bare = "no answer yet: the host could not reach the validator (unreachable)"
+        XCTAssertEqual(OpenExchangeLegFailure(.unknown(id: "x", reason: bare), pool: pool)?.kind, .noAnswer)
+        let timeout = "no answer yet: the leg's POST took more than 15000 ms"
+        XCTAssertEqual(
+            OpenExchangeLegFailure(.unknown(id: "x", reason: timeout), pool: pool),
+            OpenExchangeLegFailure(kind: .noAnswer, code: "", detail: "the leg's POST took more than 15000 ms", pool: pool, raw: timeout)
+        )
+        XCTAssertEqual(
+            OpenExchangeLegFailure(.refused(id: "x", reason: "slippage: out below the floor", pool: nil), pool: pool),
+            OpenExchangeLegFailure(kind: .refused, code: "slippage", detail: "out below the floor", pool: pool, raw: "slippage: out below the floor")
+        )
+        XCTAssertEqual(
+            OpenExchangeLegFailure(.failed(reason: "swap: ERR_FRONT_DOOR: fuel exhausted"), pool: pool),
+            OpenExchangeLegFailure(kind: .hostError, code: "ERR_FRONT_DOOR", detail: "fuel exhausted", pool: pool, raw: "swap: ERR_FRONT_DOOR: fuel exhausted")
+        )
+    }
+}

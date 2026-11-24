@@ -9,6 +9,7 @@ import BSVTransaction
 import BSVWallet
 import OneSatActions
 import OneSatColor
+import OneSatSweep
 import OneSatTemplates
 import ToolboxActions
 
@@ -162,6 +163,8 @@ public struct OpenExchangePreparedLeg: Sendable {
     /// The funding sent beside the swap: an Atomic BEEF of the first sats row's transaction.
     public let fundingAtomicBEEF: [UInt8]
     public let fundingTxid: String
+    /// What the funding BEEF carries to the validator (not in the TS: for the log).
+    public let fundingStats: OpenExchangeFundingStats
     public let fee: Int64
     public let need: Int64
     public let swap: Transaction
@@ -660,10 +663,14 @@ public enum OpenExchangeSwapLeg {
             holdingBEEF, fundingTxid: first.txid, sources: rows.map(\.txid), poolTxid: utxo.txid,
             admitted: topicAdmitted(assetId: assetId, poolTxid: utxo.txid)
         )
+        let fundingStats = try OpenExchangeFundingStats.of(atomicBEEF: funding, rows: rows.map(\.txid))
+        OneSatLog.notice(
+            "OpenExchange leg on pool \(i.leg.outpoint): funding \(first.txid): \(fundingStats.text)", category: OpenExchange.logCategory
+        )
         let sources = try holdingBEEF.merging(poolBEEF, limits: beefLimits)
         return OpenExchangePreparedLeg(
             pool: i.leg.outpoint, validator: i.pool.validatorIdentityKey, bsvIn: bsvIn, plan: plan, order: order, last: last,
-            fundingAtomicBEEF: funding, fundingTxid: first.txid, fee: change != nil ? need.feeWithChange : need.fee, need: need.need,
+            fundingAtomicBEEF: funding, fundingTxid: first.txid, fundingStats: fundingStats, fee: change != nil ? need.feeWithChange : need.fee, need: need.need,
             swap: swap, satsInputs: inputs, tokenInputs: tokens, payout: payout, commissionAmount: commissionAmount,
             commissionPkh: AMMPool.hex(commissionPkh), commissionTo: commissionTo, commissionPayout: commissionPayout,
             tokenChange: tokenChangeOut, satsChange: change?.output, sources: sources

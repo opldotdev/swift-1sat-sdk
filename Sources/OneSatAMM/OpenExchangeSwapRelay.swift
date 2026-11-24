@@ -206,25 +206,39 @@ public struct OpenExchangeStaged: Equatable, Sendable {
     public let submitted: String
     /// The submit's and the filing's failures.
     public let errors: [String]
+    /// What the staging was funded with against the change basket's coins chosen for it; nil when
+    /// storage chose them (not in the TS).
+    public var funding: ColorFundingReport? = nil
 }
 
 extension OpenExchangeSwapLeg {
-    /// `stage` of sats alone: ONE plain createAction (broadcast; not a noSend) of one P2PKH output
-    /// of `sats` to a fresh `[2, "amm swap"]` key into the swap basket, its customInstructions
-    /// `swapSatsInstructions`, labelled `amm-swap`.
-    public static func stageSats(_ ctx: OneColorContext, sats: UInt64, sym: String? = nil, randomKeyID: [UInt8]? = nil) async throws -> OpenExchangeStaged {
+    /// `stage` of sats alone: ONE createAction of one P2PKH output of `sats` to a fresh
+    /// `[2, "amm swap"]` key into the swap basket, its customInstructions `swapSatsInstructions`,
+    /// labelled `amm-swap`. Not in the TS: it is funded with the change basket's best coins
+    /// (`OpenExchangeSwapFunding`: confirmed first) as a noSend with `noSendChange`, then sent
+    /// alone with `sendWith`; when the basket cannot be read or lists no coin it is the TS's plain
+    /// broadcast action, storage choosing the change.
+    public static func stageSats(
+        _ ctx: OneColorContext, sats: UInt64, sym: String? = nil, randomKeyID: [UInt8]? = nil,
+        feeRateSatsPerKb: Double = OpenExchangeQuotes.defaultFeeRateSatsPerKb
+    ) async throws -> OpenExchangeStaged {
         guard sats > 0, sats <= AMMPoolCall.maxSafeInteger else { throw fail("nothing to stage in the swap basket") }
         let request = try stageRequest(ctx, sats: sats, sym: sym ?? "token", keyID: OpenExchangeSwapNames.newSwapKeyID(random: randomKeyID))
         let script = request.outputs![0].lockingScript
         let keyID = keyOf(request.outputs![0].customInstructions)!.keyID
-        let done = try await ColorPlainAction.run(ctx, request: request) { _ in [:] }
+        let box = OpenExchangeFundingReportBox()
+        let funding = await OpenExchangeSwapFunding.funding(
+            ctx, need: OpenExchangeSwapFunding.need(outputs: sats, callerInputs: 0, feeRateSatsPerKb: feeRateSatsPerKb),
+            what: "stage of \(sats) sats", onFunding: { box.set($0) }
+        )
+        let done = try await ColorPlainAction.run(ctx, request: request, funding: funding) { _ in [:] }
         guard done.transaction.outputs.first?.lockingScript.bytes == script else {
             throw fail("the wallet's action has no output 0 to the swap key")
         }
         return OpenExchangeStaged(txid: done.txid, atomicBEEF: done.atomicBEEF, sats: OpenExchangeSatsRow(
             outpoint: "\(done.txid).0", txid: done.txid, vout: 0, satoshis: sats, lockingScript: script,
             protocolID: try OpenExchangeSwapNames.swapProtocol(), keyID: keyID, counterparty: "self", order: nil
-        ), tokens: nil, filed: false, submitted: "not submitted (no token moved)", errors: [])
+        ), tokens: nil, filed: false, submitted: "not submitted (no token moved)", errors: [], funding: box.value)
     }
 
     /// The staging createAction, as `stage` sends it.

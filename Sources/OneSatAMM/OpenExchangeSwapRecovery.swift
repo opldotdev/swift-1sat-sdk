@@ -372,6 +372,9 @@ extension OpenExchange {
     /// in (the TS's return), and beside them what was filed and the pass itself (the TS keeps only
     /// whether anything was filed, for its `emit`), so a caller need not file or pass again.
     public func settleSwaps(_ ctx: OneColorContext, onEvent: (@Sendable (OpenExchangeSettleEvent) -> Void)? = nil) async -> OpenExchangeSettled {
+        // Not in the TS: a staging held between its noSend and its send goes out (or is aborted)
+        // first, so its staged token can be filed below.
+        await OpenExchangeSwapLeg.recoverHeldStages(ctx, onEvent: onEvent)
         var filed: [OpenExchangeUnfiledStaged] = []
         for u in await OpenExchangeSwapLeg.unfiledStagedTokens(ctx, onEvent: onEvent) {
             let outpoint = "\(u.txid).\(u.vout)"
