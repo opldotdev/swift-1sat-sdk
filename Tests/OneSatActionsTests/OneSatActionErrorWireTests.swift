@@ -22,7 +22,7 @@ final class OneSatActionErrorWireTests: XCTestCase {
         .signWithBapRequiresInscription, .sigmaPlaceholderMissing, .deployNoTxid,
         .authAndEndMintingMutuallyExclusive, .mustProvideMintOrAuth, .mintAmountMustBePositive,
         .noAuthUtxoForToken, .authUtxoMissingCustomInstructions, .multiSigAuthNotSupported,
-        .notABsv21Deploy, .overlayFeeExceedsMaxFee(fee: 3_000, maxFee: 2_000), .overlayFeeOverflow,
+        .notABsv21Deploy, .notAnOpnsMint, .overlayFeeExceedsMaxFee(fee: 3_000, maxFee: 2_000), .overlayFeeOverflow,
     ]
 
     func test_everyMessageReadsBackAsItsCase() {

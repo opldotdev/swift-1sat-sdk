@@ -382,10 +382,16 @@ enum DepositIndex {
         guard let content else { return nil }
         let trimmed = String(decoding: content, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        var units = Array(trimmed.utf16.prefix(64))
-        if let last = units.last, UTF16.isLeadSurrogate(last) { units.removeLast() }
-        let name = String(decoding: units, as: UTF16.self)
+        let name = utf16Prefix(trimmed, 64)
         return name.isEmpty ? nil : name
+    }
+
+    /// JS `text.slice(0, count)`: the first `count` UTF-16 units. A pair the cut would split is
+    /// dropped whole, since a Swift string cannot end in a lone surrogate.
+    static func utf16Prefix(_ text: String, _ count: Int) -> String {
+        var units = Array(text.utf16.prefix(count))
+        if let last = units.last, UTF16.isLeadSurrogate(last) { units.removeLast() }
+        return String(decoding: units, as: UTF16.self)
     }
 
     static func baseType(_ type: String?) -> String? {
