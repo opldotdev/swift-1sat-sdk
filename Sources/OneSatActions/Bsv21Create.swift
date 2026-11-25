@@ -353,16 +353,6 @@ extension Tokens {
         try await bsv21.submitDiscovery(tx: tx)
     }
 
-    /// The reason an overlay submit failed, as the result reports it.
-    static func submitFailure(_ error: any Error) -> String {
-        OneSatLog.error(error, "overlay submit failed after the action succeeded", category: "OneSatActions")
-        if let error = error as? OneSatActionError { return error.wireMessage }
-        if let error = error as? LocalizedError, let description = error.errorDescription {
-            return OneSatLog.redactingQueries(description)
-        }
-        return OneSatLog.message(error)
-    }
-
     /// `executeBsv21Deploy` plus the caller's discovery submit.
     private static func executeDeploy(
         _ ctx: OneSatContext,
@@ -399,7 +389,7 @@ extension Tokens {
                     try await submitDeploy(ctx, tx: tx)
                     submitted = true
                 } catch {
-                    submitError = submitFailure(error)
+                    submitError = OverlaySubmit.failure(error)
                 }
             } else {
                 submitError = "no transaction to submit"
@@ -684,7 +674,7 @@ extension Tokens {
                     try await bsv21.submitTransfer(tx: tx, tokenId: request.tokenId)
                     submitted = true
                 } catch {
-                    submitError = submitFailure(error)
+                    submitError = OverlaySubmit.failure(error)
                 }
             } else {
                 submitError = "no transaction to submit"

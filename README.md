@@ -23,16 +23,14 @@ It is the third layer of the Swift BSV stack:
 
 ## Features
 
-- **Ordinals and inscriptions:** inscribe, transfer, collections, and buy or cancel OrdLock v2 listings.
+- **Ordinals and inscriptions:** inscribe, transfer, collections, and list, buy or cancel OrdLock v2 listings, submitted to the market overlay; market search and lookups.
 - **BSV-21 tokens:** deploy, mint, send and purchase, gated on the overlay's output status, with overlay funding.
 - **1Color (BRC-162):** deploy, mint, send to a handle and receive, with BRC-207 custody compatible with `@bopen-io/color-permission-module`.
 - **Handles and delivery:** BRC-169 handle resolution, signed envelopes, BRC-232 transaction delivery, the messagebox relay, and the paymail payment inbox.
-- **OpNS:** register and resolve names through a signed PushDrop identity bind.
+- **OpNS:** register and resolve names through a signed PushDrop identity bind, and list names for sale.
 - **ORDFS:** read content and metadata, and deploy directories with manifests and VCDIFF patches.
 - **Identity, locks and more:** BAP identity and SIGMA signing, time locks, MNEE, P1SAT deposit addresses, and sweeping legacy keys.
 - **Mainnet and testnet:** set per context.
-
-OrdLock listing create is off for now. Buying and cancelling existing v2 listings work.
 
 ## Modules
 
@@ -43,7 +41,7 @@ OrdLock listing create is off for now. Buying and cancelling existing v2 listing
 | `OneSatAMM` | Open Exchange: token listing and paid enable on the 1Color AMM host |
 | `OneSatMetanet` | Handles, envelopes, transaction delivery, relay, paymail inbox |
 | `OneSatTemplates` | Locking scripts: inscription, OrdLock v2, BSV-20/21, 1Color, Cosign, TimeLock, BAP, MAP, B |
-| `OneSatClient` | Read clients for ordinals, BSV-21, OpNS, ORDFS and MNEE |
+| `OneSatClient` | Read clients for ordinals, BSV-21, OpNS, ORDFS, MNEE and the OrdLock market, and the overlay submits |
 | `OneSatPermissions` | Approval-time review data for 1Sat assets |
 | `OneSatAddresses` | P1SAT deposit addresses |
 | `OneSatCBOR` | Strict DAG-CBOR, matching `@ipld/dag-cbor` |

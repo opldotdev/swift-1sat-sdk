@@ -7,7 +7,7 @@ import BSVWallet
 import OneSatTemplates
 import ToolboxActions
 
-/// OpNS `listOpns` / `registerOpns` / `deregisterOpns` / `cancelOpnsListing` from
+/// OpNS `listOpns` / `sellOpns` / `registerOpns` / `deregisterOpns` / `cancelOpnsListing` from
 /// `packages/actions/src/opns/index.ts`.
 ///
 /// A published name is locked in a signed PushDrop (`opns:published`): its `identity` field is
@@ -94,7 +94,7 @@ public enum OpNS {
             let labels = OneSatConstants.assetID(in: request.ordinal.tags).map {
                 [OneSatConstants.inputAssetLabel(basket: OneSatConstants.opnsBasket, id: $0)]
             } ?? []
-            return try await TrackedAction.execute(
+            let result = try await TrackedAction.execute(
                 ctx,
                 description: String((name.map { "Cancel OpNS listing \($0)" }
                     ?? "Cancel OpNS listing").prefix(50)),
@@ -114,6 +114,94 @@ public enum OpNS {
                     counterparty: built.signCounterparty
                 )]
             }
+            return await OverlaySubmit.market(ctx, result)
+        } catch let error as OneSatActionError {
+            return ActionResult.failure(error)
+        } catch {
+            return ActionResult.failure(describing: error)
+        }
+    }
+
+    /// `SellOpnsRequest`: list a name for `price` satoshis on the OrdLock v2 orderbook.
+    public struct ListRequest: Sendable {
+        public let ordinal: WalletOutput
+        public let price: UInt64
+        /// Where the buyer's payment goes. Nil is TS `defaultPayAddress` (P1SAT keyID `1sat 0`,
+        /// self: the wallet's first deposit address).
+        public let payAddress: String?
+        public let inputBEEF: [UInt8]?
+
+        public init(
+            ordinal: WalletOutput,
+            price: UInt64,
+            payAddress: String? = nil,
+            inputBEEF: [UInt8]? = nil
+        ) {
+            self.ordinal = ordinal
+            self.price = price
+            self.payAddress = payAddress
+            self.inputBEEF = inputBEEF
+        }
+    }
+
+    /// `sellOpns` (`opns/index.ts`): the name in, one 1-sat OrdLock v2 output (no MAP) back to
+    /// the OpNS basket, tagged `opns` first, then `ordlock2` and the `price:` read back out of the
+    /// built script. A published name (PushDrop) or a plain one (P2PKH) is signed by its script's
+    /// shape, as TS `signOrdinalInput` does. Then the listing is submitted to the market overlay
+    /// when `ctx.market` is set, a deliberate addition over TS (see ``OverlaySubmit``).
+    public static func list(_ ctx: OneSatContext, _ request: ListRequest) async -> ActionResult {
+        do {
+            guard request.price > 0 else { return ActionResult.failure(.invalidPrice) }
+            let ordinal = request.ordinal
+            let inputBEEF = try await resolveInputBEEF(ctx, ordinal, request.inputBEEF)
+            guard let instructions = ordinal.customInstructions else {
+                return ActionResult.failure(.missingCustomInstructions)
+            }
+            let outpoint = ordinal.outpoint.description
+            let payAddress = try request.payAddress
+                ?? Ordinals.defaultPayAddress(identity: ctx.identity, network: ctx.chain.network).description
+            let cancel = try Ordinals.cancelAddress(
+                identity: ctx.identity,
+                outpoint: outpoint,
+                network: ctx.chain.network
+            )
+            let lockingScript = try Ordinals.listingLockingScript(
+                cancelAddress: cancel.description,
+                payAddress: payAddress,
+                price: request.price
+            )
+            guard let decoded = OrdLockV2.decode(lockingScript, network: ctx.chain.network) else {
+                return ActionResult.failure(.listingScriptInvalid)
+            }
+            let tags = fileTags(ordinal, extra: [OneSatConstants.ordlockV2Tag, "price:\(decoded.price)"])
+            let name = nameFromOutput(ordinal)
+            let description = "List OpNS for \(request.price) sats"
+            let output = try WalletCreateActionOutput(
+                lockingScript: lockingScript.bytes,
+                satoshis: 1,
+                outputDescription: description,
+                basket: OneSatConstants.opnsBasket,
+                customInstructions: OrdinalRemittance.buildCustomInstructions(
+                    protocolID: try OneSatConstants.p1satProtocolID,
+                    keyID: outpoint,
+                    counterparty: "self",
+                    tags: tags,
+                    name: name
+                ),
+                tags: tags
+            )
+            let actionID = TrackedAction.randomActionID()
+            let result = try await execute(
+                ctx,
+                ordinal: ordinal,
+                instructions: instructions,
+                inputBEEF: inputBEEF,
+                description: description,
+                inputDescription: "OpNS name to list",
+                output: try Ordinals.listingTracked(output, actionID: actionID, index: 0),
+                actionID: actionID
+            )
+            return await OverlaySubmit.market(ctx, result)
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {
@@ -386,7 +474,8 @@ public enum OpNS {
         inputBEEF: [UInt8],
         description: String,
         inputDescription: String,
-        output: WalletCreateActionOutput
+        output: WalletCreateActionOutput,
+        actionID: String? = nil
     ) async throws -> ActionResult {
         let labels = OneSatConstants.assetID(in: ordinal.tags).map {
             [OneSatConstants.inputAssetLabel(basket: OneSatConstants.opnsBasket, id: $0)]
@@ -404,6 +493,7 @@ public enum OpNS {
             ],
             outputs: [output],
             labels: labels,
+            actionID: actionID,
             options: TrackedAction.Options(randomizeOutputs: false)
         ) { transaction in
             let index = try Ordinals.inputIndex(ordinal.outpoint, in: transaction)

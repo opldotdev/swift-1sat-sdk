@@ -6,13 +6,13 @@ import BSVWallet
 import OneSatTemplates
 import ToolboxActions
 
-/// Ordinals transfer, cancel, purchase, and wallet listing.
+/// Ordinals transfer, OrdLock listing, cancel, purchase, and wallet listing.
 ///
-/// Semantics from `packages/actions/src/ordinals/index.ts`.
-/// OrdLock listing create (`list` / `buildList`) is off (OPL-4694). Buy and
-/// cancel of existing listings stay on, OrdLock v2 only. b-open-io/1sat-sdk
-/// 8fb809d5 removed v1 detection and the v1 sweep cancel after the v1 listings
-/// were cancelled; TS buy/cancel keep a vestigial v1 fallback that Swift drops on purpose.
+/// Semantics from `packages/actions/src/ordinals/index.ts`. Listing create, buy and cancel are
+/// OrdLock v2 only. b-open-io/1sat-sdk 8fb809d5 removed v1 detection and the v1 sweep cancel
+/// after the v1 listings were cancelled; TS buy/cancel keep a vestigial v1 fallback that Swift
+/// drops on purpose. List, cancel and purchase submit to the market overlay when
+/// `OneSatContext.market` is set (see ``OverlaySubmit``).
 public enum Ordinals {
     public struct TransferItem: Sendable {
         public let ordinal: WalletOutput
@@ -72,21 +72,28 @@ public enum Ordinals {
         }
     }
 
+    /// `SellOrdinalRequest`: list `ordinal` for `price` satoshis on the OrdLock v2 orderbook.
     public struct ListRequest: Sendable {
         public let ordinal: WalletOutput
         public let inputBEEF: [UInt8]?
         public let price: UInt64
-        public let payAddress: String
+        /// Where the buyer's payment goes. Nil is TS `defaultPayAddress`: P1SAT keyID `1sat 0`,
+        /// self, the wallet's first deposit address (``Ordinals/defaultPayAddress(identity:network:)``).
+        public let payAddress: String?
+        /// MAP metadata appended after the OrdLock, in field order (`map` in TS).
+        public let map: [(String, String)]
 
         public init(
             ordinal: WalletOutput,
             price: UInt64,
-            payAddress: String,
+            payAddress: String? = nil,
+            map: [(String, String)] = [],
             inputBEEF: [UInt8]? = nil
         ) {
             self.ordinal = ordinal
             self.price = price
             self.payAddress = payAddress
+            self.map = map
             self.inputBEEF = inputBEEF
         }
     }
@@ -175,6 +182,39 @@ public enum Ordinals {
             counterparty: .self,
             forSelf: true,
             network: network
+        )
+    }
+
+    /// `defaultPayAddress`: P1SAT keyID `1sat 0`, counterparty self, `forSelf`. The same key as
+    /// `DepositAddresses.address(index: 0)`, so a sale pays the wallet's first deposit address.
+    public static func defaultPayAddress(
+        identity: PrivateKey,
+        network: BitcoinNetwork = .mainnet
+    ) throws -> Address {
+        try P1SATKey.address(
+            identity: identity,
+            keyID: defaultPayKeyID,
+            counterparty: .self,
+            forSelf: true,
+            network: network
+        )
+    }
+
+    /// The keyID of ``defaultPayAddress(identity:network:)``.
+    public static let defaultPayKeyID = "1sat 0"
+
+    /// `buildOrdLockScript` plus the MAP suffix `buildListOrdinal` appends: OrdLock v2 locked to
+    /// `cancelAddress`, demanding `price` satoshis to `payAddress`. OP_RETURN ends the contract
+    /// before the MAP data, so the spend paths ignore it.
+    public static func listingLockingScript(
+        cancelAddress: String,
+        payAddress: String,
+        price: UInt64,
+        map: [(String, String)] = []
+    ) throws -> Script {
+        try MapSuffix.appending(
+            map,
+            to: OrdLockV2.lock(cancelAddress: cancelAddress, payAddress: payAddress, price: price)
         )
     }
 
@@ -494,20 +534,135 @@ public enum Ordinals {
         }
     }
 
-    /// OPL-4694: OrdLock listing create is off. Signatures stay so callers fail closed.
+    /// `buildListOrdinal` (`ordinals/index.ts`): the ordinal in, one 1-sat OrdLock v2 output back
+    /// to the ordinals basket. The `price:` tag is read back out of the built script, so it is
+    /// the price the chain enforces.
     public static func buildList(
-        _: OneSatContext,
-        _: ListRequest
+        _ ctx: OneSatContext,
+        _ request: ListRequest
     ) throws -> PreparedAction {
-        throw OneSatActionError.listingCreateDisabled
+        guard request.price > 0 else { throw OneSatActionError.invalidPrice }
+        guard let instructions = request.ordinal.customInstructions else {
+            throw OneSatActionError.missingCustomInstructions
+        }
+        let outpoint = request.ordinal.outpoint.description
+        let payAddress = try request.payAddress
+            ?? defaultPayAddress(identity: ctx.identity, network: ctx.chain.network).description
+        let cancel = try cancelAddress(
+            identity: ctx.identity,
+            outpoint: outpoint,
+            network: ctx.chain.network
+        )
+        let lockingScript = try listingLockingScript(
+            cancelAddress: cancel.description,
+            payAddress: payAddress,
+            price: request.price,
+            map: request.map
+        )
+        guard let decoded = OrdLockV2.decode(lockingScript, network: ctx.chain.network) else {
+            throw OneSatActionError.listingScriptInvalid
+        }
+        let tags = seedTags(source: request.ordinal)
+            + [OneSatConstants.ordlockV2Tag, "price:\(decoded.price)"]
+        let basket = OneSatConstants.ordinalsBasket
+        let labels = OneSatConstants.assetID(in: request.ordinal.tags).map {
+            [OneSatConstants.inputAssetLabel(basket: basket, id: $0)]
+        } ?? []
+        let parsed = try CustomInstructions.parse(instructions)
+        let description = "List ordinal for \(request.price) sats"
+
+        return PreparedAction(
+            description: description,
+            inputs: [
+                try WalletCreateActionInput(
+                    outpoint: request.ordinal.outpoint,
+                    inputDescription: "Ordinal to list",
+                    unlockingScriptLength: OneSatConstants.p2pkhUnlockingScriptLength
+                ),
+            ],
+            outputs: [
+                try WalletCreateActionOutput(
+                    lockingScript: lockingScript.bytes,
+                    satoshis: 1,
+                    outputDescription: description,
+                    basket: basket,
+                    customInstructions: OrdinalRemittance.buildCustomInstructions(
+                        protocolID: try OneSatConstants.p1satProtocolID,
+                        keyID: outpoint,
+                        counterparty: "self",
+                        tags: tags,
+                        name: sourceName(from: request.ordinal)
+                    ),
+                    tags: tags
+                ),
+            ],
+            labels: labels,
+            signers: [
+                P2PKHSigner(
+                    outpoint: request.ordinal.outpoint,
+                    protocolID: parsed.protocolID,
+                    keyID: parsed.keyID,
+                    counterparty: parsed.counterparty
+                ),
+            ]
+        )
     }
 
-    /// OPL-4694: OrdLock listing create is off. Buy and cancel stay on.
+    /// `sellOrdinal`: lists the ordinal, then submits the listing to the market overlay
+    /// (`tm_ordlock_v2`) when `ctx.market` is set. The submit is a deliberate addition over TS,
+    /// the same pattern as the BSV-21 deploy and mint: the listing is on chain either way, and a
+    /// failed submit only sets `submitError`.
     public static func list(
-        _: OneSatContext,
-        _: ListRequest
+        _ ctx: OneSatContext,
+        _ request: ListRequest
     ) async -> ActionResult {
-        ActionResult.failure(.listingCreateDisabled)
+        do {
+            let prepared = try buildList(ctx, request)
+            let actionID = TrackedAction.randomActionID()
+            let result = try await TrackedAction.execute(
+                ctx,
+                description: prepared.description,
+                inputBEEF: try TrackedAction.parseInputBEEF(request.inputBEEF),
+                inputs: prepared.inputs,
+                outputs: try prepared.outputs.enumerated().map {
+                    try listingTracked($0.element, actionID: actionID, index: $0.offset)
+                },
+                labels: prepared.labels,
+                actionID: actionID,
+                options: TrackedAction.Options(randomizeOutputs: false)
+            ) { transaction in
+                try signP2PKHInputs(ctx.identity, transaction, prepared.signers)
+            }
+            return await OverlaySubmit.market(ctx, result)
+        } catch let error as OneSatActionError {
+            return ActionResult.failure(error)
+        } catch {
+            return ActionResult.failure(describing: error)
+        }
+    }
+
+    /// A listing output's tags as the TS create pipeline (`applyP1SatCreateAction`) leaves them:
+    /// the managed `id:<actionId>_<index>` (`stampManagedOutputIds`), then the `price:` read from
+    /// the OrdLock (`stampScriptDerivedTags`), which moves it after the id. Stamped here because
+    /// `TrackedAction` keeps an output that already carries its own id tag as it is.
+    static func listingTracked(
+        _ output: WalletCreateActionOutput,
+        actionID: String,
+        index: Int
+    ) throws -> WalletCreateActionOutput {
+        guard output.basket != nil,
+              let price = output.tags.last(where: { $0.hasPrefix("price:") })
+        else { return output }
+        let tags = output.tags.filter { !$0.hasPrefix("id:") && !$0.hasPrefix("price:") }
+            + [TrackedAction.idTag(actionID, index: index), price]
+        return try WalletCreateActionOutput(
+            lockingScript: output.lockingScript,
+            satoshis: output.satoshis,
+            outputDescription: output.outputDescription,
+            basket: output.basket,
+            customInstructions: output.customInstructions,
+            tags: tags
+        )
     }
 
     public static func buildCancel(
@@ -572,7 +727,7 @@ public enum Ordinals {
     ) async -> ActionResult {
         do {
             let built = try buildCancel(ctx, request)
-            return try await TrackedAction.execute(
+            let result = try await TrackedAction.execute(
                 ctx,
                 description: built.prepared.description,
                 inputBEEF: try TrackedAction.parseInputBEEF(request.inputBEEF),
@@ -593,6 +748,7 @@ public enum Ordinals {
                     ),
                 ]
             }
+            return await OverlaySubmit.market(ctx, result)
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {
@@ -721,7 +877,7 @@ public enum Ordinals {
                 origin: request.origin,
                 name: request.name
             )
-            return try await OrdLockV2Purchase.execute(
+            let result = try await OrdLockV2Purchase.execute(
                 ctx,
                 description: prepared.description,
                 listingOutpoint: request.outpoint,
@@ -732,6 +888,7 @@ public enum Ordinals {
                 extras: Array(prepared.outputs.dropFirst(2)),
                 labels: prepared.labels
             )
+            return await OverlaySubmit.market(ctx, result)
         } catch let error as OneSatActionError {
             return ActionResult.failure(error)
         } catch {

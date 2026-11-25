@@ -72,6 +72,16 @@ public protocol ListingBeefSource: Sendable {
     func beef(forTxid txid: String) async throws -> [UInt8]
 }
 
+/// The market overlay (`/1sat/market`, topic `tm_ordlock_v2`) the OrdLock actions submit to.
+///
+/// TS `sellOrdinal`, `sellOpns`, cancel and purchase do not submit; Swift does when a context
+/// carries one, so a new listing shows in the market without waiting for the indexer to find it.
+public protocol MarketActionServices: Sendable {
+    /// POST `/1sat/market/overlay/submit` with `X-Topics: tm_ordlock_v2`, the action's Atomic
+    /// BEEF as the body (`OverlayClient.submitListing`).
+    func submitListing(tx: [UInt8]) async throws
+}
+
 /// Wallet handle for 1Sat actions.
 ///
 /// The identity key is the BRC-42 root. Storage is the frozen Swift toolbox client.
@@ -87,6 +97,9 @@ public struct OneSatContext: Sendable {
     public let bsv21: (any Bsv21ActionServices)?
     public let mnee: (any MneeActionServices)?
     public let listings: (any ListingBeefSource)?
+    /// Where list, cancel and purchase submit their transaction. Nil: no submit (testnet runs
+    /// no market).
+    public let market: (any MarketActionServices)?
 
     public init(
         identity: PrivateKey,
@@ -97,7 +110,8 @@ public struct OneSatContext: Sendable {
         services: (any WalletServices)? = nil,
         bsv21: (any Bsv21ActionServices)? = nil,
         mnee: (any MneeActionServices)? = nil,
-        listings: (any ListingBeefSource)? = nil
+        listings: (any ListingBeefSource)? = nil,
+        market: (any MarketActionServices)? = nil
     ) {
         self.identity = identity
         self.storage = storage
@@ -108,6 +122,7 @@ public struct OneSatContext: Sendable {
         self.bsv21 = bsv21
         self.mnee = mnee
         self.listings = listings
+        self.market = market
     }
 
     public var deriver: WalletKeyDeriver { WalletKeyDeriver(rootKey: identity) }

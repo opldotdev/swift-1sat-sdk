@@ -14,7 +14,7 @@ final class OneSatActionErrorWireTests: XCTestCase {
         .invalidBlockHeight, .noMaturedLocks, .noTxidReturned, .missingCustomInstructions,
         .invalidCustomInstructions, .missingSourceLockingScript(inputIndex: 3),
         .missingSourceTransaction(inputIndex: 0), .noSignableTransaction, .servicesRequiredForPurchase,
-        .listingCreateDisabled, .listingTransactionNotFound, .listingOutputNotFound, .notAnOrdLockListing,
+        .listingScriptInvalid, .listingTransactionNotFound, .listingOutputNotFound, .notAnOrdLockListing,
         .listingNotFoundInOverlay, .ordLockV2FrontFundingFailed(nil), .missingSourceTxid,
         .inputNotInTransaction(outpoint: "cd.2"), .mneeClientRequired, .quantityMustBePositive,
         .anchorNoTxid, .sigmaAnchorFailed, .exactlyOneOfContentOrRef, .contentTypeRequiredWithContent,

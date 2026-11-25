@@ -36,7 +36,9 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case missingSourceTransaction(inputIndex: Int)
     case noSignableTransaction
     case servicesRequiredForPurchase
-    case listingCreateDisabled
+    /// A listing's built OrdLock v2 script did not decode back (TS throws
+    /// `built OrdLock v2 script failed to decode`).
+    case listingScriptInvalid
     case listingTransactionNotFound
     case listingOutputNotFound
     case notAnOrdLockListing
@@ -126,7 +128,7 @@ public enum OneSatActionError: Error, Equatable, Sendable {
         .fundingNotNeeded, .fundingSubmitFailed, .noBeefAvailable, .noLockRequests, .invalidSatoshis,
         .invalidBlockHeight, .noMaturedLocks, .noTxidReturned, .missingCustomInstructions,
         .invalidCustomInstructions, .noSignableTransaction, .servicesRequiredForPurchase,
-        .listingCreateDisabled, .listingTransactionNotFound, .listingOutputNotFound, .notAnOrdLockListing,
+        .listingScriptInvalid, .listingTransactionNotFound, .listingOutputNotFound, .notAnOrdLockListing,
         .listingNotFoundInOverlay, .ordLockV2FrontFundingFailed(nil), .missingSourceTxid,
         .mneeClientRequired, .quantityMustBePositive, .anchorNoTxid, .sigmaAnchorFailed,
         .exactlyOneOfContentOrRef, .contentTypeRequiredWithContent, .noBapIdentity,
@@ -218,8 +220,8 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "missing-source-transaction-for-input-\(index)"
         case .noSignableTransaction:
             return "no-signable-transaction"
-        case .listingCreateDisabled:
-            return "listing-create-disabled"
+        case .listingScriptInvalid:
+            return "listing-script-invalid"
         case .servicesRequiredForPurchase:
             return "services-required-for-purchase"
         case .listingTransactionNotFound:
@@ -337,7 +339,7 @@ public struct ActionResult: Equatable, Sendable {
                 try await submit(tx)
                 return result
             } catch {
-                failure = Tokens.submitFailure(error)
+                failure = OverlaySubmit.failure(error)
             }
         } else {
             failure = "no transaction to submit"
