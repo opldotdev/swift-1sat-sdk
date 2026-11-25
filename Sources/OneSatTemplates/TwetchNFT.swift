@@ -42,8 +42,22 @@ public struct TwetchNFT: Equatable, Sendable {
     /// `TwetchIndexer` tags: `twetch`, then `name:<title>` when it has a title.
     public var tags: [String] {
         var tags = [Self.tag]
-        if let title { tags.append("name:\(title)") }
+        if let title { tags.append("name:\(Self.capName(title))") }
         return tags
+    }
+
+    /// The title cut to 64 UTF-16 units for its `name:` tag, never splitting a character's
+    /// surrogate pair (`TwetchIndexer.capName`).
+    static func capName(_ title: String) -> String {
+        var result = ""
+        var units = 0
+        for scalar in title.unicodeScalars {
+            let width = scalar.value > 0xFFFF ? 2 : 1
+            if units + width > 64 { break }
+            result.unicodeScalars.append(scalar)
+            units += width
+        }
+        return result
     }
 
     public static func decode(_ script: Script) -> TwetchNFT? {

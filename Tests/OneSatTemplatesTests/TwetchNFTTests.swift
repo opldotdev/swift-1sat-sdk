@@ -50,4 +50,10 @@ final class TwetchNFTTests: XCTestCase {
         XCTAssertNil(TwetchNFT.decode(bytes: Array(try muties()[0..<48])))
         XCTAssertNil(TwetchNFT.decode(bytes: Array(try muties()[0..<60])))
     }
+
+    func test_capsALongTitleInItsNameTag() {
+        let title = String(repeating: "x", count: 63) + "\u{1F600}" + String(repeating: "y", count: 10)
+        XCTAssertEqual(TwetchNFT.capName(title), String(repeating: "x", count: 63))
+        XCTAssertEqual(TwetchNFT.capName("Muties #15"), "Muties #15")
+    }
 }

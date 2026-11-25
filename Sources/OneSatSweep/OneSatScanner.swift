@@ -65,6 +65,46 @@ public struct OneSatScanner: AssetScanner {
             )
             throw AssetScannerError.unreadableResponse
         }
+        return try await resolve(scanned)
+    }
+
+    /// Twetch NFTs (twonks) held by an address. The indexer lists them under `twetch:<address>`,
+    /// not in the owner stream, so wallets that don't know the format never take one for funds;
+    /// ``scan(address:)`` therefore never returns them. Each comes back with its source locking
+    /// script, so ``TwetchNFT`` can read its title and image.
+    public func twetchNFTs(address: String) async throws -> [ScannedOutput] {
+        guard limit > 0, (try? Address(address)) != nil else {
+            OneSatLog.error(
+                "OneSatScanner.twetchNFTs: not searching \(address) (not an address, or limit \(limit) is not positive)",
+                category: "OneSatSweep"
+            )
+            throw AssetScannerError.unreadableResponse
+        }
+        guard let url = URL(
+            string: "\(baseURL.absoluteString)/1sat/txo/search?key=twetch%3A\(address)&unspent=true&sats=true&events=true&limit=\(limit)"
+        ) else {
+            throw AssetScannerError.unreadableResponse
+        }
+        let (status, body) = try await http.get(url)
+        guard (200..<300).contains(status) else {
+            throw AssetScannerError.http("OneSatScanner.twetchNFTs txo search", url: url, status: status, body: body)
+        }
+        let found: [ScannedOutput]
+        do {
+            found = try Self.parse(search: body, limit: limit)
+        } catch AssetScannerError.unreadableResponse {
+            OneSatLog.unreadable(
+                "OneSatScanner.twetchNFTs txo search", method: "GET", url: url, body: body, error: nil,
+                category: "OneSatSweep"
+            )
+            throw AssetScannerError.unreadableResponse
+        }
+        return try await resolve(found)
+    }
+
+    /// Reads each output's locking script from its source transaction (fetched once per txid),
+    /// checking that the indexer's row matches the transaction.
+    private func resolve(_ scanned: [ScannedOutput]) async throws -> [ScannedOutput] {
         var transactions: [String: Transaction] = [:]
         var runTransactions: Set<String> = []
         var resolved: [ScannedOutput] = []
@@ -176,6 +216,34 @@ public struct OneSatScanner: AssetScanner {
             )
         }
         guard complete else { throw AssetScannerError.unreadableResponse }
+        return outputs
+    }
+
+    /// Parses a `/1sat/txo/search` JSON array (`null` when nothing matches). Reaching `limit`
+    /// rows is refused like the owner stream, since the rest would go unlisted.
+    static func parse(search body: [UInt8], limit: Int = .max) throws -> [ScannedOutput] {
+        let text = String(decoding: body, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        if text == "null" { return [] }
+        guard let json = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)),
+              let rows = json.arrayValue else {
+            throw AssetScannerError.unreadableResponse
+        }
+        guard rows.count < limit else { throw AssetScannerError.scanLimitReached(limit: limit) }
+        var outputs: [ScannedOutput] = []
+        for row in rows {
+            guard let outpoint = row["outpoint"]?.stringValue,
+                  let (txid, vout) = splitOutpoint(outpoint),
+                  let satoshis = row["satoshis"]?.intValue.flatMap({ UInt64(exactly: $0) }),
+                  let eventValues = (row["events"] ?? .array([])).arrayValue,
+                  eventValues.allSatisfy({ $0.stringValue != nil }) else {
+                throw AssetScannerError.unreadableResponse
+            }
+            if let spend = row["spend"]?.stringValue, !spend.isEmpty { continue }
+            outputs.append(ScannedOutput(
+                txid: txid, vout: vout, satoshis: satoshis,
+                lockingScript: [], events: eventValues.compactMap(\.stringValue)
+            ))
+        }
         return outputs
     }
 

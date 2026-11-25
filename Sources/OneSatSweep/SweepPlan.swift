@@ -72,6 +72,16 @@ public struct ScannedOutput: Equatable, Sendable {
         script.starts(with: runPrefix)
     }
 
+    /// A Twetch NFT script: `OP_HASH160 <20> OP_EQUALVERIFY`, a P2PKH, then `OP_RETURN`.
+    /// Checked as well as the `twetch` event, so a twonk is never swept as funds even when the
+    /// indexer didn't tag it.
+    public static func hasTwetchShape(_ s: [UInt8]) -> Bool {
+        s.count > 48
+            && s[0] == 0xa9 && s[1] == 0x14 && s[22] == 0x88
+            && s[23] == 0x76 && s[24] == 0xa9 && s[25] == 0x14
+            && s[46] == 0x88 && s[47] == 0xac && s[48] == 0x6a
+    }
+
     /// What kind of asset this output is, from its tags.
     ///
     /// Order follows `@1sat/actions` `scan.ts` `categorizeOutputs`: BSV-21, Twetch, lock, BSV-20, then
@@ -81,7 +91,7 @@ public struct ScannedOutput: Equatable, Sendable {
         if let token = events.first(where: { $0.hasPrefix("bsv21:") }) {
             return .bsv21(tokenID: String(token.dropFirst("bsv21:".count)))
         }
-        if events.contains("twetch") { return .twetch }
+        if events.contains("twetch") || Self.hasTwetchShape(lockingScript) { return .twetch }
         if let lock = events.first(where: { $0.hasPrefix("lock:") }) {
             let until = UInt64(lock.dropFirst("lock:".count)) ?? 0
             return .locked(until: until)

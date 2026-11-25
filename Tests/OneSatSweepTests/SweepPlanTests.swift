@@ -152,4 +152,18 @@ final class SweepPlanTests: XCTestCase {
         XCTAssertEqual(plan.remaining.twetch.map(\.vout), [0])
         XCTAssertFalse(plan.remaining.isEmpty)
     }
+
+    /// Without the `twetch` event, the script shape alone keeps a twonk out of funding.
+    func test_anUntaggedTwetchScriptIsStillATwonk() {
+        var script: [UInt8] = [0xa9, 0x14]
+        script += [UInt8](repeating: 0x41, count: 20)
+        script += [0x88, 0x76, 0xa9, 0x14]
+        script += [UInt8](repeating: 0xbb, count: 20)
+        script += [0x88, 0xac, 0x6a, 0x01, 0x7b]
+        let twonk = ScannedOutput(
+            txid: "8ac7230489e80000000000000000000000000000000000000000000000000001",
+            vout: 0, satoshis: 2_180, lockingScript: script, events: []
+        )
+        XCTAssertEqual(twonk.kind, .twetch)
+    }
 }

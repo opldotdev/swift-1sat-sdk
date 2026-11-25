@@ -594,8 +594,12 @@ final class SyncAddressesTests: XCTestCase {
         let address = try DepositAddresses.address(identity: identity, index: 0)
         let json = Array(#"{"title":"Muties #15","image":"b://55068f35629f5fa80866882efba1cf86782e86130e2a35091965e4e577f7abcf"}"#.utf8)
         // OP_HASH160 <hash> OP_EQUALVERIFY, the owner's P2PKH, OP_RETURN <JSON>.
-        let bytes: [UInt8] = [0xa9, 0x14] + [UInt8](repeating: 0x41, count: 20) + [0x88]
-            + (try p2pkh(address)).bytes + [0x6a, 0x4c, UInt8(json.count)] + json
+        var bytes: [UInt8] = [0xa9, 0x14]
+        bytes += [UInt8](repeating: 0x41, count: 20)
+        bytes.append(0x88)
+        bytes += try p2pkh(address).bytes
+        bytes += [0x6a, 0x4c, UInt8(json.count)]
+        bytes += json
         let lock = try Script(bytes: bytes, maximumByteCount: 10_000)
         let tx = Transaction(
             version: 1,
