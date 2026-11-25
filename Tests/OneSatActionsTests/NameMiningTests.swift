@@ -199,6 +199,25 @@ final class NameMiningTests: XCTestCase {
         return (atomic, parsed.subjectTransactionID.displayHex, delivery.vout, delivery.name)
     }
 
+    /// ``mintFixture()`` with its name output paid to the test context's deposit address 0, as
+    /// plain BEEF in base64 (the subject's txid changes with it).
+    private func ownedMint() throws -> (beef: String, txid: String, vout: UInt32, name: String) {
+        let mint = try mintFixture()
+        let ours = try DepositAddresses.address(identity: try ActionVectors.identity(), index: 0).publicKeyHash.bytes
+        let theirs: [UInt8] = [0x76, 0xa9, 0x14] + (try Hex.decode("fc7250a211deddc70ee5a2738de5f07817351cef", maximumDecodedByteCount: 20))
+        var plain = Array(mint.atomic[36...])
+        let start = try XCTUnwrap(stride(from: plain.count - theirs.count, through: 0, by: -1).first {
+            Array(plain[$0..<($0 + theirs.count)]) == theirs
+        })
+        plain.replaceSubrange((start + 3)..<(start + 23), with: ours)
+        let beef = Data(plain).base64EncodedString()
+        let parsed = try AtomicBEEF(
+            bytes: try NameMining.atomicBEEF(fromJob: beef), limits: WalletBEEFLimits.standard, transactionOrder: .any
+        )
+        XCTAssertNotEqual(parsed.subjectTransactionID.displayHex, mint.txid)
+        return (beef, parsed.subjectTransactionID.displayHex, mint.vout, mint.name)
+    }
+
     private func context(_ storage: Bsv21CreateStorage) throws -> OneSatContext {
         try bsv21CreateContext(storage: storage, bsv21: nil)
     }
@@ -283,7 +302,9 @@ final class NameMiningTests: XCTestCase {
     func test_aClaimedNameIsRefusedBeforeAnyPayment() async throws {
         let (client, peer, payer) = try client([Reply(status: 409, body: #"{"error":"name already claimed"}"#)])
         do {
-            _ = try await client.createJob(name: "luke", receiveAddress: Self.receive, payer: payer, expectedPriceSats: 1000)
+            _ = try await client.createJob(
+                name: "luke", receiveAddress: Self.receive, payer: payer, expectedPriceSats: 1000, onPayment: { _ in }
+            )
             XCTFail("expected a refusal")
         } catch {
             XCTAssertEqual(error as? NameMiningError, .nameClaimed)
@@ -359,6 +380,47 @@ final class NameMiningTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
+    func test_aRefusalAfterThePaymentNamesThePayment() async throws {
+        let (client, _, payer) = try client([
+            Self.paymentRequired(), Reply(status: 409, body: #"{"error":"name already claimed"}"#),
+        ])
+        let seen = PaymentBox()
+        do {
+            _ = try await client.createJob(
+                name: "luke", receiveAddress: Self.receive, payer: payer, expectedPriceSats: 1000,
+                onPayment: { await seen.set($0) }
+            )
+            XCTFail("expected a refusal")
+        } catch {
+            let payment = try await XCTUnwrapAsync(await seen.payment)
+            XCTAssertEqual(
+                error as? NameMiningError,
+                .refusedAfterPayment(transactionID: payment.transactionID, reason: .nameClaimed)
+            )
+            XCTAssertFalse((error as? NameMiningError)?.errorDescription?.isEmpty ?? true)
+        }
+        let created = await payer.createActions
+        XCTAssertEqual(created.count, 1)
+    }
+
+    func test_oneClaimMakesOnePaymentAtMost() async throws {
+        let (client, _, payer) = try client(
+            [Self.paymentRequired()] + Array(repeating: Self.paymentRequired(prefix: "b3RoZXI="), count: 8)
+        )
+        let seen = PaymentBox()
+        do {
+            _ = try await client.createJob(
+                name: "luke", receiveAddress: Self.receive, payer: payer, expectedPriceSats: 1000,
+                onPayment: { await seen.set($0) }
+            )
+            XCTFail("expected a refusal")
+        } catch {
+            XCTAssertTrue(error is BRC105Error || error is NameMiningError, "\(error)")
+        }
+        let created = await payer.createActions
+        XCTAssertEqual(created.count, 1)
+    }
+
     func test_resumeSendsTheSavedPaymentWithoutANewOne() async throws {
         let (client, peer, payer) = try client([Reply(status: 201, body: Self.created)])
         let keys = try keys()
@@ -394,6 +456,25 @@ final class NameMiningTests: XCTestCase {
         }
         let headers = await peer.paymentHeaders()
         XCTAssertEqual(headers, Array(repeating: saved.headerValue, count: 3))
+    }
+
+    func test_aResumeRefusedNamesTheSavedPayment() async throws {
+        let (client, _, _) = try client([Reply(status: 409, body: #"{"error":"name already claimed"}"#)])
+        let keys = try keys()
+        let saved = try BRC105Payment(
+            derivationPrefix: "cHJlZml4", derivationSuffix: "c3VmZml4",
+            serverIdentityKey: Hex.encode(keys.server.publicKey.compressedBytes),
+            satoshisRequired: 1000, transaction: try Self.paymentBEEF()
+        )
+        do {
+            _ = try await client.resumeJob(name: "luke", receiveAddress: Self.receive, payment: saved)
+            XCTFail("expected a refusal")
+        } catch {
+            XCTAssertEqual(
+                error as? NameMiningError,
+                .refusedAfterPayment(transactionID: saved.transactionID, reason: .nameClaimed)
+            )
+        }
     }
 
     // MARK: - Status, list, refund
@@ -458,12 +539,12 @@ final class NameMiningTests: XCTestCase {
     // MARK: - Filing the mint
 
     func test_fileMintFilesTheNameUnderDepositKeyZeroAndMarksItProcessed() async throws {
-        let mint = try mintFixture()
+        let mint = try ownedMint()
         let storage = try Bsv21CreateStorage.make(rows: [])
         let internalizer = CapturingInternalizer()
         let processed = MemoryProcessed()
         let job = NameMiningJob(jobId: Self.jobID, name: mint.name, state: .complete, mintTxid: mint.txid,
-                                mintBeef: Data(Array(mint.atomic[36...])).base64EncodedString())
+                                mintBeef: mint.beef)
 
         let filed = try await NameMining.fileMint(job, ctx: try context(storage), internalizer: internalizer, processed: processed)
 
@@ -471,6 +552,7 @@ final class NameMiningTests: XCTestCase {
         XCTAssertEqual(filed.outpoint, "\(mint.txid).\(mint.vout)")
         XCTAssertEqual(filed.name, mint.name)
         XCTAssertFalse(filed.alreadyFiled)
+        XCTAssertEqual(filed.outcome, .filed)
         let marked = await processed.txids
         XCTAssertEqual(marked, [mint.txid])
 
@@ -499,17 +581,18 @@ final class NameMiningTests: XCTestCase {
     }
 
     func test_fileMintDoesNotFileANameAlreadyInTheBasket() async throws {
-        let mint = try mintFixture()
+        let mint = try ownedMint()
         let storage = try Bsv21CreateStorage.make(rows: [[
             "outpoint": "\(mint.txid).\(mint.vout)", "satoshis": 1, "spendable": true,
         ]])
         let internalizer = CapturingInternalizer()
-        let processed = MemoryProcessed()
-        let job = NameMiningJob(jobId: Self.jobID, state: .complete, mintBeef: Data(mint.atomic).base64EncodedString())
+        let processed = MemoryProcessed([mint.txid])
+        let job = NameMiningJob(jobId: Self.jobID, state: .complete, mintBeef: mint.beef)
 
         let filed = try await NameMining.fileMint(job, ctx: try context(storage), internalizer: internalizer, processed: processed)
 
         XCTAssertTrue(filed.alreadyFiled)
+        XCTAssertEqual(filed.outcome, .alreadyInOpns)
         let requests = await internalizer.requests
         XCTAssertTrue(requests.isEmpty)
         let marked = await processed.txids
@@ -517,20 +600,50 @@ final class NameMiningTests: XCTestCase {
     }
 
     func test_fileMintDoesNotFileAMintDepositSyncProcessed() async throws {
-        let mint = try mintFixture()
+        let mint = try ownedMint()
         let storage = try Bsv21CreateStorage.make(rows: [])
         let internalizer = CapturingInternalizer()
-        let job = NameMiningJob(jobId: Self.jobID, state: .complete, mintBeef: Data(mint.atomic).base64EncodedString())
+        let job = NameMiningJob(jobId: Self.jobID, state: .complete, mintBeef: mint.beef)
 
         let filed = try await NameMining.fileMint(
             job, ctx: try context(storage), internalizer: internalizer, processed: MemoryProcessed([mint.txid])
         )
 
         XCTAssertTrue(filed.alreadyFiled)
+        XCTAssertEqual(filed.outcome, .processedByDepositSync)
+        let requests = await internalizer.requests
+        XCTAssertTrue(requests.isEmpty)
+        let lists = await storage.listRequests
+        XCTAssertEqual(lists.map(\.basket), ["opns"])
+    }
+
+    func test_fileMintFilesNothingThatIsNotThisWalletsOrNotTheJobs() async throws {
+        let foreign = try mintFixture()
+        let owned = try ownedMint()
+        let storage = try Bsv21CreateStorage.make(rows: [])
+        let internalizer = CapturingInternalizer()
+        for job in [
+            NameMiningJob(jobId: Self.jobID, state: .complete, mintBeef: Data(foreign.atomic).base64EncodedString()),
+            NameMiningJob(jobId: Self.jobID, state: .complete, mintTxid: foreign.txid, mintBeef: owned.beef),
+            NameMiningJob(jobId: Self.jobID, name: "other", state: .complete, mintBeef: owned.beef),
+        ] {
+            do {
+                _ = try await NameMining.fileMint(job, ctx: try context(storage), internalizer: internalizer, processed: MemoryProcessed())
+                XCTFail("expected a refusal")
+            } catch {
+                XCTAssertEqual(error as? NameMiningError, .mintNotForThisWallet)
+            }
+        }
         let requests = await internalizer.requests
         XCTAssertTrue(requests.isEmpty)
         let methods = await storage.methods
         XCTAssertTrue(methods.isEmpty)
+        // The job's name matches whatever its case.
+        let filed = try await NameMining.fileMint(
+            NameMiningJob(jobId: Self.jobID, name: owned.name.uppercased(), state: .complete, mintTxid: owned.txid.uppercased(), mintBeef: owned.beef),
+            ctx: try context(storage), internalizer: internalizer
+        )
+        XCTAssertEqual(filed.outcome, .filed)
     }
 
     func test_fileMintNeedsACompleteJobWithItsBEEF() async throws {

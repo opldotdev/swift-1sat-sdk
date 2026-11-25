@@ -6,6 +6,7 @@ import BSVWallet
 import OneSatAddresses
 import OneSatClient
 import OneSatSweep
+import OneSatTemplates
 import ToolboxActions
 import ToolboxAuth
 import ToolboxCore
@@ -133,6 +134,14 @@ public enum NameMiningError: Error, Equatable, Sendable, LocalizedError {
     /// The refund's remittance has a derivation value that is not canonical base64, which the
     /// wallet refuses (1sat.name sends the suffix as the literal `refund`).
     case refundNotFilable
+    /// The service refused a claim after its payment was built and sent: `transactionID` is the
+    /// payment (the one `onPayment` saved), `reason` the refusal.
+    indirect case refusedAfterPayment(transactionID: String, reason: NameMiningError)
+    /// A claim was asked for a second payment; one claim makes one payment at most.
+    case secondPaymentRefused
+    /// The mint does not deliver the name to this wallet's deposit address 0, or is not the
+    /// job's mint; nothing was filed.
+    case mintNotForThisWallet
 
     public var errorDescription: String? {
         switch self {
@@ -177,8 +186,15 @@ public enum NameMiningError: Error, Equatable, Sendable, LocalizedError {
         case .mintNotFiled(let message):
             "The name couldn't be added to the wallet: \(message)"
         case .refundNotFilable:
-            "1sat.name sent this refund in a form the wallet can't accept yet. The refund is safe "
-                + "on chain; try again after 1sat.name is updated."
+            "1sat.name sent this refund in a form this wallet can't add yet. The refund is on chain "
+                + "under your key."
+        case .refusedAfterPayment(_, let reason):
+            "Your payment was sent, but 1sat.name refused the claim. "
+                + (reason.errorDescription ?? "") + " The payment record is kept."
+        case .secondPaymentRefused:
+            "1sat.name asked for a second payment for this claim. Nothing more was paid."
+        case .mintNotForThisWallet:
+            "1sat.name sent a mint that isn't for this wallet, so nothing was added."
         }
     }
 }
@@ -222,16 +238,24 @@ public struct NameMiningClient: Sendable {
     /// refused with ``NameMiningError/priceChanged(confirmed:asked:)`` before the wallet builds a
     /// payment. `onPayment` gets the payment once it is built and before it is sent; persist it
     /// there, and if the call fails after it, pass it to ``resumeJob(name:receiveAddress:payment:)``
-    /// rather than paying again. The service answers 200 with the buyer's job for the same name
+    /// rather than paying again. A refusal after the payment was built is
+    /// ``NameMiningError/refusedAfterPayment(transactionID:reason:)``. One call makes one payment
+    /// at most: a second 402 is ``NameMiningError/secondPaymentRefused``, which `sendPaid` reports
+    /// as a failed paid send. The service answers 200 with the buyer's job for the same name
     /// without charging, so a repeat call pays nothing.
     public func createJob(
         name: String, receiveAddress: String, payer: any PayingWallet, expectedPriceSats: UInt64,
-        onPayment: (@Sendable (BRC105Payment) async throws -> Void)? = nil
+        onPayment: @escaping @Sendable (BRC105Payment) async throws -> Void
     ) async throws -> NameMiningJob {
-        try await postJob(
+        let built = BuiltPayment()
+        return try await postJob(
             name: name, receiveAddress: receiveAddress, operation: "createJob",
             payer: ConfirmedPricePayer(payer: payer, confirmedSats: expectedPriceSats),
-            payment: nil, onPayment: onPayment
+            payment: nil, built: built,
+            onPayment: { payment in
+                built.set(payment.transactionID)
+                try await onPayment(payment)
+            }
         )
     }
 
@@ -244,7 +268,7 @@ public struct NameMiningClient: Sendable {
         do {
             return try await postJob(
                 name: name, receiveAddress: receiveAddress, operation: "resumeJob",
-                payer: payer, payment: payment, onPayment: nil
+                payer: payer, payment: payment, built: nil, onPayment: nil
             )
         } catch let error as BRC105Error {
             guard case .paymentFailed = error, payer.refusals.count > 0 else { throw error }
@@ -272,6 +296,10 @@ public struct NameMiningClient: Sendable {
     /// `POST /jobs/:id/refund` for a failed job: the refund, as a `refunded` job to pass to
     /// ``NameMining/fileRefund(_:internalizer:)`` (`mineRefund`). Its `name` is nil: the service
     /// answers with the job id alone.
+    ///
+    /// 1sat.name sends the refund's derivation suffix as the literal `refund`, which is not
+    /// base64, so this wallet can't file the answer (``NameMiningError/refundNotFilable``) though
+    /// the service has paid it out. Don't ask for a refund until it sends base64 values.
     public func refund(id: String) async throws -> NameMiningJob {
         struct Answer: Decodable {
             let jobId: String
@@ -298,7 +326,8 @@ public struct NameMiningClient: Sendable {
 
     private func postJob(
         name: String, receiveAddress: String, operation: String, payer: any PayingWallet,
-        payment: BRC105Payment?, onPayment: (@Sendable (BRC105Payment) async throws -> Void)?
+        payment: BRC105Payment?, built: BuiltPayment?,
+        onPayment: (@Sendable (BRC105Payment) async throws -> Void)?
     ) async throws -> NameMiningJob {
         let body = Array(OrderedJSON.record([
             "name": .string(name), "receiveAddress": .string(receiveAddress),
@@ -309,10 +338,18 @@ public struct NameMiningClient: Sendable {
         )
         let url = url("/jobs")
         guard response.statusCode == 200 || response.statusCode == 201 else {
-            if let payment {
-                OneSatLog.error("\(operation): POST /jobs for \(name) refused after payment \(payment.transactionID)", category: Self.category)
+            let refusal = Self.refusal(status: response.statusCode, body: response.body, operation: operation, method: "POST", url: url)
+            // The service checks the request again on the paid send, so a name claimed meanwhile
+            // is refused after the payment went out. The caller holds that payment (`onPayment`).
+            if let paid = payment?.transactionID ?? built?.transactionID {
+                OneSatLog.error(
+                    "NameMiningClient.\(operation): POST /jobs for \(name) refused after payment \(paid): "
+                        + OneSatLog.describe(refusal),
+                    category: Self.category
+                )
+                throw NameMiningError.refusedAfterPayment(transactionID: paid, reason: refusal)
             }
-            throw Self.refusal(status: response.statusCode, body: response.body, operation: operation, method: "POST", url: url)
+            throw refusal
         }
         return try Self.decode(NameMiningJob.self, response.body, operation: operation, method: "POST", url: url)
     }
@@ -386,6 +423,14 @@ public struct NameMiningClient: Sendable {
 struct ConfirmedPricePayer: WalletPublicKeyProviding, WalletHMACOperations, WalletActionOperations {
     let payer: any PayingWallet
     let confirmedSats: UInt64
+    /// One payment per claim: `sendPaid` builds a new one when a paid send meets a 402 with a
+    /// new prefix, and the person confirmed one.
+    private let made = BuiltPayment()
+
+    init(payer: any PayingWallet, confirmedSats: UInt64) {
+        self.payer = payer
+        self.confirmedSats = confirmedSats
+    }
 
     func createAction(_ request: WalletCreateActionRequest) async throws -> WalletCreateActionResult {
         let outputs = request.outputs ?? []
@@ -397,6 +442,13 @@ struct ConfirmedPricePayer: WalletPublicKeyProviding, WalletHMACOperations, Wall
                 category: NameMiningClient.category
             )
             throw NameMiningError.priceChanged(confirmed: confirmedSats, asked: asked)
+        }
+        guard made.claimFirst() else {
+            OneSatLog.error(
+                "NameMiningClient.createJob: 1sat.name asked for a second payment for one claim; not paid",
+                category: NameMiningClient.category
+            )
+            throw NameMiningError.secondPaymentRefused
         }
         return try await payer.createAction(request)
     }
@@ -421,6 +473,24 @@ struct ConfirmedPricePayer: WalletPublicKeyProviding, WalletHMACOperations, Wall
     }
     func internalizeAction(_ request: WalletInternalizeActionRequest) async throws -> WalletInternalizeActionResult {
         try await payer.internalizeAction(request)
+    }
+}
+
+/// Which payment a claim built, and whether it built one: read when the service refuses the claim
+/// after paying, and by ``ConfirmedPricePayer`` to make one payment at most.
+final class BuiltPayment: @unchecked Sendable {
+    private let lock = NSLock()
+    private var txid: String?
+    private var claimed = false
+
+    var transactionID: String? { lock.lock(); defer { lock.unlock() }; return txid }
+    func set(_ transactionID: String) { lock.lock(); txid = transactionID; lock.unlock() }
+    /// True the first time only.
+    func claimFirst() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
     }
 }
 
@@ -493,25 +563,40 @@ public enum NameMining {
 
     /// What ``fileMint(_:ctx:internalizer:processed:)`` did.
     public struct FiledMint: Equatable, Sendable {
+        public enum Outcome: Equatable, Sendable {
+            /// Filed in `opns` now.
+            case filed
+            /// Already in `opns` (an earlier filing or deposit sync); nothing was filed.
+            case alreadyInOpns
+            /// Not in `opns`, but deposit sync already processed the mint and filed it where its
+            /// indexing put it; nothing was filed, so the output is not filed twice.
+            case processedByDepositSync
+        }
+
         /// The mint's txid: mark it processed so deposit sync does not file it again.
         public let txid: String
         /// `<txid>.<vout>` of the name.
         public let outpoint: String
         public let name: String
-        /// True when the name was already in the `opns` basket (or the txid already processed)
-        /// and nothing was filed.
-        public let alreadyFiled: Bool
+        public let outcome: Outcome
+
+        /// Nothing was filed now: the wallet already had it.
+        public var alreadyFiled: Bool { outcome != .filed }
     }
 
     /// `internalizeMint`: files a complete job's name in `opns` with `OpNS.internalize`, protocol
     /// `[0, "onesat"]`, keyID `1sat 0`, counterparty `self`.
     ///
+    /// The name output must pay `ctx.identity`'s deposit address 0, and the mint must be the
+    /// job's (`mintTxid`, `name`), or nothing is filed (``NameMiningError/mintNotForThisWallet``).
+    ///
     /// Deposit sync watches the same address and would file the mint too, under another `id:`.
-    /// So the name is not filed when `processed` already holds the mint's txid or the `opns`
-    /// basket already holds an output tagged with its `origin:`; and after filing, the txid is
+    /// So the name is not filed when the `opns` basket already holds an output tagged with its
+    /// `origin:`, or when `processed` already holds the mint's txid; and after filing, the txid is
     /// added to `processed` (deposit sync's ``ProcessedTxStore``), which sync skips. Pass the
     /// store sync uses; with nil, only the basket check guards and the caller marks
-    /// ``FiledMint/txid`` itself.
+    /// ``FiledMint/txid`` itself. The checks and the filing are not atomic: callers that run
+    /// deposit sync too serialize the two per account.
     public static func fileMint(
         _ job: NameMiningJob,
         ctx: OneSatContext,
@@ -527,6 +612,7 @@ public enum NameMining {
         let limits = WalletBEEFLimits.standard
         let txid: String
         let delivery: (vout: UInt32, name: String)?
+        let owner: [UInt8]?
         do {
             let atomic = try AtomicBEEF(bytes: tx, limits: limits, transactionOrder: .any)
             let subjectID = atomic.subjectTransactionID
@@ -535,6 +621,10 @@ public enum NameMining {
             }
             txid = subjectID.displayHex
             delivery = OpNS.mintNameDelivery(in: subject)
+            owner = delivery.flatMap { delivery in
+                let script = subject.outputs[Int(delivery.vout)].lockingScript
+                return DepositIndex.owner(script, inscription: Inscription.decode(script))
+            }
         } catch {
             OneSatLog.error(error, "NameMining.fileMint: reading job \(job.jobId)'s mint", category: NameMiningClient.category)
             throw NameMiningError.unreadableBEEF
@@ -544,11 +634,28 @@ public enum NameMining {
             throw NameMiningError.mintNotFiled(OneSatActionError.notAnOpnsMint.wireMessage)
         }
         let outpoint = "\(txid).\(delivery.vout)"
-
-        if try await processed?.has(txid) == true {
-            OneSatLog.notice("NameMining.fileMint: mint \(txid) already processed by deposit sync; not filed again", category: NameMiningClient.category)
-            return FiledMint(txid: txid, outpoint: outpoint, name: delivery.name, alreadyFiled: true)
+        let deposit = try DepositAddresses.address(identity: ctx.identity, index: 0, network: ctx.chain.network)
+        guard owner == deposit.publicKeyHash.bytes else {
+            OneSatLog.error(
+                "NameMining.fileMint: job \(job.jobId)'s mint \(outpoint) pays \(owner.map { Hex.encode($0) } ?? "no P2PKH owner"), "
+                    + "not deposit address 0 (\(deposit)); not filed",
+                category: NameMiningClient.category
+            )
+            throw NameMiningError.mintNotForThisWallet
         }
+        if let mintTxid = job.mintTxid, mintTxid.lowercased() != txid {
+            OneSatLog.error("NameMining.fileMint: job \(job.jobId) names mint \(mintTxid) but sent \(txid); not filed", category: NameMiningClient.category)
+            throw NameMiningError.mintNotForThisWallet
+        }
+        if let name = job.name, name.lowercased() != delivery.name.lowercased() {
+            OneSatLog.error(
+                "NameMining.fileMint: job \(job.jobId) is for \(name.debugDescription) but its mint delivers "
+                    + "\(delivery.name.debugDescription); not filed",
+                category: NameMiningClient.category
+            )
+            throw NameMiningError.mintNotForThisWallet
+        }
+
         let origin = "origin:\(Bsv21Remittance.formatOrdinalOutpoint(outpoint))"
         let held = try await ctx.storage.listOutputs(ctx.auth, try WalletListOutputsRequest(
             basket: OneSatConstants.opnsBasket, tags: [origin], tagQueryMode: .all,
@@ -557,7 +664,15 @@ public enum NameMining {
         if !held.outputs.isEmpty {
             OneSatLog.notice("NameMining.fileMint: \(origin) is already in opns; not filed again", category: NameMiningClient.category)
             try await processed?.add(txid)
-            return FiledMint(txid: txid, outpoint: outpoint, name: delivery.name, alreadyFiled: true)
+            return FiledMint(txid: txid, outpoint: outpoint, name: delivery.name, outcome: .alreadyInOpns)
+        }
+        if try await processed?.has(txid) == true {
+            OneSatLog.error(
+                "NameMining.fileMint: mint \(txid) was processed by deposit sync but \(origin) is not in opns; "
+                    + "not filed again, so the output is not filed twice",
+                category: NameMiningClient.category
+            )
+            return FiledMint(txid: txid, outpoint: outpoint, name: delivery.name, outcome: .processedByDepositSync)
         }
 
         let result = await OpNS.internalize(
@@ -577,7 +692,7 @@ public enum NameMining {
         try await processed?.add(txid)
         return FiledMint(
             txid: result.txid ?? txid, outpoint: result.outpoint ?? outpoint,
-            name: result.name ?? delivery.name, alreadyFiled: false
+            name: result.name ?? delivery.name, outcome: .filed
         )
     }
 
