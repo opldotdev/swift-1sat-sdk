@@ -587,6 +587,48 @@ final class SyncAddressesTests: XCTestCase {
         )
     }
 
+    /// `TwetchIndexer` runs before `FundIndexer`: a Twetch NFT owned by a deposit address is filed
+    /// in `twetch` with its tags, never in the deposit basket that `sweepDeposit` spends.
+    func test_aTwetchNFTIsFiledInTheTwetchBasketNotAsFunds() async throws {
+        let identity = try ActionVectors.identity()
+        let address = try DepositAddresses.address(identity: identity, index: 0)
+        let json = Array(#"{"title":"Muties #15","image":"b://55068f35629f5fa80866882efba1cf86782e86130e2a35091965e4e577f7abcf"}"#.utf8)
+        // OP_HASH160 <hash> OP_EQUALVERIFY, the owner's P2PKH, OP_RETURN <JSON>.
+        let bytes: [UInt8] = [0xa9, 0x14] + [UInt8](repeating: 0x41, count: 20) + [0x88]
+            + (try p2pkh(address)).bytes + [0x6a, 0x4c, UInt8(json.count)] + json
+        let lock = try Script(bytes: bytes, maximumByteCount: 10_000)
+        let tx = Transaction(
+            version: 1,
+            inputs: [],
+            outputs: [TransactionOutput(satoshis: 2_180, lockingScript: lock)],
+            lockTime: 0
+        )
+        let (txid, beef) = try plainBEEF([tx])
+        let internalizer = CapturingInternalizer()
+        _ = try await SyncAddresses.execute(
+            try context(identity: identity, services: HeightServices(height: 100)),
+            internalizer: internalizer,
+            beef: FixedBeef(bytes: beef),
+            syncSource: FixedSync(outputs: [SyncOutput(outpoint: "\(txid).0", score: 90)]),
+            assets: NoAssets(),
+            store: MemoryStore(),
+            request: SyncAddresses.Request()
+        )
+        let captured = await internalizer.requests
+        let request = try XCTUnwrap(captured.first)
+        XCTAssertEqual(request.description, "Received Twetch NFT")
+        XCTAssertEqual(request.outputs.count, 1)
+        let filed = try insertion(request.outputs[0])
+        XCTAssertEqual(filed.basket, OneSatConstants.twetchBasket)
+        XCTAssertEqual(Array(filed.tags.prefix(2)), ["twetch", "name:Muties #15"])
+        XCTAssertEqual(filed.tags.count, 3)
+        XCTAssertTrue(filed.tags[2].hasPrefix("id:"))
+        XCTAssertEqual(
+            filed.customInstructions,
+            "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"1sat 0\",\"counterparty\":\"self\",\"name\":\"Muties #15\"}"
+        )
+    }
+
     private func insertion(_ output: WalletInternalizeOutput) throws -> WalletBasketInsertion {
         guard case .basketInsertion(let insertion) = output.remittance else {
             throw XCTSkip("deposit sync must not build walletPayment")

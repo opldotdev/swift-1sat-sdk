@@ -30,6 +30,9 @@ public enum AssetKind: Equatable, Sendable {
     case run
     /// A 0-sat output. `scan.ts` drops it from every class; it is reported here instead.
     case unspendable
+    /// A Twetch NFT (`twetch` event). Unlocking it needs a hash preimage as well as a signature,
+    /// so it is never swept as BSV, and no sweep moves it (`scan.ts` `twetch`).
+    case twetch
 }
 
 /// One categorised output from an indexer scan.
@@ -71,13 +74,14 @@ public struct ScannedOutput: Equatable, Sendable {
 
     /// What kind of asset this output is, from its tags.
     ///
-    /// Order follows `@1sat/actions` `scan.ts` `categorizeOutputs`: BSV-21, lock, BSV-20, then
+    /// Order follows `@1sat/actions` `scan.ts` `categorizeOutputs`: BSV-21, Twetch, lock, BSV-20, then
     /// by satoshis. Two deliberate differences: a tagged inscription above 1 sat stays an ordinal
     /// (TS spends it as BSV), and a 0-sat output is reported as `.unspendable` (TS drops it).
     public var kind: AssetKind {
         if let token = events.first(where: { $0.hasPrefix("bsv21:") }) {
             return .bsv21(tokenID: String(token.dropFirst("bsv21:".count)))
         }
+        if events.contains("twetch") { return .twetch }
         if let lock = events.first(where: { $0.hasPrefix("lock:") }) {
             let until = UInt64(lock.dropFirst("lock:".count)) ?? 0
             return .locked(until: until)
@@ -136,6 +140,7 @@ public struct SweepPlan: Equatable, Sendable {
         var bsv20: [OutputRef] = []
         var run: [OutputRef] = []
         var skipped: [OutputRef] = []
+        var twetch: [OutputRef] = []
 
         for output in scan {
             let ref = OutputRef(txid: output.txid, vout: output.vout)
@@ -160,6 +165,8 @@ public struct SweepPlan: Equatable, Sendable {
                 run.append(ref)
             case .unspendable:
                 skipped.append(ref)
+            case .twetch:
+                twetch.append(ref)
             }
         }
 
@@ -167,7 +174,7 @@ public struct SweepPlan: Equatable, Sendable {
             fundable: fundable,
             remaining: RemainingAssets(
                 ordinals: ordinals, bsv21: tokens, locked: locked,
-                bsv20: bsv20, run: run, skipped: skipped
+                bsv20: bsv20, run: run, skipped: skipped, twetch: twetch
             )
         )
     }
@@ -185,10 +192,13 @@ public struct RemainingAssets: Equatable, Sendable {
     public let run: [OutputRef]
     /// 0-sat outputs. Nothing to sweep, but they are reported rather than hidden.
     public let skipped: [OutputRef]
+    /// Twetch NFTs. No sweep can move them, so they stay on the key.
+    public let twetch: [OutputRef]
 
     public init(
         ordinals: [OutputRef], bsv21: [TokenRef], locked: [LockedRef],
-        bsv20: [OutputRef] = [], run: [OutputRef] = [], skipped: [OutputRef] = []
+        bsv20: [OutputRef] = [], run: [OutputRef] = [], skipped: [OutputRef] = [],
+        twetch: [OutputRef] = []
     ) {
         self.ordinals = ordinals
         self.bsv21 = bsv21
@@ -196,12 +206,13 @@ public struct RemainingAssets: Equatable, Sendable {
         self.bsv20 = bsv20
         self.run = run
         self.skipped = skipped
+        self.twetch = twetch
     }
 
     /// True when the sweep took everything and the source keys can be discarded.
     public var isEmpty: Bool {
         ordinals.isEmpty && bsv21.isEmpty && locked.isEmpty && bsv20.isEmpty && run.isEmpty
-            && skipped.isEmpty
+            && skipped.isEmpty && twetch.isEmpty
     }
 
     /// The earliest block height at which some locked output becomes spendable, if any. A wallet
