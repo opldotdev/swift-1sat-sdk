@@ -10,6 +10,26 @@ import ToolboxServices
 /// So a sweep is **partial by nature**. Only the fundable BSV moves now. Everything else is
 /// reported, the source keys are kept, and the wallet re-visits the address later — when a lock
 /// unlocks, or with an asset-transfer action for the tokens and ordinals.
+/// BSV-21 tokens the wallet no longer supports. MNEE left BSV and its outputs are
+/// cosigner-locked, so a sweep could never move them. Reads and sweep plans leave them out:
+/// they are never shown, counted or spent.
+public enum RetiredTokens {
+    public static let ids: Set<String> = [
+        "ae59f3b898ec61acbdb6cc7a245fabeded0c094bf046f35206a3aec60ef88127_0",
+    ]
+
+    public static func contains(_ tokenID: String?) -> Bool {
+        guard let tokenID else { return false }
+        return ids.contains(tokenID)
+    }
+
+    /// True for a scanned output of a retired token.
+    public static func contains(_ kind: AssetKind) -> Bool {
+        if case .bsv21(let tokenID) = kind { return ids.contains(tokenID) }
+        return false
+    }
+}
+
 public enum AssetKind: Equatable, Sendable {
     /// Plain BSV. Safe to sweep.
     case fundable
@@ -159,7 +179,7 @@ public struct SweepPlan: Equatable, Sendable {
         var skipped: [OutputRef] = []
         var twetch: [OutputRef] = []
 
-        for output in scan {
+        for output in scan where !RetiredTokens.contains(output.kind) {
             let ref = OutputRef(txid: output.txid, vout: output.vout)
             switch output.kind {
             case .fundable:

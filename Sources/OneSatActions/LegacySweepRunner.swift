@@ -327,7 +327,9 @@ public enum LegacySweepRunner {
         case .listed(let outputs, let unreadableRefs, let listed):
             listedRefs = listed
             var byRef: [OutputRef: TokenOutput] = [:]
-            for row in outputs { byRef[OutputRef(txid: row.txid, vout: row.vout)] = row }
+            for row in outputs where !RetiredTokens.contains(row.tokenID) {
+                byRef[OutputRef(txid: row.txid, vout: row.vout)] = row
+            }
             rows = byRef
             unreadable = Set(unreadableRefs)
             listingAvailable = true
@@ -343,7 +345,7 @@ public enum LegacySweepRunner {
         var bsv21Index: [String: Int] = [:]
         var scannedRefs = Set<OutputRef>()
 
-        for output in input.scanned {
+        for output in input.scanned where !RetiredTokens.contains(output.kind) {
             let ref = OutputRef(txid: output.txid, vout: output.vout)
             scannedRefs.insert(ref)
             let kind = output.kind

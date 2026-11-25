@@ -4,11 +4,11 @@ import XCTest
 
 /// The two layers of a failed 1Sat request: a short user message and a full log line.
 final class OneSatHTTPFailureTests: XCTestCase {
-    private let url = URL(string: "https://proxy-api.mnee.net/v1/tx/abc?auth_token=secret-key")!
+    private let url = URL(string: "https://api.example.com/v1/tx/abc?auth_token=secret-key")!
 
-    private func failure(_ status: Int, _ body: String, service: String = "the MNEE service") -> OneSatHTTPFailure {
+    private func failure(_ status: Int, _ body: String, service: String = "the transaction service") -> OneSatHTTPFailure {
         OneSatHTTPFailure(
-            service: service, operation: "MneeClient.fetchRawTx", method: "GET", url: url,
+            service: service, operation: "TxClient.fetchRawTx", method: "GET", url: url,
             statusCode: status, body: Array(body.utf8)
         )
     }
@@ -44,22 +44,22 @@ final class OneSatHTTPFailureTests: XCTestCase {
     func test_userMessageNamesTheServiceStatusAndReason() {
         XCTAssertEqual(
             failure(400, #"{"message":"fee too low"}"#).userMessage,
-            "The MNEE service refused the request (HTTP 400): fee too low."
+            "The transaction service refused the request (HTTP 400): fee too low."
         )
-        XCTAssertEqual(failure(404, "").userMessage, "The MNEE service refused the request (HTTP 404).")
+        XCTAssertEqual(failure(404, "").userMessage, "The transaction service refused the request (HTTP 404).")
     }
 
     func test_userMessageSuggestsRetryForServerErrors() {
         XCTAssertEqual(
             failure(503, "<html>down</html>").userMessage,
-            "The MNEE service could not answer (HTTP 503). Try again in a minute."
+            "The transaction service could not answer (HTTP 503). Try again in a minute."
         )
     }
 
     func test_debugDescriptionCarriesCallHostPathStatusAndBodyButNoQuery() {
         let text = failure(401, #"{"message":"bad key"}"#).debugDescription
-        XCTAssertTrue(text.contains("MneeClient.fetchRawTx"))
-        XCTAssertTrue(text.contains("GET proxy-api.mnee.net/v1/tx/abc"))
+        XCTAssertTrue(text.contains("TxClient.fetchRawTx"))
+        XCTAssertTrue(text.contains("GET api.example.com/v1/tx/abc"))
         XCTAssertTrue(text.contains("HTTP 401"))
         XCTAssertTrue(text.contains(#"{"message":"bad key"}"#))
         XCTAssertFalse(text.contains("auth_token"))
@@ -83,6 +83,6 @@ final class OneSatHTTPFailureTests: XCTestCase {
         XCTAssertEqual(AssetScannerError.httpFailure(statusCode: 500).errorDescription, "Asset discovery failed (HTTP 500).")
         XCTAssertEqual(error, .httpFailure(statusCode: 500))
         XCTAssertNotEqual(error, .httpFailure(statusCode: 502))
-        XCTAssertTrue(String(reflecting: error).contains("proxy-api.mnee.net/v1/tx/abc"))
+        XCTAssertTrue(String(reflecting: error).contains("api.example.com/v1/tx/abc"))
     }
 }

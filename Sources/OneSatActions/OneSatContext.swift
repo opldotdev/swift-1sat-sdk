@@ -85,7 +85,6 @@ public struct OneSatContext: Sendable {
     public let chain: OneSatChain
     public let services: (any WalletServices)?
     public let bsv21: (any Bsv21ActionServices)?
-    public let mnee: (any MneeActionServices)?
     public let listings: (any ListingBeefSource)?
 
     public init(
@@ -96,7 +95,6 @@ public struct OneSatContext: Sendable {
         chain: OneSatChain = .main,
         services: (any WalletServices)? = nil,
         bsv21: (any Bsv21ActionServices)? = nil,
-        mnee: (any MneeActionServices)? = nil,
         listings: (any ListingBeefSource)? = nil
     ) {
         self.identity = identity
@@ -106,7 +104,6 @@ public struct OneSatContext: Sendable {
         self.chain = chain
         self.services = services
         self.bsv21 = bsv21
-        self.mnee = mnee
         self.listings = listings
     }
 

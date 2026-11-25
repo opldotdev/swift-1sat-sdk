@@ -167,8 +167,9 @@ public struct OneSatClient: Sendable {
         try OneSatClientHTTP.check(
             (status, body), service: "the 1Sat indexer", operation: "OneSatClient owner txos", method: "GET", url: url
         )
+        let parsed: [IndexedOutput]
         do {
-            return try Self.parse(sse: body, limit: Self.outputLimit)
+            parsed = try Self.parse(sse: body, limit: Self.outputLimit)
         } catch {
             OneSatLog.unreadable(
                 "OneSatClient owner txos", method: "GET", url: url, body: body, error: error,
@@ -176,6 +177,8 @@ public struct OneSatClient: Sendable {
             )
             throw error
         }
+        // A retired token (MNEE) is no asset here: not listed, not counted, never swept.
+        return parsed.filter { !RetiredTokens.contains($0.tokenID) }
     }
 
     /// Refuses malformed TXO frames so a partial response cannot become a misleading asset view.

@@ -63,6 +63,30 @@ final class OneSatClientTests: XCTestCase {
         """
     }
 
+    /// A retired token (MNEE) is left out of balances, token outputs and the listed outpoints;
+    /// the ordinal and the other tokens on the same address still read.
+    func test_retiredTokenIsLeftOutOfEveryRead() async throws {
+        let retired = RetiredTokens.ids.first!
+        let extra = """
+        event: txo
+        data: {"outpoint":"\(String(repeating: "f", count: 64)).5","score":5,"satoshis":1,"events":["1sat","insc","type:application","type:application/bsv-20","bsv21:\(retired)"],"data":{"insc":{"file":{"hash":"AA==","size":1,"type":"application/bsv-20"}},"bsv21":{"id":"\(retired)","op":"transfer","amt":"500","sym":"MNEE"}}}
+        id: 5
+
+
+        """
+        let body = sse.replacingOccurrences(of: "event: done", with: extra + "event: done")
+        let client = OneSatClient(http: StubHTTP(status: 200, body: Array(body.utf8)))
+
+        let inventory = try await client.tokenInventory(forAddress: address)
+
+        XCTAssertEqual(inventory.balances.map(\.tokenID), [tokenID, "SHUA"])
+        XCTAssertFalse(inventory.outputs.contains { $0.tokenID == retired })
+        XCTAssertFalse(inventory.listed.contains(OutputRef(txid: String(repeating: "f", count: 64), vout: 5)))
+        XCTAssertEqual(inventory.listed.count, 4)
+        let ordinals = try await client.ordinals(forAddress: address)
+        XCTAssertEqual(ordinals.count, 1)
+    }
+
     func test_ordinalsReturnsOnlyTheNonTokenInscription() async throws {
         let client = OneSatClient(http: StubHTTP(status: 200, body: Array(sse.utf8)))
 

@@ -47,7 +47,6 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case ordLockV2FrontFundingFailed(String?)
     case missingSourceTxid
     case inputNotInTransaction(outpoint: String)
-    case mneeClientRequired
     case quantityMustBePositive
     case anchorNoTxid
     /// The SIGMA anchor came back without a txid or transaction (`applyInscribeSigma`).
@@ -131,7 +130,7 @@ public enum OneSatActionError: Error, Equatable, Sendable {
         .invalidCustomInstructions, .noSignableTransaction, .servicesRequiredForPurchase,
         .listingCreateDisabled, .listingTransactionNotFound, .listingOutputNotFound, .notAnOrdLockListing,
         .listingNotFoundInOverlay, .ordLockV2FrontFundingFailed(nil), .missingSourceTxid,
-        .mneeClientRequired, .quantityMustBePositive, .anchorNoTxid, .sigmaAnchorFailed,
+.quantityMustBePositive, .anchorNoTxid, .sigmaAnchorFailed,
         .exactlyOneOfContentOrRef, .contentTypeRequiredWithContent, .noBapIdentity,
         .signWithBapRequiresInscription, .sigmaPlaceholderMissing, .deployNoTxid,
         .authAndEndMintingMutuallyExclusive, .mustProvideMintOrAuth, .mintAmountMustBePositive,
@@ -241,8 +240,6 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "sourceTXID is required"
         case .inputNotInTransaction(let outpoint):
             return "input-not-in-transaction-\(outpoint)"
-        case .mneeClientRequired:
-            return "MNEE client not available — services required"
         case .quantityMustBePositive:
             return "quantity-must-be-positive"
         case .anchorNoTxid:

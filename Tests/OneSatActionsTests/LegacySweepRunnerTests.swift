@@ -264,6 +264,20 @@ final class LegacySweepRunnerTests: XCTestCase {
         XCTAssertEqual(calls.filter { $0.step == "ordinals" }.map(\.outpoints), [[op(2)]])
     }
 
+    /// A retired token (MNEE) is neither moved nor reported as a leftover; the BSV beside it
+    /// still sweeps.
+    func test_retiredTokenIsNeitherSweptNorLeftOver() throws {
+        let retired = RetiredTokens.ids.first!
+        let input = try keyInput(
+            [out(0, sats: 5_000), out(1, sats: 1, events: ["bsv21:\(retired)"])],
+            tokens: listing([token(1, amount: 500, kind: .bsv21, id: retired)], unreadable: [])
+        )
+        let plan = LegacySweepRunner.plan(input)
+        XCTAssertEqual(plan.funding.map(\.vout), [0])
+        XCTAssertTrue(plan.bsv21.isEmpty)
+        XCTAssertTrue(plan.leftovers.isEmpty)
+    }
+
     func test_noSkipsLeavesThePlanAsItWas() throws {
         let input = try keyInput([out(0, sats: 5_000), out(1, sats: 1, events: ["1sat"])])
         let plan = LegacySweepRunner.plan(input)

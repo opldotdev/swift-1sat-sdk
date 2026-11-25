@@ -8,7 +8,7 @@ import PackageDescription
 ///
 /// Sweep still moves coins from a legacy or foreign key into the wallet's own scheme — the first
 /// thing a real wallet needs from this layer. The tree already ships major `@1sat/actions` families
-/// — ordinals, BSV21, OpNS, MNEE — alongside templates, addresses, and clients.
+/// — ordinals, BSV21, OpNS — alongside templates, addresses, and clients.
 let publicModules = [
     "OneSatClient",
     "OneSatPermissions",

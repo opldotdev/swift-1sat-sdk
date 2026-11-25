@@ -16,7 +16,7 @@ final class OneSatActionErrorWireTests: XCTestCase {
         .missingSourceTransaction(inputIndex: 0), .noSignableTransaction, .servicesRequiredForPurchase,
         .listingCreateDisabled, .listingTransactionNotFound, .listingOutputNotFound, .notAnOrdLockListing,
         .listingNotFoundInOverlay, .ordLockV2FrontFundingFailed(nil), .missingSourceTxid,
-        .inputNotInTransaction(outpoint: "cd.2"), .mneeClientRequired, .quantityMustBePositive,
+        .inputNotInTransaction(outpoint: "cd.2"), .quantityMustBePositive,
         .anchorNoTxid, .sigmaAnchorFailed, .exactlyOneOfContentOrRef, .contentTypeRequiredWithContent,
         .invalidRef(ref: "not-a-ref"), .invalidCollectionIdFormat(id: "xyz"), .noBapIdentity,
         .signWithBapRequiresInscription, .sigmaPlaceholderMissing, .deployNoTxid,

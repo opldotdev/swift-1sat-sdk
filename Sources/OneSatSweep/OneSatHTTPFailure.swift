@@ -6,7 +6,7 @@ import os
 /// What a 1Sat service answered when a request failed: enough for a short message to the user
 /// and a full line in the log.
 ///
-/// The query string is never kept: some services take an API key there (MNEE's `auth_token`).
+/// The query string is never kept: some services take an API key there (an `auth_token`).
 public struct OneSatHTTPFailure: Error, Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
     /// The service in plain words, as a user would name it ("the 1Sat indexer").
     public let service: String
@@ -171,7 +171,7 @@ public enum OneSatLog {
     /// A URL loading error (in `NSURLErrorDomain`, or one that names its failing URL or the error
     /// under it) is described only by its domain, code, description and the failing host and
     /// path, and so is each error under it: its user info carries the full URL, and some services
-    /// take an API key in the query (MNEE's `auth_token`). Anything else is reflected and passed
+    /// take an API key in the query (an `auth_token`). Anything else is reflected and passed
     /// through ``redactingQueries(_:)``.
     public static func reflecting(_ error: any Error) -> String {
         if let foundation = FoundationError(error), foundation.isURLLoading {
@@ -202,7 +202,7 @@ public enum OneSatLog {
     /// A secret is the value of a parameter, JSON member, reflected property or header whose name
     /// ends in `password`, `passwd`, `secret`, `wif`, `mnemonic`, `phrase`, `seed`, `authorization`,
     /// `api_key` / `apiKey` (and `access`, `auth`, `secret`, `signing`, `priv`, `private` keys), or in
-    /// `token` after a prefix (`auth_token`, `mnee_token`, `accessToken`); a `key` or `token` value
+    /// `token` after a prefix (`auth_token`, `api_token`, `accessToken`); a `key` or `token` value
     /// that is quoted, a parameter, or a header's (at the start of a line or list item), unless it
     /// is a token ID (`<txid>_<vout>`) or, quoted, a plain word, since this SDK names token IDs and
     /// labels that way; an `Authorization:` header's credential (a plain word
@@ -290,7 +290,7 @@ public enum OneSatLog {
         // own line, `{token: abc`), so prose such as "this token: no pool" is left alone.
         (#"(?im)(^|[,;{(\[])([ \t]*\\?["']?)(\#(ambiguousName))\#(bareSeparator)(?!nil\b|\#(proseValue)|\#(tokenID)(?!\#(bareValue)))\#(bareValue)++(?!\()"#,
          "$1$2$3$4<redacted>"),
-        // A query or form parameter (`key=`, `mnee_token=`), up to the next `&` or space.
+        // A query or form parameter (`key=`, `api_token=`), up to the next `&` or space.
         (#"(?i)\#(nameStart)(\#(secretName)|\#(ambiguousName))=[^&\s"'<>]+"#, "$1=<redacted>"),
         // A bare bearer credential: one that holds a digit, or is 24 characters or more, so the
         // word in prose ("the bearer certificate") is left alone.
@@ -336,7 +336,7 @@ public enum OneSatLog {
 
     /// `error` rebuilt without the failing URL's query string: the same code and description,
     /// the failing URL as scheme, host and path, and the error under it as its domain, code and
-    /// description only. Some services take an API key in the query (MNEE's `auth_token`), and
+    /// description only. Some services take an API key in the query (an `auth_token`), and
     /// URLSession's error carries the full URL to every caller and log.
     public static func urlFree(_ error: URLError) -> URLError {
         var info: [String: Any] = [NSLocalizedDescriptionKey: redactingQueries(error.localizedDescription)]

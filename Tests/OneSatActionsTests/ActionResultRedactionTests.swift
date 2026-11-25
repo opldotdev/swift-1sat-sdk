@@ -2,10 +2,10 @@ import Foundation
 import XCTest
 @testable import OneSatActions
 
-/// An offline MNEE call never puts its API key in an action's diagnostic.
+/// An offline call never puts its API key in an action's diagnostic.
 final class ActionResultRedactionTests: XCTestCase {
     private func offline() -> NSError {
-        let url = URL(string: "https://proxy-api.mnee.net/v1/tx/abc?auth_token=SECRET")!
+        let url = URL(string: "https://api.example.com/v1/tx/abc?auth_token=SECRET")!
         return NSError(
             domain: "NSURLErrorDomain", code: -1009,
             userInfo: [
@@ -20,7 +20,7 @@ final class ActionResultRedactionTests: XCTestCase {
         let result = ActionResult.failure(describing: offline())
         let diagnostic = result.diagnostic ?? ""
         XCTAssertFalse(diagnostic.contains("SECRET"), diagnostic)
-        XCTAssertTrue(diagnostic.contains("proxy-api.mnee.net/v1/tx/abc"), diagnostic)
+        XCTAssertTrue(diagnostic.contains("api.example.com/v1/tx/abc"), diagnostic)
         XCTAssertFalse(result.error?.contains("SECRET") ?? false)
     }
 
@@ -32,9 +32,9 @@ final class ActionResultRedactionTests: XCTestCase {
 
     func test_failureDescribingKeepsTheErrorsWordsWithoutItsSecrets() {
         struct Refused: LocalizedError {
-            var errorDescription: String? { "GET https://proxy-api.mnee.net/v1/tx/abc?auth_token=SECRET was refused" }
+            var errorDescription: String? { "GET https://api.example.com/v1/tx/abc?auth_token=SECRET was refused" }
         }
         let result = ActionResult.failure(describing: Refused())
-        XCTAssertEqual(result.error, "GET https://proxy-api.mnee.net/v1/tx/abc was refused")
+        XCTAssertEqual(result.error, "GET https://api.example.com/v1/tx/abc was refused")
     }
 }
