@@ -19,7 +19,8 @@ public struct OneSatClient: Sendable {
     /// Every ordinal is returned separately because its outpoint is its wallet identity.
     public func ordinals(forAddress address: String) async throws -> [OrdinalOutput] {
         try await outputs(forAddress: address).compactMap { output in
-            guard output.isInscribed, !output.isToken, !output.isLocked else { return nil }
+            guard output.isInscribed, !output.isToken, !output.isLocked,
+                  !RetiredTokens.contains(output.tokenID) else { return nil }
             return OrdinalOutput(
                 txid: output.txid,
                 vout: output.vout,
@@ -45,12 +46,17 @@ public struct OneSatClient: Sendable {
     }
 
     /// Token balances and the token outputs left out of them, from one owner-stream request.
+    ///
+    /// A retired token's outputs (MNEE) are named in `retired` only: they are not in the
+    /// balances, the token outputs or `listed`, so they are never shown, counted or moved.
     public func tokenInventory(forAddress address: String) async throws -> TokenInventory {
-        let outputs = try await outputs(forAddress: address)
+        let all = try await outputs(forAddress: address)
+        let retired = Set(all.filter { RetiredTokens.contains($0.tokenID) }.map { OutputRef(txid: $0.txid, vout: $0.vout) })
+        let outputs = all.filter { !RetiredTokens.contains($0.tokenID) }
         let inventory = try Self.tokenInventory(from: outputs)
         return TokenInventory(
             balances: inventory.balances, unreadable: inventory.unreadable, outputs: Self.tokenOutputs(from: outputs),
-            listed: Set(outputs.map { OutputRef(txid: $0.txid, vout: $0.vout) })
+            listed: Set(outputs.map { OutputRef(txid: $0.txid, vout: $0.vout) }), retired: retired
         )
     }
 
@@ -129,6 +135,7 @@ public struct OneSatClient: Sendable {
         outputs.compactMap { output in
             guard output.isToken,
                   let tokenID = output.tokenID,
+                  !RetiredTokens.contains(tokenID),
                   let amount = output.tokenAmount
             else { return nil }
             return TokenOutput(
@@ -324,14 +331,19 @@ public struct TokenInventory: Equatable, Sendable {
     /// Every unspent outpoint the read returned, token or not. An outpoint missing here was not
     /// checked for inscription token data, so a sweep must not move it as a bare ordinal.
     public let listed: Set<OutputRef>
+    /// Outputs of a retired token (MNEE). They are in none of the above; a wallet neither shows
+    /// nor moves them.
+    public let retired: Set<OutputRef>
 
     public init(
-        balances: [TokenBalance], unreadable: [OutputRef], outputs: [TokenOutput] = [], listed: Set<OutputRef> = []
+        balances: [TokenBalance], unreadable: [OutputRef], outputs: [TokenOutput] = [], listed: Set<OutputRef> = [],
+        retired: Set<OutputRef> = []
     ) {
         self.balances = balances
         self.unreadable = unreadable
         self.outputs = outputs
         self.listed = listed
+        self.retired = retired
     }
 }
 

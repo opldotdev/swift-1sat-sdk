@@ -17,6 +17,20 @@ final class SweepPlanTests: XCTestCase {
         )
     }
 
+    /// A retired token (MNEE) is no asset: it is neither swept nor kept as a remaining token,
+    /// and the plain BSV beside it still sweeps.
+    func test_retiredTokenIsLeftOutOfThePlan() {
+        let retired = RetiredTokens.ids.first!
+        let plan = SweepPlan.from(scan: [
+            out(0, sats: 1, events: ["bsv21:\(retired)"]),
+            out(1, sats: 10_000),
+            out(2, sats: 1, events: ["ord"]),
+        ])
+        XCTAssertEqual(plan.fundable.count, 1)
+        XCTAssertTrue(plan.remaining.bsv21.isEmpty)
+        XCTAssertEqual(plan.remaining.ordinals.count, 1)
+    }
+
     func test_plainOutputsAreFundable() {
         XCTAssertEqual(out(0, sats: 1000).kind, .fundable)
     }

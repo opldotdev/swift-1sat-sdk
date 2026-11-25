@@ -5,12 +5,10 @@ import FoundationNetworking
 import XCTest
 @testable import OneSatClient
 
-/// The transport hands callers a URLError without the MNEE API key in its failing URL.
+/// The transport hands callers a URLError without the API key in its failing URL.
 final class URLSessionOneSatTransportTests: XCTestCase {
     func test_urlFreeDropsTheQueryAndKeepsCodeHostAndPath() {
-        let url = MneeClient.rawTxURL(
-            txid: "abc", baseURL: URL(string: "https://proxy-api.mnee.net")!, apiKey: "SECRET"
-        )
+        let url = URL(string: "https://api.example.com/v1/tx/abc?auth_token=SECRET")!
         XCTAssertTrue(url.absoluteString.contains("SECRET"))
         let underlying = NSError(
             domain: "kCFErrorDomainCFNetwork", code: -1009,
@@ -29,7 +27,7 @@ final class URLSessionOneSatTransportTests: XCTestCase {
         XCTAssertEqual(clean.code, .notConnectedToInternet)
         XCTAssertEqual(clean.localizedDescription, "The Internet connection appears to be offline.")
         let info = clean.errorUserInfo
-        XCTAssertEqual(info["NSErrorFailingURLStringKey"] as? String, "https://proxy-api.mnee.net/v1/tx/abc")
+        XCTAssertEqual(info["NSErrorFailingURLStringKey"] as? String, "https://api.example.com/v1/tx/abc")
         XCTAssertFalse(String(reflecting: clean).contains("SECRET"), String(reflecting: clean))
         XCTAssertFalse(String(describing: info).contains("SECRET"))
     }
