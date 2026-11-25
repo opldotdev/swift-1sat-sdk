@@ -72,6 +72,10 @@ final class OneSatClientTests: XCTestCase {
         data: {"outpoint":"\(String(repeating: "f", count: 64)).5","score":5,"satoshis":1,"events":["1sat","insc","type:application","type:application/bsv-20","bsv21:\(retired)"],"data":{"insc":{"file":{"hash":"AA==","size":1,"type":"application/bsv-20"}},"bsv21":{"id":"\(retired)","op":"transfer","amt":"500","sym":"MNEE"}}}
         id: 5
 
+        event: txo
+        data: {"outpoint":"\(String(repeating: "f", count: 64)).6","score":6,"satoshis":1,"events":["1sat","insc"],"data":{"insc":{"file":{"hash":"AA==","size":1,"type":"application/bsv-20"}},"bsv21":{"id":"\(retired)","op":"transfer","amt":"7","sym":"MNEE"}}}
+        id: 6
+
 
         """
         let body = sse.replacingOccurrences(of: "event: done", with: extra + "event: done")
@@ -81,7 +85,12 @@ final class OneSatClientTests: XCTestCase {
 
         XCTAssertEqual(inventory.balances.map(\.tokenID), [tokenID, "SHUA"])
         XCTAssertFalse(inventory.outputs.contains { $0.tokenID == retired })
-        XCTAssertFalse(inventory.listed.contains(OutputRef(txid: String(repeating: "f", count: 64), vout: 5)))
+        let retiredRefs: Set<OutputRef> = [
+            OutputRef(txid: String(repeating: "f", count: 64), vout: 5),
+            OutputRef(txid: String(repeating: "f", count: 64), vout: 6),
+        ]
+        XCTAssertEqual(inventory.retired, retiredRefs)
+        XCTAssertTrue(inventory.listed.isDisjoint(with: retiredRefs))
         XCTAssertEqual(inventory.listed.count, 4)
         let ordinals = try await client.ordinals(forAddress: address)
         XCTAssertEqual(ordinals.count, 1)

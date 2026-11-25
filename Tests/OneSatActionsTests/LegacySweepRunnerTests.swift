@@ -278,6 +278,19 @@ final class LegacySweepRunnerTests: XCTestCase {
         XCTAssertTrue(plan.leftovers.isEmpty)
     }
 
+    /// A retired token output whose scan lacks the `bsv21:` tag reads as an ordinal there; the
+    /// listing's `retired` keeps it from moving as one or being reported as a leftover.
+    func test_untaggedRetiredTokenIsNeitherMovedAsAnOrdinalNorLeftOver() throws {
+        let input = try keyInput(
+            [out(0, sats: 5_000), out(1, sats: 1, events: ["1sat", "insc"]), out(2, sats: 1, events: ["1sat"])],
+            retired: [1]
+        )
+        let plan = LegacySweepRunner.plan(input)
+        XCTAssertEqual(plan.funding.map(\.vout), [0])
+        XCTAssertEqual(plan.ordinals.map(\.vout), [2])
+        XCTAssertTrue(plan.leftovers.isEmpty)
+    }
+
     func test_noSkipsLeavesThePlanAsItWas() throws {
         let input = try keyInput([out(0, sats: 5_000), out(1, sats: 1, events: ["1sat"])])
         let plan = LegacySweepRunner.plan(input)
@@ -334,14 +347,19 @@ final class LegacySweepRunnerTests: XCTestCase {
     private func keyInput(
         _ scanned: [ScannedOutput],
         tokens: Listing = .listed([], unreadable: []),
-        unlisted: Set<UInt32> = []
+        unlisted: Set<UInt32> = [],
+        retired: Set<UInt32> = []
     ) throws -> LegacySweepRunner.KeyInput {
         let listing: LegacySweepRunner.TokenListing
         switch tokens {
         case .listed(let outputs, let unreadable):
             // The listing read returns every outpoint of the address unless a test leaves one out.
-            let listed = Set(scanned.filter { !unlisted.contains($0.vout) }.map { OutputRef(txid: $0.txid, vout: $0.vout) })
-            listing = .listed(outputs: outputs, unreadable: unreadable, listed: listed)
+            let listed = Set(
+                scanned.filter { !unlisted.contains($0.vout) && !retired.contains($0.vout) }
+                    .map { OutputRef(txid: $0.txid, vout: $0.vout) }
+            )
+            let retiredRefs = Set(retired.map { OutputRef(txid: txid, vout: $0) })
+            listing = .listed(outputs: outputs, unreadable: unreadable, listed: listed, retired: retiredRefs)
         case .unavailable(let reason):
             listing = .unavailable(reason: reason)
         }

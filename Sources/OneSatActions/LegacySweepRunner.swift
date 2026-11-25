@@ -156,12 +156,16 @@ public enum LegacySweepRunner {
     /// and ``OneSatClient/unreadableTokenOutputs(forAddress:)``.
     public enum TokenListing: Sendable {
         /// `listed` is every unspent outpoint the listing read returned, token or not.
-        case listed(outputs: [TokenOutput], unreadable: [OutputRef], listed: Set<OutputRef>)
+        /// `retired` names a retired token's outputs (MNEE), which are neither moved nor left over.
+        case listed(outputs: [TokenOutput], unreadable: [OutputRef], listed: Set<OutputRef>, retired: Set<OutputRef> = [])
         /// The listing request failed. `reason` is recorded as a step failure.
         case unavailable(reason: String)
         /// The listing from one ``OneSatClient/tokenInventory(forAddress:)`` read.
         public static func listed(_ inventory: TokenInventory) -> TokenListing {
-            .listed(outputs: inventory.outputs, unreadable: inventory.unreadable, listed: inventory.listed)
+            .listed(
+                outputs: inventory.outputs, unreadable: inventory.unreadable, listed: inventory.listed,
+                retired: inventory.retired
+            )
         }
     }
 
@@ -323,9 +327,11 @@ public enum LegacySweepRunner {
         let unreadable: Set<OutputRef>
         let listingAvailable: Bool
         let listedRefs: Set<OutputRef>
+        var retired: Set<OutputRef> = []
         switch input.tokens {
-        case .listed(let outputs, let unreadableRefs, let listed):
+        case .listed(let outputs, let unreadableRefs, let listed, let retiredRefs):
             listedRefs = listed
+            retired = retiredRefs
             var byRef: [OutputRef: TokenOutput] = [:]
             for row in outputs where !RetiredTokens.contains(row.tokenID) {
                 byRef[OutputRef(txid: row.txid, vout: row.vout)] = row
@@ -345,7 +351,10 @@ public enum LegacySweepRunner {
         var bsv21Index: [String: Int] = [:]
         var scannedRefs = Set<OutputRef>()
 
-        for output in input.scanned where !RetiredTokens.contains(output.kind) {
+        // A retired token (MNEE) is no asset: by its scan tag, or by the listing when the scan
+        // lacks that tag.
+        for output in input.scanned
+        where !RetiredTokens.contains(output.kind) && !retired.contains(OutputRef(txid: output.txid, vout: output.vout)) {
             let ref = OutputRef(txid: output.txid, vout: output.vout)
             scannedRefs.insert(ref)
             let kind = output.kind
