@@ -140,4 +140,30 @@ final class SweepPlanTests: XCTestCase {
         XCTAssertFalse(ScannedOutput.hasRunPrefix([0x00, 0x6a, 0x03, 0x72, 0x75]), "one byte short is not RUN")
         XCTAssertFalse(ScannedOutput.hasRunPrefix([0x6a, 0x03, 0x72, 0x75, 0x6e, 0x00]))
     }
+
+    // MARK: - Twetch NFTs
+
+    /// A Twetch NFT holds 2180 sats behind a hash lock; spending it as BSV would fail.
+    func test_aTwetchNFTIsNeverFundable() {
+        let twonk = out(0, sats: 2180, events: ["twetch"])
+        XCTAssertEqual(twonk.kind, .twetch)
+        let plan = SweepPlan.from(scan: [twonk, out(1, sats: 5_000)])
+        XCTAssertEqual(plan.fundable.map(\.vout), [1])
+        XCTAssertEqual(plan.remaining.twetch.map(\.vout), [0])
+        XCTAssertFalse(plan.remaining.isEmpty)
+    }
+
+    /// Without the `twetch` event, the script shape alone keeps a twonk out of funding.
+    func test_anUntaggedTwetchScriptIsStillATwonk() {
+        var script: [UInt8] = [0xa9, 0x14]
+        script += [UInt8](repeating: 0x41, count: 20)
+        script += [0x88, 0x76, 0xa9, 0x14]
+        script += [UInt8](repeating: 0xbb, count: 20)
+        script += [0x88, 0xac, 0x6a, 0x01, 0x7b]
+        let twonk = ScannedOutput(
+            txid: "8ac7230489e80000000000000000000000000000000000000000000000000001",
+            vout: 0, satoshis: 2_180, lockingScript: script, events: []
+        )
+        XCTAssertEqual(twonk.kind, .twetch)
+    }
 }

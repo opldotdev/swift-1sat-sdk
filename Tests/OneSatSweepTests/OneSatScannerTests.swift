@@ -246,6 +246,58 @@ final class OneSatScannerTests: XCTestCase {
         }
     }
 
+    /// Twonks live under `twetch:<address>`, not the owner stream: they are looked up by key,
+    /// resolved to their scripts, and come back as `.twetch`.
+    func test_twetchNFTsAreFoundUnderTheirOwnKey() async throws {
+        var bytes: [UInt8] = [0xa9, 0x14]
+        bytes += [UInt8](repeating: 0x41, count: 20)
+        bytes += [0x88, 0x76, 0xa9, 0x14]
+        bytes += [UInt8](repeating: 0xbb, count: 20)
+        bytes += [0x88, 0xac, 0x6a]
+        let json = Array(#"{"title":"Muties #15"}"#.utf8)
+        bytes.append(UInt8(json.count))
+        bytes += json
+        let source = Transaction(version: 1, inputs: [], outputs: [
+            TransactionOutput(satoshis: 2_180, lockingScript: try Script(bytes: bytes, maximumByteCount: 10_000)),
+        ], lockTime: 0)
+        let txid = try source.transactionID(limits: Sweep.defaultLimits).displayHex
+        let rows = #"[{"outpoint":"\#(txid).0","satoshis":2180,"events":["twetch","twetch:\#(address)"]}]"#
+        let http = SearchHTTP(search: Array(rows.utf8), raw: try source.serialized(limits: Sweep.defaultLimits))
+
+        let outputs = try await OneSatScanner(http: http).twetchNFTs(address: address)
+
+        XCTAssertEqual(outputs.map(\.lockingScript), [bytes])
+        XCTAssertEqual(outputs.first?.kind, .twetch)
+        XCTAssertEqual(TwetchNFT.decode(bytes: bytes)?.title, "Muties #15")
+        let urls = await http.urls
+        XCTAssertEqual(urls.first?.path, "/1sat/txo/search")
+        XCTAssertEqual(urls.first?.query?.contains("key=twetch%3A\(address)"), true)
+    }
+
+    func test_noTwetchNFTsIsAnEmptyList() async throws {
+        let http = SearchHTTP(search: Array("null".utf8), raw: [])
+        let outputs = try await OneSatScanner(http: http).twetchNFTs(address: address)
+        XCTAssertTrue(outputs.isEmpty)
+    }
+
+    func test_anUnreadableTwetchSearchIsRefused() throws {
+        XCTAssertThrowsError(try OneSatScanner.parse(search: Array("{}".utf8)))
+        XCTAssertThrowsError(try OneSatScanner.parse(search: Array(#"[{"outpoint":"x"}]"#.utf8)))
+    }
+
+    private actor SearchHTTP: HTTPGet {
+        let search: [UInt8]
+        let raw: [UInt8]
+        private(set) var urls: [URL] = []
+
+        init(search: [UInt8], raw: [UInt8]) { self.search = search; self.raw = raw }
+
+        func get(_ url: URL) async throws -> (status: Int, body: [UInt8]) {
+            urls.append(url)
+            return (200, url.path.hasSuffix("/search") ? search : raw)
+        }
+    }
+
     private actor SourceHTTP: HTTPGet {
         let stream: [UInt8]
         let raw: [UInt8]

@@ -27,6 +27,10 @@ public enum OneSatConstants {
     public static let hostingBasket = "hosting"
     /// `BSOCIAL_BASKET`
     public static let bsocialBasket = "bsocial"
+    /// `TWETCH_BASKET`: Twetch NFTs (twonks). They cannot be sent, and are never plain funds.
+    public static let twetchBasket = "twetch"
+    /// `TWETCH_TAG`
+    public static let twetchTag = "twetch"
     /// `P1SAT_LABEL` = `p 1sat action`
     public static let p1satLabel = "p 1sat action"
     /// `P1SAT_BASKET_PREFIX` — leftover P-basket spelling, migration source only.

@@ -26,6 +26,8 @@ public enum LegacySweepRunner {
         case run
         /// A 0-sat output.
         case unspendable
+        /// A Twetch NFT. No sweep moves it.
+        case twetch
 
         /// The classes a sweep can move, in run order (`sweeper.ts` `SweepClass`).
         public static let transferable: [SweepClass] = [.bsv, .ordinals, .opns, .bsv20, .bsv21]
@@ -72,6 +74,9 @@ public enum LegacySweepRunner {
         case runTransaction
         /// 0 sats.
         case zeroSatoshis
+        /// A Twetch NFT: unlocking it needs a hash preimage as well as the key, and sending one
+        /// is not supported.
+        case twetchNotSupported
         /// Its class was skipped for this run (`sweeper.ts` `SweepClassSelection`). It stays on
         /// the key for a later run.
         case skipped
@@ -377,6 +382,8 @@ public enum LegacySweepRunner {
                 plan.leftovers.append(Leftover(sweepClass: .run, outpoint: ref, reason: .runTransaction))
             case .unspendable:
                 plan.leftovers.append(Leftover(sweepClass: .unspendable, outpoint: ref, reason: .zeroSatoshis))
+            case .twetch:
+                plan.leftovers.append(Leftover(sweepClass: .twetch, outpoint: ref, reason: .twetchNotSupported))
             case .ordinal:
                 // `scan.ts`: a 1-sat `type:application/op-ns` output is OpNS.
                 let sweepClass: SweepClass = output.events.contains("type:application/op-ns") ? .opns : .ordinals
@@ -611,7 +618,7 @@ public enum LegacySweepRunner {
         case .opns: report.opnsTxids.append(txid)
         case .bsv20: report.bsv20Txids.append(txid)
         case .bsv21: report.bsv21Txids.append(txid)
-        case .run, .unspendable: break
+        case .run, .unspendable, .twetch: break
         }
     }
 

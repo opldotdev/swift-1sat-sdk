@@ -30,6 +30,9 @@ public enum AssetKind: Equatable, Sendable {
     case run
     /// A 0-sat output. `scan.ts` drops it from every class; it is reported here instead.
     case unspendable
+    /// A Twetch NFT (`twetch` event). Unlocking it needs a hash preimage as well as a signature,
+    /// so it is never swept as BSV, and no sweep moves it (`scan.ts` `twetch`).
+    case twetch
 }
 
 /// One categorised output from an indexer scan.
@@ -69,15 +72,26 @@ public struct ScannedOutput: Equatable, Sendable {
         script.starts(with: runPrefix)
     }
 
+    /// A Twetch NFT script: `OP_HASH160 <20> OP_EQUALVERIFY`, a P2PKH, then `OP_RETURN`.
+    /// Checked as well as the `twetch` event, so a twonk is never swept as funds even when the
+    /// indexer didn't tag it.
+    public static func hasTwetchShape(_ s: [UInt8]) -> Bool {
+        s.count > 48
+            && s[0] == 0xa9 && s[1] == 0x14 && s[22] == 0x88
+            && s[23] == 0x76 && s[24] == 0xa9 && s[25] == 0x14
+            && s[46] == 0x88 && s[47] == 0xac && s[48] == 0x6a
+    }
+
     /// What kind of asset this output is, from its tags.
     ///
-    /// Order follows `@1sat/actions` `scan.ts` `categorizeOutputs`: BSV-21, lock, BSV-20, then
+    /// Order follows `@1sat/actions` `scan.ts` `categorizeOutputs`: BSV-21, Twetch, lock, BSV-20, then
     /// by satoshis. Two deliberate differences: a tagged inscription above 1 sat stays an ordinal
     /// (TS spends it as BSV), and a 0-sat output is reported as `.unspendable` (TS drops it).
     public var kind: AssetKind {
         if let token = events.first(where: { $0.hasPrefix("bsv21:") }) {
             return .bsv21(tokenID: String(token.dropFirst("bsv21:".count)))
         }
+        if events.contains("twetch") || Self.hasTwetchShape(lockingScript) { return .twetch }
         if let lock = events.first(where: { $0.hasPrefix("lock:") }) {
             let until = UInt64(lock.dropFirst("lock:".count)) ?? 0
             return .locked(until: until)
@@ -111,6 +125,13 @@ public struct ScannedOutput: Equatable, Sendable {
 /// source for a sweep that could hold assets.
 public protocol AssetScanner: Sendable {
     func scan(address: String) async throws -> [ScannedOutput]
+    /// Twetch NFTs held by `address`, which the indexer keeps out of ``scan(address:)``.
+    func twetchNFTs(address: String) async throws -> [ScannedOutput]
+}
+
+extension AssetScanner {
+    /// A scanner that can't list Twetch NFTs reports none; ``OneSatScanner`` lists them.
+    public func twetchNFTs(address: String) async throws -> [ScannedOutput] { [] }
 }
 
 /// The split a sweep produces: what moves now, and what stays.
@@ -136,6 +157,7 @@ public struct SweepPlan: Equatable, Sendable {
         var bsv20: [OutputRef] = []
         var run: [OutputRef] = []
         var skipped: [OutputRef] = []
+        var twetch: [OutputRef] = []
 
         for output in scan {
             let ref = OutputRef(txid: output.txid, vout: output.vout)
@@ -160,6 +182,8 @@ public struct SweepPlan: Equatable, Sendable {
                 run.append(ref)
             case .unspendable:
                 skipped.append(ref)
+            case .twetch:
+                twetch.append(ref)
             }
         }
 
@@ -167,7 +191,7 @@ public struct SweepPlan: Equatable, Sendable {
             fundable: fundable,
             remaining: RemainingAssets(
                 ordinals: ordinals, bsv21: tokens, locked: locked,
-                bsv20: bsv20, run: run, skipped: skipped
+                bsv20: bsv20, run: run, skipped: skipped, twetch: twetch
             )
         )
     }
@@ -185,10 +209,13 @@ public struct RemainingAssets: Equatable, Sendable {
     public let run: [OutputRef]
     /// 0-sat outputs. Nothing to sweep, but they are reported rather than hidden.
     public let skipped: [OutputRef]
+    /// Twetch NFTs. No sweep can move them, so they stay on the key.
+    public let twetch: [OutputRef]
 
     public init(
         ordinals: [OutputRef], bsv21: [TokenRef], locked: [LockedRef],
-        bsv20: [OutputRef] = [], run: [OutputRef] = [], skipped: [OutputRef] = []
+        bsv20: [OutputRef] = [], run: [OutputRef] = [], skipped: [OutputRef] = [],
+        twetch: [OutputRef] = []
     ) {
         self.ordinals = ordinals
         self.bsv21 = bsv21
@@ -196,12 +223,13 @@ public struct RemainingAssets: Equatable, Sendable {
         self.bsv20 = bsv20
         self.run = run
         self.skipped = skipped
+        self.twetch = twetch
     }
 
     /// True when the sweep took everything and the source keys can be discarded.
     public var isEmpty: Bool {
         ordinals.isEmpty && bsv21.isEmpty && locked.isEmpty && bsv20.isEmpty && run.isEmpty
-            && skipped.isEmpty
+            && skipped.isEmpty && twetch.isEmpty
     }
 
     /// The earliest block height at which some locked output becomes spendable, if any. A wallet

@@ -100,6 +100,7 @@ final class LegacySweepRunnerTests: XCTestCase {
                 out(2, sats: 0),
                 run,
                 out(4, sats: 5_000, events: ["lock:900"]),
+                out(5, sats: 2_180, events: ["twetch"]),
             ],
             tokens: listing([token(0, amount: 40, kind: .bsv21)], unreadable: [ref(1)])
         )
@@ -108,12 +109,13 @@ final class LegacySweepRunnerTests: XCTestCase {
             leftover(.bsv21, 1, .unreadableTokenAmount),
             leftover(.unspendable, 2, .zeroSatoshis),
             leftover(.run, 3, .runTransaction),
+            leftover(.twetch, 5, .twetchNotSupported),
         ])
         XCTAssertEqual(report.locked.map(\.vout), [4])
         XCTAssertEqual(report.bsv21Txids, ["bsv21-1"])
         XCTAssertEqual(report.sweptOutpoints, [ref(0)])
         let calls = await recorder.calls
-        XCTAssertFalse(calls.contains { $0.step == "bsv" }, "RUN and 0-sat outputs never fund")
+        XCTAssertFalse(calls.contains { $0.step == "bsv" }, "RUN, 0-sat and Twetch outputs never fund")
     }
 
     func test_aBsv21OutputTheOverlayLeftIsCountedAndAnUnfiledSweepIsNoted() async throws {
