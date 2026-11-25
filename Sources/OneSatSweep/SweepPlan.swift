@@ -125,6 +125,13 @@ public struct ScannedOutput: Equatable, Sendable {
 /// source for a sweep that could hold assets.
 public protocol AssetScanner: Sendable {
     func scan(address: String) async throws -> [ScannedOutput]
+    /// Twetch NFTs held by `address`, which the indexer keeps out of ``scan(address:)``.
+    func twetchNFTs(address: String) async throws -> [ScannedOutput]
+}
+
+extension AssetScanner {
+    /// A scanner that can't list Twetch NFTs reports none; ``OneSatScanner`` lists them.
+    public func twetchNFTs(address: String) async throws -> [ScannedOutput] { [] }
 }
 
 /// The split a sweep produces: what moves now, and what stays.
