@@ -44,7 +44,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "811778df02d03605aa1421e77da1e93a966b9caf"
+            revision: "140cdd41f41b54b3d0a8aeafcf94f97486fee394"
         ),
         // Open Exchange's engine works in exact integers as the TS does in `bigint`. The version
         // swift-sdk pins (exact 5.7.0); SwiftPM resolves the two to the same checkout.
