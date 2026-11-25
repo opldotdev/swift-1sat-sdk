@@ -24,4 +24,13 @@ public enum OneSatAPI {
         case .testnet: testnetContentURL
         }
     }
+
+    /// The API base that serves the OrdLock v2 market (`/1sat/market`) for `network`, or nil where
+    /// none runs: testnet answers 404 for every `/1sat/market` route.
+    public static func marketURL(for network: BitcoinNetwork) -> URL? {
+        switch network {
+        case .mainnet: mainnetURL
+        case .testnet: nil
+        }
+    }
 }

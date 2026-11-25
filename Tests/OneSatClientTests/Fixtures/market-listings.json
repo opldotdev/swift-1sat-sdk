@@ -1,0 +1,154 @@
+{
+  "_source": "GET https://api.1sat.app/1sat/market/listings (?limit=5, ?status=sale&limit=3, ?status=cancel&limit=2), captured 2026-11-25, read-only",
+  "active": [
+    {
+      "outpoint": "dedfffa9755928b5bd0d6cc97ded152be937f26c538322334dfc9d4438b1a377.0",
+      "score": 1795372297.2825608,
+      "data": {
+        "ordlock": {
+          "content_type": "text/html",
+          "name": "BOE DHA SOY",
+          "origin": "25da0379e13867d253537b5a1044ff25c34833f3d34b936cb048a4a7e190efc5.0",
+          "price": 100000000,
+          "seller": "19XfhUxng8NRbX3km5HmuqGARiy9SY79eC"
+        }
+      }
+    },
+    {
+      "outpoint": "a8cb46dd6f7a1c230e5801ee131d0ddb99a7c076ce00c5ce37dabed74acd0369.0",
+      "score": 1795372297.1012197,
+      "data": {
+        "ordlock": {
+          "content_type": "text/html",
+          "name": "ORCHSI",
+          "origin": "cf89e0131ce204ef44bf3f05c48001fa4fb01a89de8005893ecbdf4e9897241a.0",
+          "price": 100000000,
+          "seller": "19XfhUxng8NRbX3km5HmuqGARiy9SY79eC"
+        }
+      }
+    },
+    {
+      "outpoint": "df026f32ccfe8715d3807663b6fbc25ac527a39e716fa52f61c6e497e1ebf02a.0",
+      "score": 1795328571.0237415,
+      "data": {
+        "ordlock": {
+          "content_type": "image/png",
+          "name": "Luminex 10",
+          "origin": "50348ce38398c01431c59f456a49dd5129e9f5f00cdde6288aaae2d52268b148.0",
+          "price": 100000000,
+          "seller": "13ksLV9ERdKCDe3aLKmUyyhhMt639VmAmL"
+        }
+      }
+    },
+    {
+      "outpoint": "239b052336321c68467a82c885ba2f6c14ec9a51dec68ca8b695976ff2358719.0",
+      "score": 1795328511.9997742,
+      "data": {
+        "ordlock": {
+          "content_type": "image/png",
+          "name": "Luminex 9",
+          "origin": "4a328eb5cab28971d028297e0cd3b53e9ca54749e418cb6f846560c4d56c4475.0",
+          "price": 180000000,
+          "seller": "13ksLV9ERdKCDe3aLKmUyyhhMt639VmAmL"
+        }
+      }
+    },
+    {
+      "outpoint": "7c79c2bad3a811a499145683b04b34409fa5b6e52978ad1fa99c87fb807ff5d6.0",
+      "score": 1795328456.6715744,
+      "data": {
+        "ordlock": {
+          "content_type": "image/png",
+          "name": "Luminex 8",
+          "origin": "5eab8bca54ffe07ff2df3e92155ce95943bfaad857240ab3b0fee216bb83b8fe.0",
+          "price": 150000000,
+          "seller": "13ksLV9ERdKCDe3aLKmUyyhhMt639VmAmL"
+        }
+      }
+    }
+  ],
+  "sale": [
+    {
+      "outpoint": "a0eec88f685ab81105d9469b181a303d4504e98cfaa3db82375fdf2ccc4fcb96.0",
+      "score": 1791840781.9362447,
+      "spend": "044bc29afc5fdbade741398accb9fac8bb2b40df7e525687bdfa989249534d51",
+      "data": {
+        "ordlock": {
+          "content_type": "image/jpeg",
+          "name": "The Wandering Astronaut 2 6",
+          "origin": "093d60743da9b30b693aee856b6362e6bbd6f41c9648e7ffdeb5d4387a24460d.0",
+          "price": 1000000,
+          "seller": "1N1QG9hdaMhaTwBDweVrrkbyrXxNeCBHst",
+          "spend_score": 1791841063.7086637,
+          "spend_type": "sale"
+        }
+      }
+    },
+    {
+      "outpoint": "5f958feb9aae136051ee8eab8a1aa2af5d72e95887af33655e85dcae94f0d7c3.0",
+      "score": 1789251246.8783257,
+      "spend": "c9dc28af88cbf9e30c89fda87730b9573a8aba113a6c7e2f5550389cbd9dd799",
+      "data": {
+        "ordlock": {
+          "content_type": "image/png",
+          "name": "v2-green",
+          "origin": "0c949aa95fc39dbdb22824497f258dabb4706669f67c1e81a06f15bb7f8620dc.0",
+          "price": 2500,
+          "seller": "1CSFd45upxaiCKLW2JugqdKG2ZVez2uFDR",
+          "spend_score": 1789251425.0414631,
+          "spend_type": "sale"
+        }
+      }
+    },
+    {
+      "outpoint": "f2a9ad5640c99285be08348e7837e94d519283441fe42b4882a018be87de87ce.0",
+      "score": 1789251178.0065022,
+      "spend": "2065a9e512058516efd5e959768d45fa7abcbf37b3278f6532acf2f37aa87621",
+      "data": {
+        "ordlock": {
+          "content_type": "image/png",
+          "name": "v2-gold",
+          "origin": "8bd2bcf3ef859432dcf5e2ae94d89e4f89c3bc8a7ff8e020814d071af0c41824.0",
+          "price": 1200,
+          "seller": "1E8trNB7RZJJ8sFctyadaBCc5ciSY2BrZe",
+          "spend_score": 1789251205.920568,
+          "spend_type": "sale"
+        }
+      }
+    }
+  ],
+  "cancel": [
+    {
+      "outpoint": "34c8dd556806e363a94ab8596feba69825624de23e276220f15331df8ac4feb9.0",
+      "score": 1791839968.9745133,
+      "spend": "1fffe4acaf723f5223ae5e34a7673bd99a6494979465b253e4e88fa9624533f7",
+      "data": {
+        "ordlock": {
+          "content_type": "image/jpeg",
+          "name": "Frozen Objects 2",
+          "origin": "bd8c381f7c939e52f8ce56ce022a9b97ffc490a8870c1863292f40886fbe7767.0",
+          "price": 20000000,
+          "seller": "1N1QG9hdaMhaTwBDweVrrkbyrXxNeCBHst",
+          "spend_score": 1791839989.058729,
+          "spend_type": "cancel"
+        }
+      }
+    },
+    {
+      "outpoint": "bbb9592cf270e38e153da928954b6e107c6663b12d53131d16d5c4ad5183383b.0",
+      "score": 1789252089.9885309,
+      "spend": "eddb64c1b2dc404954acac9bb700095e590783c271aa9f4d09f8311c442c28a5",
+      "data": {
+        "ordlock": {
+          "content_type": "image/png",
+          "name": "v2-red",
+          "origin": "fc5b81164740afa2641379f240e2ff91faa903a1b4f983c721e4912ad2544aff.0",
+          "price": 800,
+          "seller": "1FG4btdQ3BxAvQ7wzfGqesdv5fHwqUAtf8",
+          "spend_score": 1789252176.0078735,
+          "spend_type": "cancel"
+        }
+      }
+    }
+  ]
+}
