@@ -7,6 +7,7 @@ This package ports `b-open-io/1sat-sdk`. It sits above `swift-sdk` and
 |---|---|
 | Specifications | `~/code/BRCs` |
 | 1Sat SDK | `~/code/1sat-sdk` — `packages/templates`, `actions`, `client`, `types`, `wallet` |
+| 1sat.name job client (`NameMining`) | `b-open-io/1sat-name` `frontend/src/mine.ts` (server: `orchestrator/src/routes.ts`, `index.ts`) |
 
 Read `~/code/1sat-sdk` before you change behaviour. Match that checkout with
 vectors where the script or JSON is part of the locking bytes. Do not copy

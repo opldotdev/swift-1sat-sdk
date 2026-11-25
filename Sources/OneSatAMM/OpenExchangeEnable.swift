@@ -117,8 +117,8 @@ extension OpenExchange {
         }
 
         let wallet = ProtoWallet(rootKey: ctx.identity)
-        let derivationPrefix = try await Self.createNonce(wallet)
-        let derivationSuffix = try await Self.createNonce(wallet)
+        let derivationPrefix = try await AuthNonce.create(wallet)
+        let derivationSuffix = try await AuthNonce.create(wallet)
         let payee = try await wallet.getPublicKey(WalletGetPublicKeyRequest(selection: .derived(
             protocolID: try Self.brc29Protocol(),
             keyID: try WalletKeyID(BRC29.keyID(prefix: derivationPrefix, suffix: derivationSuffix)),
@@ -233,20 +233,6 @@ extension OpenExchange {
             return atomic.beef
         }
         return try BEEF(bytes: bytes, limits: beefLimits, transactionOrder: .any)
-    }
-
-    /// `createNonce(wallet, "self")` of `@bsv/sdk`: 16 random bytes, then their HMAC under
-    /// `[2, "server hmac"]` with the bytes as UTF-8 for the key ID, base64.
-    static func createNonce(_ wallet: ProtoWallet) async throws -> String {
-        var generator = SystemRandomNumberGenerator()
-        let random = (0..<16).map { _ in UInt8.random(in: .min ... .max, using: &generator) }
-        let hmac = try await wallet.createHMAC(WalletCreateHMACRequest(
-            protocolID: try WalletProtocolID(securityLevel: .everyAppAndCounterparty, name: "server hmac"),
-            keyID: try WalletKeyID(String(decoding: random, as: UTF8.self)),
-            counterparty: .self,
-            data: random
-        ))
-        return Data(random + hmac.hmac.bytes).base64EncodedString()
     }
 
     /// A non-200 answer to the enable (client.ts:2001): `"<code ?? status>: <description ??

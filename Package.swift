@@ -44,7 +44,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "6349f67b78862697ef3f7bda629c9e3b41227574"
+            revision: "811778df02d03605aa1421e77da1e93a966b9caf"
         ),
         // Open Exchange's engine works in exact integers as the TS does in `bigint`. The version
         // swift-sdk pins (exact 5.7.0); SwiftPM resolves the two to the same checkout.
@@ -218,6 +218,8 @@ let package = Package(
                 .product(name: "BSVTransaction", package: "swift-sdk"),
                 .product(name: "BSVWallet", package: "swift-sdk"),
                 .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
+                // `AuthenticatedSession.sendPaid`: the 1sat.name job client (NameMining).
+                .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
@@ -377,6 +379,8 @@ let package = Package(
             dependencies: [
                 "OneSatActions",
                 "OneSatTemplates",
+                // A BRC-103 peer for the 1sat.name job client's tests.
+                .product(name: "BSVAuth", package: "swift-sdk"),
                 .product(name: "BSVCompat", package: "swift-sdk"),
                 .product(name: "BSVInterpreter", package: "swift-sdk"),
                 .product(name: "BSVCore", package: "swift-sdk"),
