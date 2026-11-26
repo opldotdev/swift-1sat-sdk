@@ -29,7 +29,7 @@ It is the third layer of the Swift BSV stack:
 - **Handles and delivery:** BRC-169 handle resolution, signed envelopes, BRC-232 transaction delivery, the messagebox relay, and the paymail payment inbox.
 - **OpNS:** register and resolve names through a signed PushDrop identity bind, and list names for sale.
 - **ORDFS:** read content and metadata, and deploy directories with manifests and VCDIFF patches.
-- **Identity, locks and more:** BAP identity and SIGMA signing, time locks, MNEE, P1SAT deposit addresses, and sweeping legacy keys.
+- **Identity, locks and more:** BAP identity and SIGMA signing, time locks, P1SAT deposit addresses, and sweeping legacy keys.
 - **Mainnet and testnet:** set per context.
 
 ## Modules
@@ -41,7 +41,7 @@ It is the third layer of the Swift BSV stack:
 | `OneSatAMM` | Open Exchange: token listing and paid enable on the 1Color AMM host |
 | `OneSatMetanet` | Handles, envelopes, transaction delivery, relay, paymail inbox |
 | `OneSatTemplates` | Locking scripts: inscription, OrdLock v2, BSV-20/21, 1Color, Cosign, TimeLock, BAP, MAP, B |
-| `OneSatClient` | Read clients for ordinals, BSV-21, OpNS, ORDFS, MNEE and the OrdLock market, and the overlay submits |
+| `OneSatClient` | Read clients for ordinals, BSV-21, OpNS, ORDFS and the OrdLock market, and the overlay submits |
 | `OneSatPermissions` | Approval-time review data for 1Sat assets |
 | `OneSatAddresses` | P1SAT deposit addresses |
 | `OneSatCBOR` | Strict DAG-CBOR, matching `@ipld/dag-cbor` |

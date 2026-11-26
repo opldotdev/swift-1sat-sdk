@@ -2,9 +2,9 @@ import Foundation
 import XCTest
 @testable import OneSatSweep
 
-/// A URL loading error never puts a URL's query string (MNEE's `auth_token`) in the log.
+/// A URL loading error never puts a URL's query string (an `auth_token`) in the log.
 final class OneSatLogRedactionTests: XCTestCase {
-    private let url = URL(string: "https://proxy-api.mnee.net/v1/tx/abc?auth_token=SECRET")!
+    private let url = URL(string: "https://api.example.com/v1/tx/abc?auth_token=SECRET")!
 
     /// What URLSession throws offline: the full URL in its user info, and again in the error
     /// under it.
@@ -30,7 +30,7 @@ final class OneSatLogRedactionTests: XCTestCase {
         XCTAssertFalse(text.contains("auth_token"), text)
         XCTAssertTrue(text.contains("NSURLErrorDomain -1009"), text)
         XCTAssertTrue(text.contains("The Internet connection appears to be offline."), text)
-        XCTAssertTrue(text.contains("proxy-api.mnee.net/v1/tx/abc"), text)
+        XCTAssertTrue(text.contains("api.example.com/v1/tx/abc"), text)
         XCTAssertTrue(text.contains("underlying: kCFErrorDomainCFNetwork -1009"), text)
     }
 
@@ -98,7 +98,7 @@ final class OneSatLogRedactionTests: XCTestCase {
         XCTAssertEqual(OneSatLog.redactingQueries("password=SECRET"), "password=<redacted>")
         XCTAssertEqual(OneSatLog.redactingQueries("secret=SECRET"), "secret=<redacted>")
         XCTAssertEqual(OneSatLog.redactingQueries("wif=SECRET"), "wif=<redacted>")
-        XCTAssertEqual(OneSatLog.redactingQueries("mnee_token=SECRET"), "mnee_token=<redacted>")
+        XCTAssertEqual(OneSatLog.redactingQueries("api_token=SECRET"), "api_token=<redacted>")
         XCTAssertEqual(OneSatLog.redactingQueries("x token=SEC,RET;MORE)tail"), "x token=<redacted>")
     }
 
@@ -251,7 +251,7 @@ final class OneSatLogRedactionTests: XCTestCase {
         )
         let clean = try XCTUnwrap(OneSatLog.urlFree(thrown: error) as? URLError)
         XCTAssertEqual(clean.code, .timedOut)
-        XCTAssertEqual(clean.errorUserInfo["NSErrorFailingURLStringKey"] as? String, "https://proxy-api.mnee.net/v1/tx/abc")
+        XCTAssertEqual(clean.errorUserInfo["NSErrorFailingURLStringKey"] as? String, "https://api.example.com/v1/tx/abc")
         XCTAssertFalse(String(reflecting: clean).contains("SECRET"), String(reflecting: clean))
     }
 
@@ -283,7 +283,7 @@ final class OneSatLogRedactionTests: XCTestCase {
         let text = OneSatLog.message(error)
         XCTAssertFalse(text.contains("SECRET"), text)
         XCTAssertTrue(text.hasPrefix("NSURLErrorDomain -1001: The request timed out."), text)
-        XCTAssertTrue(text.contains("proxy-api.mnee.net/v1/tx/abc"), text)
+        XCTAssertTrue(text.contains("api.example.com/v1/tx/abc"), text)
     }
 
     func test_foundationErrorReadsAnNSErrorAndAURLError() {
@@ -300,6 +300,6 @@ final class OneSatLogRedactionTests: XCTestCase {
     }
 
     func test_withoutQueryKeepsSchemeHostAndPath() {
-        XCTAssertEqual(OneSatLog.withoutQuery(url)?.absoluteString, "https://proxy-api.mnee.net/v1/tx/abc")
+        XCTAssertEqual(OneSatLog.withoutQuery(url)?.absoluteString, "https://api.example.com/v1/tx/abc")
     }
 }

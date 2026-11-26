@@ -56,7 +56,7 @@ public struct Cosign: Equatable, Sendable {
     }
 
     /// Owner half of the unlock: <ownerSigDER + sigHashFlag byte> <owner compressed pubkey>.
-    /// The MNEE proxy prepends the approver signature; approverUnlock is NOT ported.
+    /// The cosigner prepends the approver signature; approverUnlock is NOT ported.
     public static func ownerUnlock(
         ownerSigDER: [UInt8],
         sigHashFlag: UInt8,

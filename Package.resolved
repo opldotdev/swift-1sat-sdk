@@ -50,7 +50,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/opldotdev/swift-wallet-toolbox.git",
       "state" : {
-        "revision" : "6349f67b78862697ef3f7bda629c9e3b41227574"
+        "revision" : "8dd2af6a4515969d68a09d085cf9112eb9e57ba9"
       }
     }
   ],

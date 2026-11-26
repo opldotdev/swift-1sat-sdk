@@ -8,7 +8,7 @@ import PackageDescription
 ///
 /// Sweep still moves coins from a legacy or foreign key into the wallet's own scheme — the first
 /// thing a real wallet needs from this layer. The tree already ships major `@1sat/actions` families
-/// — ordinals, BSV21, OpNS, MNEE — alongside templates, addresses, and clients.
+/// — ordinals, BSV21, OpNS — alongside templates, addresses, and clients.
 let publicModules = [
     "OneSatClient",
     "OneSatPermissions",
@@ -44,7 +44,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/opldotdev/swift-wallet-toolbox.git",
-            revision: "6349f67b78862697ef3f7bda629c9e3b41227574"
+            revision: "8dd2af6a4515969d68a09d085cf9112eb9e57ba9"
         ),
         // Open Exchange's engine works in exact integers as the TS does in `bigint`. The version
         // swift-sdk pins (exact 5.7.0); SwiftPM resolves the two to the same checkout.
@@ -218,6 +218,8 @@ let package = Package(
                 .product(name: "BSVTransaction", package: "swift-sdk"),
                 .product(name: "BSVWallet", package: "swift-sdk"),
                 .product(name: "ToolboxActions", package: "swift-wallet-toolbox"),
+                // `AuthenticatedSession.sendPaid`: the 1sat.name job client (NameMining).
+                .product(name: "ToolboxAuth", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxBRC29", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorage", package: "swift-wallet-toolbox"),
                 .product(name: "ToolboxStorageClient", package: "swift-wallet-toolbox"),
@@ -379,6 +381,8 @@ let package = Package(
             dependencies: [
                 "OneSatActions",
                 "OneSatTemplates",
+                // A BRC-103 peer for the 1sat.name job client's tests.
+                .product(name: "BSVAuth", package: "swift-sdk"),
                 .product(name: "BSVCompat", package: "swift-sdk"),
                 .product(name: "BSVInterpreter", package: "swift-sdk"),
                 .product(name: "BSVCore", package: "swift-sdk"),

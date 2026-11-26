@@ -49,7 +49,6 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case ordLockV2FrontFundingFailed(String?)
     case missingSourceTxid
     case inputNotInTransaction(outpoint: String)
-    case mneeClientRequired
     case quantityMustBePositive
     case anchorNoTxid
     /// The SIGMA anchor came back without a txid or transaction (`applyInscribeSigma`).
@@ -71,6 +70,9 @@ public enum OneSatActionError: Error, Equatable, Sendable {
     case multiSigAuthNotSupported
     /// A deploy whose transaction carries no BSV-21 deploy at output 0.
     case notABsv21Deploy
+    /// `internalizeOpns`: the transaction holds no two adjacent OpNS nodes followed by a third
+    /// output (the name).
+    case notAnOpnsMint
     /// The overlay fee the indexer asks for (`fee_per_output` times the token outputs) is above
     /// the caller's `maxFee`. Swift only: `@1sat/actions` pays whatever the indexer returns.
     case overlayFeeExceedsMaxFee(fee: UInt64, maxFee: UInt64)
@@ -130,12 +132,12 @@ public enum OneSatActionError: Error, Equatable, Sendable {
         .invalidCustomInstructions, .noSignableTransaction, .servicesRequiredForPurchase,
         .listingScriptInvalid, .listingTransactionNotFound, .listingOutputNotFound, .notAnOrdLockListing,
         .listingNotFoundInOverlay, .ordLockV2FrontFundingFailed(nil), .missingSourceTxid,
-        .mneeClientRequired, .quantityMustBePositive, .anchorNoTxid, .sigmaAnchorFailed,
+.quantityMustBePositive, .anchorNoTxid, .sigmaAnchorFailed,
         .exactlyOneOfContentOrRef, .contentTypeRequiredWithContent, .noBapIdentity,
         .signWithBapRequiresInscription, .sigmaPlaceholderMissing, .deployNoTxid,
         .authAndEndMintingMutuallyExclusive, .mustProvideMintOrAuth, .mintAmountMustBePositive,
         .noAuthUtxoForToken, .authUtxoMissingCustomInstructions, .multiSigAuthNotSupported,
-        .notABsv21Deploy, .overlayFeeOverflow,
+        .notABsv21Deploy, .notAnOpnsMint, .overlayFeeOverflow,
     ]
 
     /// The non-empty text after `prefix`, or nil when `message` does not start with it.
@@ -240,8 +242,6 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "sourceTXID is required"
         case .inputNotInTransaction(let outpoint):
             return "input-not-in-transaction-\(outpoint)"
-        case .mneeClientRequired:
-            return "MNEE client not available — services required"
         case .quantityMustBePositive:
             return "quantity-must-be-positive"
         case .anchorNoTxid:
@@ -278,6 +278,8 @@ public enum OneSatActionError: Error, Equatable, Sendable {
             return "multisig-auth-not-supported"
         case .notABsv21Deploy:
             return "not-a-bsv21-deploy"
+        case .notAnOpnsMint:
+            return "not-an-opns-mint"
         case .overlayFeeExceedsMaxFee(let fee, let maxFee):
             return "overlay-fee-exceeds-max-fee: \(fee) sats > maxFee \(maxFee) sats"
         case .overlayFeeOverflow:

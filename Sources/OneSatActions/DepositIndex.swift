@@ -19,6 +19,8 @@ import OneSatSweep
 ///   failure to read it fails the transaction so the sync retries it;
 /// - a BSV-21 output (`Bsv21Indexer`) goes to `bsv21` (`mnee` for MNEE) with token CI and the
 ///   `bsv21 <id>` label.
+/// - a Twetch NFT (`TwetchIndexer`, which runs before `FundIndexer`) goes to `twetch` with its
+///   `twetch` and `name:` tags. Its owner sits after a hash lock, and it is never plain funds.
 ///
 /// Every output records the protocol its address was derived under, so legacy `p 1sat`
 /// deposits are signed with the key that owns them.
@@ -60,6 +62,26 @@ enum DepositIndex {
         for (index, output) in tx.outputs.enumerated() {
             let vout = UInt32(index)
             let script = output.lockingScript
+
+            if let nft = TwetchNFT.decode(script) {
+                guard let derivation = derived.first(where: { $0.publicKeyHash == nft.ownerHash })
+                else { continue }
+                let tags = nft.tags + ["id:\(actionID)_\(vout)"]
+                indexed.outputs.append(try insertion(
+                    vout: vout,
+                    basket: OneSatConstants.twetchBasket,
+                    tags: tags,
+                    customInstructions: OrdinalRemittance.buildCustomInstructions(
+                        protocolID: derivation.protocolID,
+                        keyID: derivation.keyID,
+                        counterparty: "self",
+                        tags: tags,
+                        name: nft.title
+                    )
+                ))
+                parts.append("Twetch NFT")
+                continue
+            }
             let inscription = output.satoshis == 1 ? Inscription.decode(script) : nil
             guard let ownerHash = owner(script, inscription: inscription),
                   let derivation = derived.first(where: { $0.publicKeyHash == ownerHash })
@@ -382,10 +404,16 @@ enum DepositIndex {
         guard let content else { return nil }
         let trimmed = String(decoding: content, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        var units = Array(trimmed.utf16.prefix(64))
-        if let last = units.last, UTF16.isLeadSurrogate(last) { units.removeLast() }
-        let name = String(decoding: units, as: UTF16.self)
+        let name = utf16Prefix(trimmed, 64)
         return name.isEmpty ? nil : name
+    }
+
+    /// JS `text.slice(0, count)`: the first `count` UTF-16 units. A pair the cut would split is
+    /// dropped whole, since a Swift string cannot end in a lone surrogate.
+    static func utf16Prefix(_ text: String, _ count: Int) -> String {
+        var units = Array(text.utf16.prefix(count))
+        if let last = units.last, UTF16.isLeadSurrogate(last) { units.removeLast() }
+        return String(decoding: units, as: UTF16.self)
     }
 
     static func baseType(_ type: String?) -> String? {
