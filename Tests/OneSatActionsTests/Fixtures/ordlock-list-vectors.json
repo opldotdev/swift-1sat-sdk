@@ -1,0 +1,281 @@
+{
+  "source": "@1sat/actions buildListOrdinal and sellOpns (createAction args) over ProtoWallet",
+  "identity": "ffbd04ccf50e9822ac4387cc180d1a5021c16c89b288013fc8b9a2111dfa2da2",
+  "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+  "defaultPayAddress": "1AgDi5NFc3FUNGEBhHHdRPqm3Rs241GSYN",
+  "cases": [
+    {
+      "name": "ordinalDefaultPay",
+      "family": "ordinal",
+      "tags": [
+        "type:image/png",
+        "origin:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+        "id:list_0"
+      ],
+      "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\",\"name\":\"Pixel Ape\"}",
+      "request": {
+        "price": 50000
+      },
+      "args": {
+        "description": "List ordinal for 50000 sats",
+        "labels": [
+          "p 1sat input id list_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "Ordinal to list",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "76009c637576ab76aa517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e01007e8100011f80517e9321414136d08c5ed2bf3ba048afe6dcaebafeffffffffffffffffffffffffffffff007d97785296789f527952798d9495937776927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e827c7e23022079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798027c7e827c7e01307c7e01c37e2102b405d7f0322a89d0f9f3a98e6f938fdc1c969a8d1382a2bf66a71ae74a1e83b0ad692250c30000000000001976a9146a23f67c0cb825a6449239ebd966bfb4f0b9309288acaa7c820128947f7701207f758767519d7b0a6f6c323a63616e63656c8876a9149a6a4796f90faf9ad6179f7e97ab9571b4cf1ca888ac68",
+            "satoshis": 1,
+            "outputDescription": "List ordinal for 50000 sats",
+            "basket": "1sat",
+            "tags": [
+              "type:image/png",
+              "origin:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "ordlock2",
+              "price:50000"
+            ],
+            "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\",\"origin\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"name\":\"Pixel Ape\"}"
+          }
+        ]
+      },
+      "created": {
+        "description": "List ordinal for 50000 sats",
+        "labels": [
+          "p 1sat input id list_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "Ordinal to list",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "76009c637576ab76aa517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e01007e8100011f80517e9321414136d08c5ed2bf3ba048afe6dcaebafeffffffffffffffffffffffffffffff007d97785296789f527952798d9495937776927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e827c7e23022079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798027c7e827c7e01307c7e01c37e2102b405d7f0322a89d0f9f3a98e6f938fdc1c969a8d1382a2bf66a71ae74a1e83b0ad692250c30000000000001976a9146a23f67c0cb825a6449239ebd966bfb4f0b9309288acaa7c820128947f7701207f758767519d7b0a6f6c323a63616e63656c8876a9149a6a4796f90faf9ad6179f7e97ab9571b4cf1ca888ac68",
+            "satoshis": 1,
+            "outputDescription": "List ordinal for 50000 sats",
+            "basket": "1sat",
+            "tags": [
+              "type:image/png",
+              "origin:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "ordlock2",
+              "id:<actionId>_0",
+              "price:50000"
+            ],
+            "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\",\"origin\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"name\":\"Pixel Ape\"}"
+          }
+        ],
+        "randomizeOutputs": false
+      }
+    },
+    {
+      "name": "ordinalMapAndPayAddress",
+      "family": "ordinal",
+      "tags": [
+        "origin",
+        "type:image",
+        "type:image/png",
+        "collection:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.0",
+        "app:1sat",
+        "name:Legacy",
+        "id:list_0"
+      ],
+      "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\",\"name\":\"Canonical Ape\"}",
+      "request": {
+        "price": 21000000,
+        "payAddress": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+        "map": {
+          "app": "1sat",
+          "type": "ord"
+        }
+      },
+      "args": {
+        "description": "List ordinal for 21000000 sats",
+        "labels": [
+          "p 1sat input id list_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "Ordinal to list",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "76009c637576ab76aa517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e01007e8100011f80517e9321414136d08c5ed2bf3ba048afe6dcaebafeffffffffffffffffffffffffffffff007d97785296789f527952798d9495937776927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e827c7e23022079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798027c7e827c7e01307c7e01c37e2102b405d7f0322a89d0f9f3a98e6f938fdc1c969a8d1382a2bf66a71ae74a1e83b0ad6922406f4001000000001976a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888acaa7c820128947f7701207f758767519d7b0a6f6c323a63616e63656c8876a9149a6a4796f90faf9ad6179f7e97ab9571b4cf1ca888ac686a223150755161374b36324d694b43747373534c4b79316b683536575755374d74555235035345540361707004317361740474797065036f7264",
+            "satoshis": 1,
+            "outputDescription": "List ordinal for 21000000 sats",
+            "basket": "1sat",
+            "tags": [
+              "origin:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "type:image/png",
+              "collection:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0",
+              "app:1sat",
+              "ordlock2",
+              "price:21000000"
+            ],
+            "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\",\"origin\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"app\":\"1sat\",\"collection\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0\",\"name\":\"Canonical Ape\"}"
+          }
+        ]
+      },
+      "created": {
+        "description": "List ordinal for 21000000 sats",
+        "labels": [
+          "p 1sat input id list_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "Ordinal to list",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "76009c637576ab76aa517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e01007e8100011f80517e9321414136d08c5ed2bf3ba048afe6dcaebafeffffffffffffffffffffffffffffff007d97785296789f527952798d9495937776927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e827c7e23022079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798027c7e827c7e01307c7e01c37e2102b405d7f0322a89d0f9f3a98e6f938fdc1c969a8d1382a2bf66a71ae74a1e83b0ad6922406f4001000000001976a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888acaa7c820128947f7701207f758767519d7b0a6f6c323a63616e63656c8876a9149a6a4796f90faf9ad6179f7e97ab9571b4cf1ca888ac686a223150755161374b36324d694b43747373534c4b79316b683536575755374d74555235035345540361707004317361740474797065036f7264",
+            "satoshis": 1,
+            "outputDescription": "List ordinal for 21000000 sats",
+            "basket": "1sat",
+            "tags": [
+              "origin:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "type:image/png",
+              "collection:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0",
+              "app:1sat",
+              "ordlock2",
+              "id:<actionId>_0",
+              "price:21000000"
+            ],
+            "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\",\"origin\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"app\":\"1sat\",\"collection\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb_0\",\"name\":\"Canonical Ape\"}"
+          }
+        ],
+        "randomizeOutputs": false
+      }
+    },
+    {
+      "name": "ordinalZeroPrice",
+      "family": "ordinal",
+      "tags": [
+        "type:image/png",
+        "id:list_0"
+      ],
+      "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\"}",
+      "request": {
+        "price": 0
+      },
+      "error": "invalid-price"
+    },
+    {
+      "name": "opnsDefaultPay",
+      "family": "opns",
+      "tags": [
+        "type:application/op-ns",
+        "origin:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+        "name:alice",
+        "id:aa_0"
+      ],
+      "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\"}",
+      "request": {
+        "price": 1234
+      },
+      "created": {
+        "description": "List OpNS for 1234 sats",
+        "labels": [
+          "p opns input id aa_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "OpNS name to list",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "76009c637576ab76aa517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e01007e8100011f80517e9321414136d08c5ed2bf3ba048afe6dcaebafeffffffffffffffffffffffffffffff007d97785296789f527952798d9495937776927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e827c7e23022079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798027c7e827c7e01307c7e01c37e2102b405d7f0322a89d0f9f3a98e6f938fdc1c969a8d1382a2bf66a71ae74a1e83b0ad6922d2040000000000001976a9146a23f67c0cb825a6449239ebd966bfb4f0b9309288acaa7c820128947f7701207f758767519d7b0a6f6c323a63616e63656c8876a9149a6a4796f90faf9ad6179f7e97ab9571b4cf1ca888ac68",
+            "satoshis": 1,
+            "outputDescription": "List OpNS for 1234 sats",
+            "basket": "opns",
+            "tags": [
+              "opns",
+              "type:application/op-ns",
+              "origin:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "ordlock2",
+              "id:<actionId>_0",
+              "price:1234"
+            ],
+            "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\",\"origin\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"name\":\"alice\"}"
+          }
+        ],
+        "randomizeOutputs": false
+      }
+    },
+    {
+      "name": "opnsLongPricePublished",
+      "family": "opns",
+      "tags": [
+        "opns",
+        "type:application/op-ns",
+        "origin:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+        "opns:published",
+        "id:aa_0"
+      ],
+      "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\",\"name\":\"bob\"}",
+      "request": {
+        "price": 2100000000000000,
+        "payAddress": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+      },
+      "created": {
+        "description": "List OpNS for 2100000000000000 sats",
+        "labels": [
+          "p opns input id aa_0"
+        ],
+        "inputs": [
+          {
+            "outpoint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0",
+            "inputDescription": "OpNS name to list",
+            "unlockingScriptLength": 108
+          }
+        ],
+        "outputs": [
+          {
+            "lockingScript": "76009c637576ab76aa517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f517f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e01007e8100011f80517e9321414136d08c5ed2bf3ba048afe6dcaebafeffffffffffffffffffffffffffffff007d97785296789f527952798d9495937776927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f76927f7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e7c7e827c7e23022079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798027c7e827c7e01307c7e01c37e2102b405d7f0322a89d0f9f3a98e6f938fdc1c969a8d1382a2bf66a71ae74a1e83b0ad69220040075af07507001976a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888acaa7c820128947f7701207f758767519d7b0a6f6c323a63616e63656c8876a9149a6a4796f90faf9ad6179f7e97ab9571b4cf1ca888ac68",
+            "satoshis": 1,
+            "outputDescription": "List OpNS for 2100000000000000 sats",
+            "basket": "opns",
+            "tags": [
+              "opns",
+              "type:application/op-ns",
+              "origin:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+              "ordlock2",
+              "id:<actionId>_0",
+              "price:2100000000000000"
+            ],
+            "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\",\"origin\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0\",\"name\":\"bob\"}"
+          }
+        ],
+        "randomizeOutputs": false
+      }
+    },
+    {
+      "name": "opnsZeroPrice",
+      "family": "opns",
+      "tags": [
+        "type:application/op-ns",
+        "id:aa_0"
+      ],
+      "customInstructions": "{\"protocolID\":[0,\"onesat\"],\"keyID\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.0\",\"counterparty\":\"self\"}",
+      "request": {
+        "price": 0
+      },
+      "error": "invalid-price"
+    }
+  ]
+}

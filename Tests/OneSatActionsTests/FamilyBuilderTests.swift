@@ -260,46 +260,6 @@ final class FamilyBuilderTests: XCTestCase {
         XCTAssertThrowsError(try Locks.maturedLocks(outputs: [output], currentHeight: 99))
     }
 
-    func test_listBuilderRefusesCreate() throws {
-        let identity = try ActionVectors.identity()
-        let ctx = try dummyContext(identity: identity)
-        let ordinal = try walletOutput(
-            tags: ["type:image/png", "id:list_0"],
-            instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
-        )
-        XCTAssertThrowsError(
-            try Ordinals.buildList(
-                ctx,
-                Ordinals.ListRequest(
-                    ordinal: ordinal,
-                    price: 50_000,
-                    payAddress: ActionVectors.payAddress
-                )
-            )
-        ) { error in
-            XCTAssertEqual(error as? OneSatActionError, .listingCreateDisabled)
-        }
-    }
-
-    func test_listActionRefusesCreate() async throws {
-        let identity = try ActionVectors.identity()
-        let ctx = try dummyContext(identity: identity)
-        let ordinal = try walletOutput(
-            tags: ["type:image/png", "id:list_0"],
-            instructions: try CustomInstructions(keyID: ActionVectors.outpoint).encoded()
-        )
-        let result = await Ordinals.list(
-            ctx,
-            Ordinals.ListRequest(
-                ordinal: ordinal,
-                price: 50_000,
-                payAddress: ActionVectors.payAddress
-            )
-        )
-        XCTAssertEqual(result.error, OneSatActionError.listingCreateDisabled.wireMessage)
-        XCTAssertNil(result.txid)
-    }
-
     func test_ordinalSpendBuildersMoveLegacyNamesIntoCustomInstructions() throws {
         let identity = try ActionVectors.identity()
         let ctx = try dummyContext(identity: identity)
@@ -327,18 +287,18 @@ final class FamilyBuilderTests: XCTestCase {
                 transfers: [Ordinals.TransferItem(ordinal: legacyOnly, toSelf: true)]
             )
         )
-        XCTAssertThrowsError(
-            try Ordinals.buildList(
-                ctx,
-                Ordinals.ListRequest(
-                    ordinal: canonical,
-                    price: 50_000,
-                    payAddress: ActionVectors.payAddress
-                )
+        let list = try Ordinals.buildList(
+            ctx,
+            Ordinals.ListRequest(
+                ordinal: canonical,
+                price: 50_000,
+                payAddress: ActionVectors.payAddress
             )
-        ) { error in
-            XCTAssertEqual(error as? OneSatActionError, .listingCreateDisabled)
-        }
+        )
+        let legacyList = try Ordinals.buildList(
+            ctx,
+            Ordinals.ListRequest(ordinal: legacyOnly, price: 50_000)
+        )
         let cancel = try Ordinals.buildCancel(
             ctx,
             Ordinals.CancelRequest(listing: legacyOnly)
@@ -352,7 +312,15 @@ final class FamilyBuilderTests: XCTestCase {
             try CustomInstructions.parse(XCTUnwrap(cancel.outputs[0].customInstructions)).name,
             "Legacy Ape"
         )
-        for output in [transfer.outputs[0], cancel.outputs[0]] {
+        XCTAssertEqual(
+            try CustomInstructions.parse(XCTUnwrap(list.outputs[0].customInstructions)).name,
+            "Canonical Ape"
+        )
+        XCTAssertEqual(
+            try CustomInstructions.parse(XCTUnwrap(legacyList.outputs[0].customInstructions)).name,
+            "Legacy Ape"
+        )
+        for output in [transfer.outputs[0], cancel.outputs[0], list.outputs[0], legacyList.outputs[0]] {
             XCTAssertFalse(output.tags.contains { $0.hasPrefix("name:") })
         }
     }

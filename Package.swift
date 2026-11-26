@@ -357,8 +357,10 @@ let package = Package(
             name: "OneSatClientTests",
             dependencies: [
                 "OneSatClient",
+                "OneSatSweep",
                 .product(name: "ToolboxServices", package: "swift-wallet-toolbox"),
-            ]
+            ],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "OneSatPermissionsTests",

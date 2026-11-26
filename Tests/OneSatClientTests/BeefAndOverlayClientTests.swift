@@ -90,4 +90,34 @@ final class BeefAndOverlayClientTests: XCTestCase {
             XCTAssertEqual(error as? OneSatClientError, .httpFailure(statusCode: 503))
         }
     }
+
+    func test_submitListingPostsTheBEEFToTheMarketTopic() async throws {
+        let http = ScriptedHTTP([(200, Array(#"{"tm_ordlock_v2":{"outputsToAdmit":[0]}}"#.utf8))])
+        try await OverlayClient(baseURL: base, transport: http).submitListing(tx: [9, 8, 7])
+
+        let calls = await http.recorded()
+        XCTAssertEqual(
+            calls,
+            [.init(
+                method: "POST",
+                url: URL(string: "https://api.example/1sat/market/overlay/submit")!,
+                headers: ["Content-Type": "application/octet-stream", "X-Topics": "tm_ordlock_v2"],
+                body: [9, 8, 7]
+            )]
+        )
+        XCTAssertEqual(OverlayClient.marketSubmitURL(baseURL: base), calls.first?.url)
+    }
+
+    func test_submitListingThrowsTheMarketOverlaysRefusal() async {
+        let http = ScriptedHTTP([(400, Array(#"{"message":"invalid BEEF"}"#.utf8))])
+        do {
+            try await OverlayClient(baseURL: base, transport: http).submitListing(tx: [1])
+            XCTFail("expected the HTTP failure")
+        } catch let OneSatClientError.httpFailure(status, detail) {
+            XCTAssertEqual(status, 400)
+            XCTAssertEqual(detail?.service, "the market overlay")
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+    }
 }
